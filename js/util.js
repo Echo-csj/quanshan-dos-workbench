@@ -236,7 +236,14 @@ window.App = window.App || {};
     ]);
 
     // Body
-    var body = el('div', { className: 'modal-body' }, options.content || '');
+    var body = el('div', { className: 'modal-body' });
+    if (options.content) {
+      if (typeof options.content === 'string') {
+        body.innerHTML = options.content;
+      } else {
+        body.appendChild(options.content);
+      }
+    }
 
     // Footer
     var footer = el('div', { className: 'modal-footer' });
