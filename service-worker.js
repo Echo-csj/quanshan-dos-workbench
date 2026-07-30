@@ -2,7 +2,7 @@
  * 离线优先缓存策略：预缓存全部静态资源，运行时 cache-first，
  * 导航请求离线时回退到 index.html。后台静默更新。
  */
-var CACHE = 'dos-workbench-v3';
+var CACHE = 'dos-workbench-v4';
 var PRECACHE = [
   './',
   './index.html',
