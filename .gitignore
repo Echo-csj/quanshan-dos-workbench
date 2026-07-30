@@ -1,0 +1,4 @@
+# 本地记忆 / 计划 / 环境文件，不纳入版本控制
+.workbuddy/
+.DS_Store
+*.log
