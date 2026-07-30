@@ -8,8 +8,7 @@
   var TYPE_META = {
     dos:         { name: 'DOS 周报', icon: 'bar-chart-2', desc: '提取「数据统计表」关键指标：完成率、饱和度、单位周均、续费/推荐率等' },
     satisfaction:{ name: '五项满意度', icon: 'star', desc: '按班主任汇总，提取结课/退费/停课/续费/推荐 人数率+单科率，直接对标基准值' },
-    yoy:         { name: '同比环比报表', icon: 'trending-up', desc: '提取「总表」多月数据+同比列，自动生成环比/同比趋势' },
-    supervisor:  { name: '主管会周报', icon: 'users', desc: '提取生产完成率、各项满意度率、离职率、教师数（部分字段）' }
+    yoy:         { name: '同比环比报表', icon: 'trending-up', desc: '提取「总表」多月数据+同比列，自动生成环比/同比趋势' }
   };
 
   function fmtMetric(id, v) {
