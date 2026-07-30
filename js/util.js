@@ -244,7 +244,8 @@ window.App = window.App || {};
       footer.appendChild(el('button', { className: 'btn btn-secondary', onClick: close }, '取消'));
     }
     if (options.onConfirm) {
-      footer.appendChild(el('button', { className: 'btn btn-primary', onClick: function() {
+      var cls = options.confirmStyle === 'danger' ? 'btn btn-danger' : 'btn btn-primary';
+      footer.appendChild(el('button', { className: cls, onClick: function() {
         options.onConfirm(close);
       }}, options.confirmText || '确定'));
     }
