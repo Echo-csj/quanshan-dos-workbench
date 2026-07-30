@@ -1,0 +1,27 @@
+{
+  "name": "状元港·泉山校区 DOS 个人工作台",
+  "short_name": "泉山DOS台",
+  "description": "教培机构校区教学管理个人工作台：时间轴提醒、事项跟进、数据看板（基准值对标/环比同比）、六大项目组流程中心。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#4F46E5",
+  "categories": ["productivity", "business", "education"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
