@@ -194,12 +194,37 @@
     console.log('[Workbench] 当前路由:', window.location.hash || '#/today');
 
     // 注册 Service Worker（PWA 离线缓存，仅 https / localhost 生效）
+    // 强制更新逻辑：检测到新版本 SW 在等待时，立即激活并刷新页面
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
         navigator.serviceWorker.register('service-worker.js').then(function (reg) {
-          console.log('[Workbench] Service Worker 已注册，scope:', reg.scope);
+          console.log('[Workbench] SW 已注册, scope:', reg.scope);
+
+          // 如果有新版本 SW 在等待（waiting），强制激活并刷新
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+
+          // 监听新 SW 安装完成进入等待状态
+          reg.addEventListener('updatefound', function () {
+            var newWorker = reg.installing;
+            newWorker.addEventListener('statechange', function () {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                // 新 SW 已安装且当前页面已有旧 SW 控制 → 提示用户刷新
+                console.log('[Workbench] 新版本可用，即将刷新...');
+                newWorker.postMessage({ type: 'SKIP_WAITING' });
+              }
+            });
+          });
+
+          // 监听 SW 控制权变更 → 刷新页面加载最新资源
+          navigator.serviceWorker.addEventListener('controllerchange', function () {
+            console.log('[Workbench] SW 控制权已变更，刷新页面');
+            window.location.reload();
+          });
+
         }).catch(function (err) {
-          console.warn('[Workbench] Service Worker 注册失败:', err);
+          console.warn('[Workbench] SW 注册失败:', err);
         });
       });
     }

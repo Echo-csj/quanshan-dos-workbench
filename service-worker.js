@@ -2,7 +2,7 @@
  * 离线优先缓存策略：预缓存全部静态资源，运行时 cache-first，
  * 导航请求离线时回退到 index.html。后台静默更新。
  */
-var CACHE = 'dos-workbench-v4';
+var CACHE = 'dos-workbench-v5';
 var PRECACHE = [
   './',
   './index.html',
@@ -77,4 +77,11 @@ self.addEventListener('fetch', function (event) {
       });
     })
   );
+});
+
+// 接收页面消息：强制跳过等待状态
+self.addEventListener('message', function (event) {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
