@@ -35,7 +35,6 @@ window.App = window.App || {};
         ],
         customNodes: []
       },
-      tasks: [],
       reports: {
         // 月度数据快照：key = 'YYYY-MM'，由报表导入自动写入
         monthly: {},

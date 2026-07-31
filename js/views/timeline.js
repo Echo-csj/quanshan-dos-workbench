@@ -90,22 +90,6 @@
         }
       });
 
-      // 该日的待办
-      var tasks = (App.store.get('tasks') || []).filter(function(t) {
-        return t.due === dateStr && t.status !== 'done';
-      });
-      if (tasks.length > 0) {
-        html += '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border)">';
-        html += '<span style="font-size:10px;color:var(--accent);font-weight:600">' + tasks.length + '项待办</span>';
-        tasks.slice(0, 3).forEach(function(t) {
-          html += '<div style="font-size:11px;color:var(--text-muted);padding:2px 0 2px 8px">· ' + App.util.truncate(t.title, 20) + '</div>';
-        });
-        if (tasks.length > 3) {
-          html += '<div style="font-size:10px;color:var(--text-faint);padding:2px 0 0 8px">+' + (tasks.length - 3) + '...</div>';
-        }
-        html += '</div>';
-      }
-
       html += '</div>'; // .timeline-day
     }
     html += '</div>'; // .timeline-week
@@ -168,11 +152,6 @@
         return n.weekday === d.getDay();
       });
 
-      // 这天的待办数
-      var taskCount = (App.store.get('tasks') || []).filter(function(t) {
-        return t.due === dateStr && t.status !== 'done';
-      }).length;
-
       html += '<div style="background:' + (isToday ? 'var(--accent-soft)' : 'var(--bg)') + ';min-height:70px;padding:4px 6px;position:relative">';
       html += '<span style="font-size:12px;font-weight:' + (isToday ? '700;color:var(--accent)' : '500') + '">' + day + '</span>';
 
@@ -180,10 +159,6 @@
         dayFixedNodes.forEach(function(n) {
           html += '<div style="font-size:9px;background:var(--accent-soft);color:var(--accent-text);padding:1px 4px;border-radius:2px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + n.title + '</div>';
         });
-      }
-
-      if (taskCount > 0) {
-        html += '<div style="position:absolute;bottom:4px;right:4px;width:16px;height:16px;border-radius:50%;background:var(--accent);color:white;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:600">' + taskCount + '</div>';
       }
 
       html += '</div>';
@@ -201,7 +176,6 @@
         html += '<div><strong style="font-size:13px">' + node.title + '</strong>';
         if (node.note) { html += '<p style="font-size:11px;color:var(--text-muted);margin-top:2px">' + node.note + '</p>'; }
         html += '</div>';
-        html += '<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="App.views.timeline.generateMonthlyTasks(\'' + node.id + '\')">生成本月待办</button>';
         html += '</div>';
       });
       html += '</div>';
@@ -226,29 +200,6 @@
         App.util.toast('跨周切换开发中', 'warn');
       }
     },
-    generateMonthlyTasks: function(nodeId) {
-      var nodes = App.store.get('timeline.fixedNodes') || [];
-      var node = nodes.find(function(n) { return n.id === nodeId; });
-      if (!node) return;
-
-      App.store.push('tasks', {
-        id: App.store.uid('task'),
-        title: node.title + '（' + new Date().getMonth() + 1 + '月）',
-        source: '周期任务',
-        project: null,
-        owner: 'self',
-        priority: 'normal',
-        due: App.util.formatDate(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0), 'YYYY-MM-DD'),
-        status: 'todo',
-        parentId: null,
-        children: [],
-        note: node.note || '',
-        createdAt: new Date().toISOString()
-      });
-
-      App.util.toast('已生成月度待办：' + node.title, 'ok');
-      App.router.resolve();
-    }
   };
 
 })();

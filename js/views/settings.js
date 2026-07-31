@@ -21,7 +21,7 @@
     html += '<div><strong>版本：</strong>v1.0.0 (MVP)</div>';
     html += '<div><strong>负责人：</strong>' + (meta.owner || 'DOS-泉山') + '</div>';
     html += '<div><strong>最后更新：</strong>' + (meta.updatedAt ? new Date(meta.updatedAt).toLocaleString('zh-CN') : '-') + '</div>';
-    html += '<div><strong>数据量：</strong>' + ((data.tasks || []).length) + ' 条待办 / ' + ((data.timeline.fixedNodes || []).length) + ' 个时间节点</div>';
+    html += '<div><strong>数据量：</strong>' + ((data.timeline.fixedNodes || []).length) + ' 个时间节点 / ' + Object.keys((data.reports && data.reports.monthly) || {}).length + ' 个月度报表</div>';
     html += '</div></div>';
 
     // --- 基准值查看 ---
@@ -73,7 +73,7 @@
 
     html += '<button class="btn btn-danger btn-ghost" onclick="App.views.settings.confirmReset()">' + App.util.svgIcon('trash-2', 14) + '重置所有数据</button>';
     html += '</div>';
-    html += '<p class="form-hint">导出的 JSON 文件包含所有待办、时间节点、设置等数据。可在不同设备间通过导入/导出同步。</p>';
+    html += '<p class="form-hint">导出的 JSON 文件包含所有时间节点、报表数据、设置等。可在不同设备间通过导入/导出同步。</p>';
     html += '</div></div>';
 
     // --- 示例数据 ---
@@ -128,7 +128,7 @@
     confirmReset: function() {
       App.util.modal({
         title: '⚠️ 确认重置',
-        content: '<p style="color:var(--bad);font-size:13px">此操作将<strong>清除所有数据</strong>（待办、设置、检查清单等），且不可恢复！</p><p class="form-hint" style="margin-top:8px">建议先「导出备份」再重置。</p>',
+        content: '<p style="color:var(--bad);font-size:13px">此操作将<strong>清除所有数据</strong>（时间节点、报表、检查清单、设置等），且不可恢复！</p><p class="form-hint" style="margin-top:8px">建议先「导出备份」再重置。</p>',
         confirmText: '确认重置',
         onConfirm: function(close) {
           App.store.reset();
@@ -142,25 +142,6 @@
     injectSeedData: function() {
       var now = new Date();
 
-      // 示例待办
-      var seedTasks = [
-        { title: '完成7月第4周 DOS 周报填写', source: '周日周报', project: null, owner: 'self', priority: 'high', due: App.util.formatDate(new Date(now.getTime() + (7 - now.getDay()) * 86400000), 'YYYY-MM-DD'), status: 'todo', note: '每周日固定任务' },
-        { title: '跟进数学组停课学员回访情况', source: '教务会', project: 'warning', owner: '数学组长', priority: 'high', due: App.util.formatDate(new Date(now.getTime() + 2*86400000), 'YYYY-MM-DD'), status: 'doing', note: '重点关注停课超2周的学员' },
-        { title: '审核8月份排课表初稿', source: '主管会', project: 'schedule', owner: 'self', priority: 'normal', due: App.util.formatDate(new Date(now.getFullYear(), now.getMonth(), -now.getDate() + 25), 'YYYY-MM-DD'), status: 'todo', note: '每月最后一周周三前完成次月预排' },
-        { title: '新师张老师试听课评估', source: '新师培训', project: 'training', owner: 'self', priority: 'normal', due: App.util.formatDate(new Date(now.getTime() + 3*86400000), 'YYYY-MM-DD'), status: 'following', note: '带教导师：李老师' },
-        { title: '暑期班备考计划制定', source: '备考项目组', project: 'exam', owner: '备考组长', priority: 'normal', due: App.util.formatDate(new Date(now.getTime() + 5*86400000), 'YYYY-MM-DD'), status: 'todo', note: '针对8月初模考' },
-        { title: '本月讲义检查第二轮', source: '讲义检查', project: 'material', owner: 'self', priority: 'low', due: App.util.formatDate(new Date(now.getTime() + 6*86400000), 'YYYY-MM-DD'), status: 'todo', note: '重点检查四环节完整性' },
-        { title: '新生首课回访（王同学、李同学）', source: '新生项目组', project: 'newstudent', owner: 'CC-小王', priority: 'normal', due: App.util.formatDate(new Date(now.getTime() + 1*86400000), 'YYYY-MM-DD'), status: 'todo', note: '2名新学员均在7月27���完成首课' },
-        { title: '整理五项满意度月度报表', source: '数据分析', project: null, owner: 'self', priority: 'low', due: App.util.formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 3), 'YYYY-MM-DD'), status: 'todo', note: '从教务系统导出数据后填入' }
-      ];
-
-      seedTasks.forEach(function(t) {
-        t.id = App.store.uid('task');
-        t.parentId = null;
-        t.children = [];
-        t.createdAt = now.toISOString();
-        App.store.push('tasks', t);
-      });
 
       // 示例月度数据（用于基准值对标 + 环比/同比趋势演示）
       var reports = App.store.get('reports') || { monthly: {}, imports: [] };
@@ -195,7 +176,7 @@
       });
       App.store.set('reports', reports);
 
-      App.util.toast('已注入 ' + seedTasks.length + ' 条待办 + 3 个月度示例数据', 'ok');
+      App.util.toast('已注入 3 个月度示例数据', 'ok');
       App.router.resolve();
     }
   };
