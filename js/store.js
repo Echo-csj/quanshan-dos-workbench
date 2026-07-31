@@ -18,7 +18,8 @@ window.App = window.App || {};
       settings: {
         weekStart: 1,       // 周一为起始日
         reminders: true,
-        theme: 'light'
+        theme: 'light',
+        remindBackup: true  // 每月提醒导出备份
       },
       timeline: {
         fixedNodes: [
@@ -168,6 +169,7 @@ window.App = window.App || {};
   // --- Export / Import JSON ---
   function exportJSON() {
     if (!_data) load();
+    _data.meta.lastBackupAt = new Date().toISOString();
     var blob = new Blob([JSON.stringify(_data, null, 2)], { type: 'application/json' });
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
@@ -175,6 +177,7 @@ window.App = window.App || {};
     a.download = 'workbench-backup-' + App.util.formatDate(new Date(), 'YYYYMMDD') + '.json';
     a.click();
     URL.revokeObjectURL(url);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_data)); } catch (e) {}
   }
 
   function importJSON(file, callback) {

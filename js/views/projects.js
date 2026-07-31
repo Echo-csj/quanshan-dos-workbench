@@ -30,7 +30,7 @@
 
     // --- 说明 ---
     html += '<div class="card"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('info', 18) + '关于项目组</h3></div>';
-    html += '<p style="font-size:13px;color:var(--text-muted);line-height:1.8">每个项目组对应一套标准流程与检查清单。点击卡片进入详情查看标准文件、流程检查清单与注意事项。待办模块已移除，后续将以新思路重建「事项跟进」。</p>';
+    html += '<p style="font-size:13px;color:var(--text-muted);line-height:1.8">每个项目组对应一套标准流程与检查清单。点击卡片进入详情查看标准文件、流程检查清单与注意事项。需要跟进的工作事项，请前往「<a href="javascript:App.router.navigate(\'/tasks\')" style="color:var(--accent);cursor:pointer">事项看板</a>」统一管理与流转。</p>';
     html += '</div>';
 
     container.innerHTML = html;

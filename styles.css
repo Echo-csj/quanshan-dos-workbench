@@ -678,7 +678,8 @@ a:hover { color: var(--accent-hover); }
   .content-area { padding: 16px; }
   .topbar { padding: 0 16px; }
   .grid-2, .grid-3, .grid-4, .import-grid { grid-template-columns: 1fr; }
-  .kanban-board { grid-template-columns: 1fr; }
+  .kanban-board { display: flex; overflow-x: auto; grid-template-columns: unset; padding-bottom: 8px; -webkit-overflow-scrolling: touch; }
+  .kanban-column { min-width: 220px; flex: 0 0 220px; }
   .project-grid { grid-template-columns: 1fr; }
   .timeline-week { grid-template-columns: 1fr; gap: 8px; }
   .form-row { grid-template-columns: 1fr; }

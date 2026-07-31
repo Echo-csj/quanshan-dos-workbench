@@ -85,12 +85,12 @@
       dayNodes.forEach(function(node) {
         var nodeClass = node.type === 'fixed' ? 'node-fixed' : (node.type === 'monthly' ? 'node-monthly' : 'node-custom');
         html += '<div class="timeline-node ' + nodeClass + '" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
-        html += '<strong>' + node.title + '</strong>';
+        html += '<strong>' + App.util.escapeHtml(node.title) + '</strong>';
         if (node.time) { html += '<span class="mono" style="margin-left:auto;font-size:10px">' + node.time + '</span>'; }
         html += '<span class="node-edit-hint">✎</span>';
         html += '</div>';
         if (node.note) {
-          html += '<p style="font-size:11px;color:var(--text-faint);margin:2px 0 0 8px;line-height:1.4">' + App.util.truncate(node.note, 50) + '</p>';
+          html += '<p style="font-size:11px;color:var(--text-faint);margin:2px 0 0 8px;line-height:1.4">' + App.util.escapeHtml(App.util.truncate(node.note, 50)) + '</p>';
         }
       });
 
@@ -104,12 +104,12 @@
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期节点</h3></div>';
       monthlyNodes.forEach(function(node) {
         html += '<div class="timeline-node node-monthly" style="margin-bottom:6px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
-        html += '<strong>' + node.title + '</strong>';
+        html += '<strong>' + App.util.escapeHtml(node.title) + '</strong>';
         html += '<span style="font-size:11px;color:var(--warn-text);margin-left:8px">' + (node.cron || '') + '</span>';
         html += '<span class="node-edit-hint" style="margin-left:auto">✎</span>';
         html += '</div>';
         if (node.note) {
-          html += '<p style="font-size:12px;color:var(--text-muted);margin-top:4px">' + node.note + '</p>';
+          html += '<p style="font-size:12px;color:var(--text-muted);margin-top:4px">' + App.util.escapeHtml(node.note) + '</p>';
         }
       });
       html += '</div>';
@@ -178,8 +178,8 @@
       monthlyNodes.forEach(function(node) {
         html += '<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<span class="status-dot warn"></span>';
-        html += '<div><strong style="font-size:13px">' + node.title + '</strong>';
-        if (node.note) { html += '<p style="font-size:11px;color:var(--text-muted);margin-top:2px">' + node.note + '</p>'; }
+        html += '<div><strong style="font-size:13px">' + App.util.escapeHtml(node.title) + '</strong>';
+        if (node.note) { html += '<p style="font-size:11px;color:var(--text-muted);margin-top:2px">' + App.util.escapeHtml(node.note) + '</p>'; }
         html += '</div>';
         html += '<span class="node-edit-hint" style="margin-left:auto">✎</span>';
         html += '</div>';

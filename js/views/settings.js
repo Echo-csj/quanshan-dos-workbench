@@ -52,7 +52,7 @@
     (data.timeline.fixedNodes || []).forEach(function(node) {
       var wdNames = ['日','一','二','三','四','五','六'];
       html += '<tr>';
-      html += '<td><strong>' + node.title + '</strong></td>';
+      html += '<td><strong>' + App.util.escapeHtml(node.title) + '</strong></td>';
       html += '<td><span class="tag tag-' + (node.type === 'monthly' ? 'warn' : 'accent') + '" style="font-size:10px">' + (node.type === 'fixed' ? '固定' : '月度') + '</span></td>';
       html += '<td>' + (node.weekday !== null ? '周' + wdNames[node.weekday] : '-') + '</td>';
       html += '<td class="mono" style="font-size:12px">' + (node.time || '-') + '</td>';
@@ -74,6 +74,11 @@
     html += '<button class="btn btn-danger btn-ghost" onclick="App.views.settings.confirmReset()">' + App.util.svgIcon('trash-2', 14) + '重置所有数据</button>';
     html += '</div>';
     html += '<p class="form-hint">导出的 JSON 文件包含所有时间节点、报表数据、设置等。可在不同设备间通过导入/导出同步。</p>';
+    var remind = (data.settings && data.settings.remindBackup !== false);
+    html += '<div style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);margin-top:4px">';
+    html += '<input type="checkbox" id="remind-backup" ' + (remind ? 'checked' : '') + ' style="width:16px;height:16px" onchange="App.store.set(\'settings.remindBackup\', this.checked); App.util.toast(\'已保存\',\'ok\')">';
+    html += '<label for="remind-backup" style="font-size:13px;color:var(--text-secondary);cursor:pointer">每月提醒我导出数据备份（防止浏览器清理导致数据丢失）</label>';
+    html += '</div>';
     html += '</div></div>';
 
     // --- 示例数据 ---
