@@ -397,12 +397,12 @@
 
     var msg = '确定要删除「' + task.title + '」吗？';
     if (childCount > 0) {
-      msg += '\n\n该待办下有 ' + childCount + ' 个子项，将一并删除。';
+      msg += '（该待办下有 ' + childCount + ' 个子项，将一并删除）';
     }
 
     App.util.modal({
-      title: '🗑 确认删除',
-      content: '<p style="font-size:14px;color:var(--text-muted);margin-bottom:8px">' + msg.replace(/\n/g,'<br>') + '</p>',
+      title: '确认删除',
+      content: msg,
       confirmText: '确认删除',
       confirmStyle: 'danger',
       onConfirm: function(close) {
