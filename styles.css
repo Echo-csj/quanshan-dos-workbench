@@ -416,6 +416,16 @@ a:hover { color: var(--accent-hover); }
 .kanban-card.dragging { opacity: 0.4; transform: scale(0.98); box-shadow: var(--shadow-3); }
 .kanban-card[draggable] { position: relative; }
 
+/* 优先级标签配色 */
+.tag.priority-urgent { background: #FEE2E2; color: #991B1B; font-weight: 600; }
+.tag.priority-high   { background: #FEF3C7; color: #92400E; font-weight: 600; }
+.tag.priority-normal { background: var(--surface-2); color: var(--text-muted); }
+.tag.priority-low    { background: #DBEAFE; color: #1E40AF; }
+
+/* 看板卡片：悬停轻微上浮 */
+.kanban-card { transition: transform var(--fast), box-shadow var(--fast), border-color var(--fast); }
+.kanban-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-1); border-color: var(--accent); }
+
 /* --- Timeline --- */
 .timeline-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
 .timeline-day {

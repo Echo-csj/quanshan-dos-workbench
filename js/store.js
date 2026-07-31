@@ -42,6 +42,7 @@ window.App = window.App || {};
         imports: []
       },
       projects: {},
+      tasks: [],
       hr: {
         // 教学部人事数据：周度入离职记录
         // weekly key = 'YYYY-Www' (ISO周), value = { weekLabel, year, month, hireCount, leaveCount, note, createdAt }
