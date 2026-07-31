@@ -41,7 +41,16 @@ window.App = window.App || {};
         // 导入日志
         imports: []
       },
-      projects: {}
+      projects: {},
+      hr: {
+        // 教学部人事数据：周度入离职记录
+        // weekly key = 'YYYY-Www' (ISO周), value = { weekLabel, year, month, hireCount, leaveCount, note, createdAt }
+        weekly: {},
+        // 期初在职人数（用于计算离职率分母）
+        baseHeadcount: null,
+        // 期初设定日期
+        baseDate: null
+      }
     };
   }
 
