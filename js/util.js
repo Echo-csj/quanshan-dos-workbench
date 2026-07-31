@@ -195,9 +195,24 @@ window.App = window.App || {};
       });
     }
     if (children) {
-      if (typeof children === 'string') elem.textContent = children;
+      if (typeof children === 'string') {
+        // 检测 HTML/SVG 标记，用 innerHTML 渲染；纯文本用 textContent
+        if (children.trim().indexOf('<') === 0) { elem.innerHTML = children; }
+        else { elem.textContent = children; }
+      }
       else if (Array.isArray(children)) children.forEach(function(c) {
-        if (c) elem.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+        if (!c) return;
+        if (typeof c === 'string') {
+          if (c.trim().indexOf('<') === 0) {
+            var wrapper = document.createElement('span');
+            wrapper.innerHTML = c;
+            while (wrapper.firstChild) elem.appendChild(wrapper.firstChild);
+          } else {
+            elem.appendChild(document.createTextNode(c));
+          }
+        } else {
+          elem.appendChild(c);
+        }
       });
       else if (children instanceof HTMLElement) elem.appendChild(children);
     }

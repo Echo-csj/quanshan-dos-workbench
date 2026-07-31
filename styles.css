@@ -253,21 +253,24 @@ a:hover { color: var(--accent-hover); }
 
 /* --- Modal Overlay --- */
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 999;
-  background: rgba(0,0,0,.4);
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.45);
   display: flex; align-items: center; justify-content: center;
   opacity: 0; visibility: hidden;
   transition: opacity var(--fast), visibility var(--fast);
+  isolation: isolate;
 }
 .modal-overlay.show { opacity: 1; visibility: visible; }
 .modal {
-  background: var(--bg);
+  background: #FFFFFF;
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-modal);
+  box-shadow: 0 25px 60px rgba(0,0,0,.2), 0 0 1px rgba(0,0,0,.1);
   width: 520px; max-width: 90vw; max-height: 85vh;
   overflow-y: auto;
+  overflow-x: hidden;
   transform: scale(.96) translateY(10px);
   transition: transform var(--norm) var(--spring);
+  position: relative;
 }
 .modal-overlay.show .modal { transform: scale(1) translateY(0); }
 .modal-header {
