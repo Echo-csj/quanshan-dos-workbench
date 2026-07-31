@@ -9,8 +9,8 @@
     var container = document.getElementById('view-container');
     if (!container) return;
 
-    var now = new Date();
-    var todayWeekday = now.getDay();
+    var today = new Date();
+    var anchor = getAnchor();
 
     var data = App.store.getData();
     var fixedNodes = (data.timeline && data.timeline.fixedNodes) || [];
@@ -34,21 +34,21 @@
     html += '</div>';
 
     if (viewMode === 'week') {
-      html += renderWeekView(now, allNodes, weekdayNames, todayWeekday);
+      html += renderWeekView(anchor, today, allNodes, weekdayNames);
     } else {
-      html += renderMonthView(now, allNodes, fixedNodes);
+      html += renderMonthView(anchor, today, allNodes, fixedNodes);
     }
 
     container.innerHTML = html;
   });
 
-  function renderWeekView(now, allNodes, weekdayNames, todayWeekday) {
+  function renderWeekView(anchor, today, allNodes, weekdayNames) {
     var html = '';
 
     // 计算本周起始日（周一）
-    var startOfWeek = new Date(now);
-    var dayDiff = now.getDay() === 0 ? 6 : now.getDay() - 1;
-    startOfWeek.setDate(now.getDate() - dayDiff);
+    var startOfWeek = new Date(anchor);
+    var dayDiff = anchor.getDay() === 0 ? 6 : anchor.getDay() - 1;
+    startOfWeek.setDate(anchor.getDate() - dayDiff);
 
     html += '<div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">';
     html += '<span style="font-size:13px;color:var(--text-muted)">' + App.util.formatDate(startOfWeek, 'MM/DD') + ' ~ ' + App.util.formatDate(new Date(startOfWeek.getTime() + 6*86400000), 'MM/DD') + '</span>';
@@ -63,7 +63,7 @@
     for (var d = 0; d < 7; d++) {
       var date = new Date(startOfWeek.getTime() + d * 86400000);
       var dateStr = App.util.formatDate(date, 'YYYY-MM-DD');
-      var isToday = dateStr === App.util.formatDate(now, 'YYYY-MM-DD');
+      var isToday = dateStr === App.util.formatDate(today, 'YYYY-MM-DD');
 
       html += '<div class="timeline-day' + (isToday ? ' today' : '') + '">';
       html += '<div class="timeline-day-header">';
@@ -118,16 +118,22 @@
     return html;
   }
 
-  function renderMonthView(now, allNodes, fixedNodes) {
-    var year = now.getFullYear();
-    var month = now.getMonth();
+  function renderMonthView(anchor, today, allNodes, fixedNodes) {
+    var year = anchor.getFullYear();
+    var month = anchor.getMonth();
     var firstDay = new Date(year, month, 1);
     var lastDay = new Date(year, month + 1, 0);
     var startPad = firstDay.getDay(); // 0=Sunday
     var totalDays = lastDay.getDate();
 
     var html = '';
-    html += '<div style="margin-bottom:16px;text-align:center"><span style="font-size:18px;font-weight:600">' + year + ' 年 ' + (month + 1) + ' 月</span></div>';
+    html += '<div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.timeline.shiftMonth(-1)">← 上月</button>';
+    html += '<span style="font-size:18px;font-weight:600">' + year + ' 年 ' + (month + 1) + ' 月</span>';
+    html += '<div style="display:flex;gap:6px">';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.timeline.shiftMonth(0)">本月</button>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.timeline.shiftMonth(1)">下月 →</button>';
+    html += '</div></div>';
 
     // 星期表头
     html += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--border);border-radius:var(--radius);overflow:hidden">';
@@ -143,11 +149,11 @@
     // 日期格子
     for (var day = 1; day <= totalDays; day++) {
       var d = new Date(year, month, day);
-      var isToday = App.util.formatDate(d, 'YYYY-MM-DD') === App.util.formatDate(now, 'YYYY-MM-DD');
+      var isToday = App.util.formatDate(d, 'YYYY-MM-DD') === App.util.formatDate(today, 'YYYY-MM-DD');
       var dateStr = App.util.formatDate(d, 'YYYY-MM-DD');
 
       // 找到这天的固定节点（含"最后一周周三"类月度节点）
-      var dayFixedNodes = fixedNodes.filter(function(n) {
+      var dayFixedNodes = allNodes.filter(function(n) {
         if (n.type === 'monthly') {
           if (n.weekday != null && n.weekday === d.getDay() && n.which === 'last') {
             return App.util.isLastWeekOfMonth(d);
@@ -162,7 +168,7 @@
 
       if (dayFixedNodes.length > 0) {
         dayFixedNodes.forEach(function(n) {
-          html += '<div style="font-size:9px;background:var(--accent-soft);color:var(--accent-text);padding:1px 4px;border-radius:2px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + n.title + '</div>';
+          html += '<div style="font-size:9px;background:var(--accent-soft);color:var(--accent-text);padding:1px 4px;border-radius:2px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + App.util.escapeHtml(n.title) + '</div>';
         });
       }
 
@@ -303,6 +309,11 @@
     });
   }
 
+  // 当前查看锚点（支持跨周/跨月翻阅；刷新页面后回到本周/本月）
+  var _anchor = null;
+  function getAnchor() { return _anchor || new Date(); }
+  function setAnchor(d) { _anchor = d; }
+
   // 视图切换
   App.views = App.views || {};
   App.views.timeline = {
@@ -314,13 +325,14 @@
     saveNode: saveNode,
     deleteNode: deleteNode,
     shiftWeek: function(dir) {
-      // 简化实现：刷新即可显示本周
-      if (dir === 0) {
-        App.router.resolve();
-      } else {
-        // TODO: 实现跨周切换
-        App.util.toast('跨周切换开发中', 'warn');
-      }
+      if (dir === 0) setAnchor(new Date());
+      else { var a = getAnchor(); a.setDate(a.getDate() + dir * 7); setAnchor(a); }
+      App.router.resolve();
+    },
+    shiftMonth: function(dir) {
+      if (dir === 0) setAnchor(new Date());
+      else { var a = getAnchor(); a.setMonth(a.getMonth() + dir); setAnchor(a); }
+      App.router.resolve();
     },
   };
 
