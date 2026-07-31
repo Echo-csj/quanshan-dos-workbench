@@ -262,6 +262,11 @@ window.App = window.App || {};
 
     // Footer
     var footer = el('div', { className: 'modal-footer' });
+    if (options.onDelete) {
+      footer.appendChild(el('button', { className: 'btn btn-danger btn-sm', onClick: function() {
+        options.onDelete(close);
+      }}, options.deleteText || '删除'));
+    }
     if (options.showCancel !== false) {
       footer.appendChild(el('button', { className: 'btn btn-secondary', onClick: close }, '取消'));
     }
@@ -405,6 +410,18 @@ window.App = window.App || {};
     return p.join('');
   }
 
+  // --- HTML 转义（防止 XSS / 标签注入）---
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
   // Public API
   App.util = {
     getWeekNumber: getWeekNumber,
@@ -429,7 +446,9 @@ window.App = window.App || {};
     statusLabel: statusLabel,
     statusColor: statusColor,
     lineChart: lineChart,
-    chartFmt: chartFmt
+    chartFmt: chartFmt,
+    escapeHtml: escapeHtml,
+    escapeAttr: escapeAttr
   };
 
 })();

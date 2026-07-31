@@ -25,9 +25,12 @@
     var html = '';
 
     // --- 视图切换 Tabs ---
-    html += '<div class="tabs">';
+    html += '<div class="timeline-toolbar">';
+    html += '<div class="tabs" style="margin-bottom:0">';
     html += '<button class="tab ' + (viewMode === 'week' ? 'active' : '') + '" onclick="App.views.timeline.switchView(\'week\')">📅 周视图</button>';
     html += '<button class="tab ' + (viewMode === 'month' ? 'active' : '') + '" onclick="App.views.timeline.switchView(\'month\')">📆 月视图</button>';
+    html += '</div>';
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.timeline.openNodeModal()">' + App.util.svgIcon('plus', 15) + ' 新建节点</button>';
     html += '</div>';
 
     if (viewMode === 'week') {
@@ -81,9 +84,10 @@
       });
       dayNodes.forEach(function(node) {
         var nodeClass = node.type === 'fixed' ? 'node-fixed' : (node.type === 'monthly' ? 'node-monthly' : 'node-custom');
-        html += '<div class="timeline-node ' + nodeClass + '" title="' + (node.note || '') + '">';
+        html += '<div class="timeline-node ' + nodeClass + '" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<strong>' + node.title + '</strong>';
         if (node.time) { html += '<span class="mono" style="margin-left:auto;font-size:10px">' + node.time + '</span>'; }
+        html += '<span class="node-edit-hint">✎</span>';
         html += '</div>';
         if (node.note) {
           html += '<p style="font-size:11px;color:var(--text-faint);margin:2px 0 0 8px;line-height:1.4">' + App.util.truncate(node.note, 50) + '</p>';
@@ -99,9 +103,10 @@
     if (monthlyNodes.length > 0) {
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期节点</h3></div>';
       monthlyNodes.forEach(function(node) {
-        html += '<div class="timeline-node node-monthly" style="margin-bottom:6px">';
+        html += '<div class="timeline-node node-monthly" style="margin-bottom:6px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<strong>' + node.title + '</strong>';
         html += '<span style="font-size:11px;color:var(--warn-text);margin-left:8px">' + (node.cron || '') + '</span>';
+        html += '<span class="node-edit-hint" style="margin-left:auto">✎</span>';
         html += '</div>';
         if (node.note) {
           html += '<p style="font-size:12px;color:var(--text-muted);margin-top:4px">' + node.note + '</p>';
@@ -171,17 +176,131 @@
     if (monthlyNodes.length > 0) {
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期任务</h3></div>';
       monthlyNodes.forEach(function(node) {
-        html += '<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">';
+        html += '<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<span class="status-dot warn"></span>';
         html += '<div><strong style="font-size:13px">' + node.title + '</strong>';
         if (node.note) { html += '<p style="font-size:11px;color:var(--text-muted);margin-top:2px">' + node.note + '</p>'; }
         html += '</div>';
+        html += '<span class="node-edit-hint" style="margin-left:auto">✎</span>';
         html += '</div>';
       });
       html += '</div>';
     }
 
     return html;
+  }
+
+  /* ---------------- 节点编辑 ---------------- */
+  function getAllNodes() {
+    return (App.store.get('timeline.fixedNodes') || []).concat(App.store.get('timeline.customNodes') || []);
+  }
+
+  function openNodeModal(id) {
+    var isEdit = !!id;
+    var node = isEdit ? getAllNodes().filter(function(n) { return n.id === id; })[0] : null;
+    var data = node || { title: '', type: 'fixed', weekday: 1, time: '', note: '', reminder: true };
+
+    var isMonthly = data.type === 'monthly';
+    var weekdayVal = (data.weekday == null) ? '' : String(data.weekday);
+
+    var html = '<div style="display:flex;flex-direction:column;gap:14px">';
+    // 节点类型
+    html += '<div class="form-group"><label class="form-label">节点类型</label><select class="form-input" id="node-type">';
+    html += '<option value="weekly"' + (!isMonthly ? ' selected' : '') + '>每周固定（指定星期）</option>';
+    html += '<option value="monthly"' + (isMonthly ? ' selected' : '') + '>每月固定（最后一周）</option>';
+    html += '</select></div>';
+    // 标题
+    html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="node-title" value="' + App.util.escapeAttr(data.title) + '" placeholder="如：集团会议"></div>';
+    // 星期
+    var wdNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    html += '<div class="form-group"><label class="form-label">星期</label><select class="form-input" id="node-weekday">';
+    html += '<option value="">不指定（整月有效）</option>';
+    wdNames.forEach(function(n, i) {
+      html += '<option value="' + i + '"' + (weekdayVal === String(i) ? ' selected' : '') + '>' + n + '</option>';
+    });
+    html += '</select></div>';
+    // 时间 + 提醒
+    html += '<div class="form-row">';
+    html += '<div class="form-group"><label class="form-label">时间（可选）</label><input class="form-input" id="node-time" type="time" value="' + App.util.escapeAttr(data.time || '') + '"></div>';
+    html += '<div class="form-group"><label class="form-label">提醒</label><div style="display:flex;align-items:center;gap:8px;height:38px"><input type="checkbox" id="node-reminder"' + (data.reminder ? ' checked' : '') + '><span style="font-size:13px;color:var(--text-muted)">开启节点提醒</span></div></div>';
+    html += '</div>';
+    // 备注
+    html += '<div class="form-group"><label class="form-label">备注（可选）</label><textarea class="form-input" id="node-note" placeholder="补充说明">' + App.util.escapeHtml(data.note || '') + '</textarea></div>';
+    html += '</div>';
+
+    var modalOpts = {
+      title: isEdit ? '编辑时间轴节点' : '新建时间轴节点',
+      content: html,
+      confirmText: isEdit ? '保存修改' : '创建节点',
+      onConfirm: function(close) { saveNode(isEdit ? id : null, close); }
+    };
+    if (isEdit) {
+      modalOpts.onDelete = function(close) { deleteNode(id, close); };
+      modalOpts.deleteText = '删除';
+    }
+    App.util.modal(modalOpts);
+  }
+
+  function saveNode(id, close) {
+    var titleEl = document.getElementById('node-title');
+    if (!titleEl) return;
+    var title = titleEl.value.trim();
+    if (!title) { App.util.toast('请填写节点标题', 'warn'); return; }
+    var isMonthly = document.getElementById('node-type').value === 'monthly';
+    var weekdaySel = document.getElementById('node-weekday').value;
+    var weekday = weekdaySel === '' ? null : parseInt(weekdaySel, 10);
+    var time = document.getElementById('node-time').value;
+    var reminder = document.getElementById('node-reminder').checked;
+    var note = document.getElementById('node-note').value.trim();
+
+    var newNode = {
+      title: title,
+      type: isMonthly ? 'monthly' : 'fixed',
+      weekday: weekday,
+      time: time,
+      reminder: reminder,
+      note: note
+    };
+    if (isMonthly) {
+      if (weekday != null) newNode.which = 'last';
+      else newNode.cron = 'last-week-of-month';
+    }
+
+    if (id) {
+      var fixed = App.store.get('timeline.fixedNodes') || [];
+      var custom = App.store.get('timeline.customNodes') || [];
+      var fi = -1, ci = -1;
+      fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
+      custom.forEach(function(n, i) { if (n.id === id) ci = i; });
+      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); App.store.set('timeline.fixedNodes', fixed); }
+      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); App.store.set('timeline.customNodes', custom); }
+    } else {
+      newNode.id = App.store.uid('node');
+      App.store.push('timeline.customNodes', newNode);
+    }
+    if (close) close();
+    App.util.toast(id ? '已保存修改' : '已创建节点', 'ok');
+    App.router.resolve();
+  }
+
+  function deleteNode(id, close) {
+    var node = getAllNodes().filter(function(n) { return n.id === id; })[0];
+    if (!node) return;
+    App.util.modal({
+      title: '确认删除节点',
+      content: '确定删除时间轴节点「' + App.util.escapeHtml(node.title) + '」？此操作不可撤销。',
+      confirmText: '删除', confirmStyle: 'danger',
+      onConfirm: function(c) {
+        var fixed = (App.store.get('timeline.fixedNodes') || []).filter(function(n) { return n.id !== id; });
+        var custom = (App.store.get('timeline.customNodes') || []).filter(function(n) { return n.id !== id; });
+        App.store.set('timeline.fixedNodes', fixed);
+        App.store.set('timeline.customNodes', custom);
+        if (c) c();
+        if (close) close();
+        App.util.toast('已删除', 'ok');
+        App.router.resolve();
+      }
+    });
   }
 
   // 视图切换
@@ -191,6 +310,9 @@
       localStorage.setItem('timeline_view', mode);
       App.router.resolve();
     },
+    openNodeModal: openNodeModal,
+    saveNode: saveNode,
+    deleteNode: deleteNode,
     shiftWeek: function(dir) {
       // 简化实现：刷新即可显示本周
       if (dir === 0) {
