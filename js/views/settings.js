@@ -79,6 +79,12 @@
     html += '<input type="checkbox" id="remind-backup" ' + (remind ? 'checked' : '') + ' style="width:16px;height:16px" onchange="App.store.set(\'settings.remindBackup\', this.checked); App.util.toast(\'已保存\',\'ok\')">';
     html += '<label for="remind-backup" style="font-size:13px;color:var(--text-secondary);cursor:pointer">每月提醒我导出数据备份（防止浏览器清理导致数据丢失）</label>';
     html += '</div>';
+    // 已完成自动归档天数
+    html += '<div style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);margin-top:4px;flex-wrap:wrap">';
+    html += '<label for="archive-days" style="font-size:13px;color:var(--text-secondary);cursor:pointer;white-space:nowrap">已完成自动归档（天）：</label>';
+    html += '<input type="number" id="archive-days" min="1" max="365" value="' + (settings.tasksArchiveDays || 30) + '" style="width:70px" class="form-input" onchange="App.store.set(\'settings.tasksArchiveDays\', parseInt(this.value,10)||30); App.util.toast(\'已保存\',\'ok\')">';
+    html += '<span style="font-size:12px;color:var(--text-faint)">超过该天数未完成复核的已完成事项，将自动移入归档（仍可在「已归档」中查询恢复）</span>';
+    html += '</div>';
     html += '</div></div>';
 
     // --- 示例数据 ---

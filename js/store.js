@@ -19,7 +19,8 @@ window.App = window.App || {};
         weekStart: 1,       // 周一为起始日
         reminders: true,
         theme: 'light',
-        remindBackup: true  // 每月提醒导出备份
+        remindBackup: true, // 每月提醒导出备份
+        tasksArchiveDays: 30 // 已完成事项超过该天数自动归档
       },
       timeline: {
         fixedNodes: [

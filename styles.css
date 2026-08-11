@@ -429,6 +429,26 @@ a:hover { color: var(--accent-hover); }
 .kanban-card { transition: transform var(--fast), box-shadow var(--fast), border-color var(--fast); }
 .kanban-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-1); border-color: var(--accent); }
 
+/* 已完成列折叠展开按钮 */
+.kanban-expand-btn {
+  width: 100%; margin-top: 8px; padding: 7px;
+  background: var(--surface-2); border: 1px dashed var(--border);
+  border-radius: var(--radius-sm); color: var(--text-muted);
+  font-size: 12px; cursor: pointer; transition: background var(--fast);
+}
+.kanban-expand-btn:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* 已归档列表（弹窗） */
+.archive-list { max-height: 60vh; overflow-y: auto; }
+.archive-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 4px; border-bottom: 1px solid var(--border);
+}
+.archive-row-main { flex: 1; min-width: 0; }
+.archive-row-title { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+.archive-row-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--text-faint); }
+.archive-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
 /* --- Timeline --- */
 .timeline-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
 .timeline-day {
