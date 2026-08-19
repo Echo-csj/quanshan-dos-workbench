@@ -546,7 +546,7 @@
     _pasteItems.forEach(function(it, i) {
       html += '<div class="paste-row" data-idx="' + i + '">';
       html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
-      html += '<input class="form-input paste-f paste-title" id="pp-title-' + i + '" value="' + escapeAttr(it.title) + '" placeholder="事项描述">';
+      html += '<input class="form-input paste-f paste-title" id="pp-title-' + i + '" value="' + escapeAttr(it.title) + '" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">';
       html += '<input class="form-input paste-f" id="pp-assignee-' + i + '" value="' + escapeAttr(it.assignee) + '" placeholder="负责人">';
       html += '<input class="form-input paste-f" id="pp-due-' + i + '" type="date" value="' + escapeAttr(it.dueDate) + '">';
       html += '<select class="form-input paste-f" id="pp-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
@@ -612,13 +612,32 @@
       // 去掉行首序号 / 项目符号
       line = line.replace(/^[\d]+[.、)]\s*/, '').replace(/^[-*•·]\s*/, '');
       if (!line) return;
+      // 跳过明显的"列表说明"行（不当作任务）
+      if (isLikelyHeader(line)) return;
       var item = parseLine(line, base);
-      if (item && item.title) items.push(item);
+      // 过滤掉标题为空或仅含标点/数字的项
+      if (item && item.title && isMeaningfulTitle(item.title)) items.push(item);
     });
     return items;
   }
 
+  // 跳过"以上是…数据"、"针对…有以下几项任务"等说明性行
+  function isLikelyHeader(line) {
+    if (line.length < 12) return false;
+    return /^(以上是|以下是|针对|关于|根据|按照|请注意|请各|请将|请于|请在|注意[:：]?|任务如下|有如下|有以下|现将|现就|特此|另外|此外|同时|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家)/.test(line);
+  }
+
+  // 标题必须包含至少 2 个有效字符（排除纯标点/纯数字/纯空白）
+  function isMeaningfulTitle(s) {
+    if (!s) return false;
+    var stripped = s.replace(/[\s+\-—–=、，。：:；;·•*#@()（）\[\]【】"'`~!?:：；]/g, '');
+    if (stripped.length < 2) return false;
+    if (/^[\d\s\-—–=+]+$/.test(stripped)) return false;
+    return true;
+  }
+
   function parseLine(line, base) {
+    var raw = line;
     var title = line;
     var dueDate = parseDate(title, base);     // 仅提取，不改 title
     var ap = extractAssignee(title);          // 提取并清理负责人
@@ -627,7 +646,7 @@
     var priority = detectPriority(line);
     title = cleanTitle(title);                // 清理日期/星期/优先级残留
     if (!title) return null;
-    return { title: title, assignee: assignee || '', dueDate: dueDate || '', priority: priority, status: 'todo' };
+    return { title: title, assignee: assignee || '', dueDate: dueDate || '', priority: priority, status: 'todo', _raw: raw };
   }
 
   // 返回 'YYYY-MM-DD' 或 null
@@ -716,7 +735,7 @@
       .replace(/负责人[：:\s]*/g, ' ')
       .replace(/[（(][\u4e00-\u9fa5·]{2,6}[）)]/g, ' ')
       .replace(/[—\-–=]\s*[\u4e00-\u9fa5·]{2,6}\s*$/g, ' ')
-      .replace(/(本周|这周|下周|下个?周)?(周|星期)?[一二三四五六日天]/g, ' ')
+      .replace(/(本周|这周|下周|下个?周)?(周|星期)?[一二三四五六日天](?:\s*前)?/g, ' ')
       .replace(/明天|今天|今日|后天/g, ' ')
       .replace(/截止/g, ' ')
       .replace(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, ' ')
