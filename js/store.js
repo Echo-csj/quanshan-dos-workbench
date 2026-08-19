@@ -30,7 +30,39 @@ window.App = window.App || {};
           search: '',              // 搜索关键字（标题/负责人/备注）
           expanded: {},            // 分组/列 展开状态，key -> bool
           columnLimit: 10          // 每列/每组前 N 条折叠
-        }
+        },
+        // —— 粘贴提取规则引擎（用户可配置，完全替换旧硬编码智能解析）——
+        defaultRuleId: 'rule_default',
+        extractionRules: [
+          {
+            id: 'rule_default',
+            name: '通用群消息',
+            enabled: true,
+            isDefault: true,
+            triggers: [],                 // 触发关键词（空 = 兜底规则，自动匹配失败时使用）
+            lineDelimiter: '\\n',         // 输入按换行拆分为行（半结构化，默认换行）
+            rowDelimiter: '',             // 行内字段分隔符（如 | 或逗号；留空 = 按整行智能提取）
+            fields: {
+              title:    { key:'title',    label:'事项',    enabled:true,  required:true,  method:'remainder' },
+              dueDate:  { key:'dueDate',  label:'截止日期', enabled:true,  required:false, method:'auto',
+                          formats:['YMD','MD_CN','MD_DOT','MD_HAO','WEEKDAY','RELATIVE','RANGE'], rangeLatest:true },
+              time:     { key:'time',     label:'时间',     enabled:true,  required:false, method:'auto' },
+              assignee: { key:'assignee', label:'负责人',   enabled:true,  required:false, method:'auto',
+                          markers:['at','colon','parens','dash','role'] },
+              priority: { key:'priority', label:'优先级',   enabled:true,  required:false, method:'auto',
+                          keywords:['紧急','加急','特急','尽快','重要','高优'] }
+            },
+            lineFilters: {
+              skipReply: true,            // 收到回复 / 回复：之后整段跳过
+              skipSectionHeaders: true,   // 👉一、/ 一、章节名词 等顶级标题
+              skipNegative: true,         // 否定式告诫：不见…不…
+              skipEmailLines: true,       // 抄送/邮件发送/主送 等（无日期才跳过）
+              skipPreface: true,          // 另有几项事项说明 / 以下是安排 等引出句
+              skipNotice: true,           // 以上是/现将/特此/各位/大家/注意/任务如下 等通知行
+              groupBackfill: true         // 以上N项 + 日期 → 批量回填截止日
+            }
+          }
+        ]
       },
       timeline: {
         fixedNodes: [

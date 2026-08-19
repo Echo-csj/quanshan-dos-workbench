@@ -24,6 +24,7 @@
   var dragId = null;
     var _pasteItems = [];              // 粘贴解析预览暂存
   var _pasteSkipped = [];            // 被识别为说明/邮件/否定句而跳过的行
+  var _pasteResult = null;           // 整次解析结果（含 errors）
 
   /* ---------------- 路由 ---------------- */
   App.router.register('/tasks', function() {
@@ -205,6 +206,7 @@
     html += '<button class="btn btn-primary" onclick="App.views.tasks.openTaskModal()">' + App.util.svgIcon('plus', 15) + ' 新建任务</button>';
     html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
     html += '<button class="btn btn-secondary" onclick="App.views.tasks.openPasteModal()">📋 粘贴提取</button>';
+    html += '<button class="btn btn-ghost" onclick="App.views.tasks.openRulesModal()">⚙ 提取规则</button>';
     html += '<span class="toolbar-sep"></span>';
     var modes = [
       { v: 'kanban', icon: '📋', label: '看板' },
@@ -812,18 +814,35 @@
     return null;
   }
 
-  /* ---------------- 粘贴提取 ---------------- */
-  // 入口：粘贴框 + 实时解析预览
+  /* ---------------- 粘贴提取（规则驱动 + 即时校验） ---------------- */
+  var _currentRule = null;
+  var _editingRuleId = null;
+  var _editingRuleBase = null;
+
   function openPasteModal() {
     var ex = document.querySelector('.modal-overlay');
     if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
     _pasteItems = [];
     _pasteSkipped = [];
+    _pasteResult = null;
+    _currentRule = selectRule(getRules(), '') || getRules()[0] || null;
 
     var html = '';
-    html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">从工作群复制内容粘贴到下方，系统自动识别 <b>事项 / 负责人 / 时间</b>。每行一条；支持 ' +
-      '<code>@张三</code>、<code>负责人：张三</code>、<code>（张三）</code>、<code>8月20日</code>、<code>下周三</code>、<code>明天</code> 等格式。' +
-      '还支持「<b>以上N项 + 日期完成</b>」批量设截止日、自动跳过「抄送/邮件发送/收到回复/否定式告诫」等说明行；每行右侧显示置信度。</p>';
+    html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">从工作群复制内容粘贴到下方，系统按所选<b>规则</b>自动识别字段并即时校验。可在右上「⚙ 管理规则」里自定义字段格式与分隔符。' +
+      '识别方式支持 <code>@张三</code>、<code>负责人：张三</code>、<code>（张三）</code>、<code>8月20日</code>、<code>下周三</code>、<code>9.9（周三）</code> 等多种格式，并自动跳过说明/邮件/回复块。</p>';
+
+    // 规则选择条
+    html += '<div class="paste-rulebar">';
+    html += '<span class="paste-rulebar-label">使用规则</span>';
+    html += '<select id="paste-rule" class="form-input" onchange="App.views.tasks.onPasteRuleChange(this.value)">';
+    getRules().forEach(function(r) {
+      if (!r.enabled) return;
+      html += '<option value="' + r.id + '"' + (_currentRule && _currentRule.id === r.id ? ' selected' : '') + '>' + escapeHtml(r.name) + (r.isDefault ? '（默认）' : '') + '</option>';
+    });
+    html += '</select>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.openRulesModal()">⚙ 管理规则</button>';
+    html += '</div>';
+
     html += '<textarea id="paste-input" class="form-input" rows="6" style="font-family:var(--font-mono);font-size:12px" placeholder="示例：\n@张老师 完成次月预排课表 8月20日\n下周三前 提交教务周报 — 李教务\n（王主管）核对新生名单 截止8/25 紧急"></textarea>';
     html += '<div id="paste-preview" style="margin-top:14px"></div>';
 
@@ -831,7 +850,7 @@
       title: '📋 粘贴提取待办',
       content: html,
       showCancel: true,
-      confirmText: '生成待办',
+      confirmText: '一键生成待办',
       onConfirm: function(close) { confirmPasteImport(close); }
     });
 
@@ -843,62 +862,117 @@
     onPasteInput();
   }
 
+  function onPasteRuleChange(ruleId) {
+    var r = getRules().filter(function(x) { return x.id === ruleId; })[0];
+    if (r) _currentRule = r;
+    onPasteInput();
+  }
+
   function onPasteInput() {
     var ta = document.getElementById('paste-input');
     if (!ta) return;
-    var result = parsePasteText(ta.value);
-    _pasteItems = result.items;
+    var rule = _currentRule || selectRule(getRules(), ta.value) || getRules()[0];
+    _currentRule = rule;
+    var result = parsePasteText(ta.value, null, rule);
+    _pasteResult = result;
+    _pasteItems = result.items;       // 与 result.items 同一引用
     _pasteSkipped = result.skipped;
     renderPastePreview();
+  }
+
+  // 校验横幅（三态：成功 / 警告 / 错误）
+  function renderPasteBanner(result, rule) {
+    var n = result.items.length;
+    var errCount = (result.errors || []).length;
+    var skipped = (result.skipped || []).length;
+    if (n === 0) {
+      var msg = skipped > 0
+        ? '未识别到待办事项 —— 当前规则与内容不匹配，已跳过 ' + skipped + ' 行说明。可在「⚙ 管理规则」调整，或切换/新建规则。'
+        : '未识别到任何内容。请粘贴待办文本，或检查所选规则。';
+      return '<div class="paste-banner paste-banner-error">❌ ' + msg + '</div>';
+    }
+    if (errCount > 0) {
+      return '<div class="paste-banner paste-banner-warn">⚠️ 识别 <b>' + n + '</b> 条，其中 <b>' + errCount + '</b> 条缺必填字段（红框标注），可补充后生成，或忽略直接生成。</div>';
+    }
+    return '<div class="paste-banner paste-banner-ok">✅ 成功匹配 <b>' + n + '</b> 条，字段齐全，可一键生成' + (skipped ? '（另跳过 ' + skipped + ' 行说明）' : '') + '。</div>';
   }
 
   function renderPastePreview() {
     var box = document.getElementById('paste-preview');
     if (!box) return;
-    if (_pasteItems.length === 0 && _pasteSkipped.length === 0) {
-      box.innerHTML = '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">粘贴文本后将在此预览解析结果，可勾选并编辑后生成。</p>';
-      return;
-    }
+    var result = _pasteResult;
+    var rule = _currentRule;
+    if (!result) { box.innerHTML = '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">粘贴文本后将在此预览解析结果…</p>'; return; }
+
     var html = '';
-    if (_pasteItems.length === 0 && _pasteSkipped.length > 0) {
-      html += '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">全部 ' + _pasteSkipped.length + ' 行被识别为说明/邮件/否定告诫，未识别出待办事项。</p>';
-    } else {
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-      html += '<span style="font-size:12px;color:var(--text-muted)">已识别 <b>' + _pasteItems.length + '</b> 条，可编辑后生成</span>';
+    html += renderPasteBanner(result, rule);
+
+    if (result.items.length === 0 && result.skipped.length === 0) {
+      html += '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">粘贴文本后将在此预览解析结果，可勾选并编辑后生成。</p>';
+    } else if (result.items.length > 0) {
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 8px">';
+      html += '<span style="font-size:12px;color:var(--text-muted)">已识别 <b>' + result.items.length + '</b> 条，可编辑后生成</span>';
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleAllPaste()">全选 / 取消</button>';
       html += '</div>';
-      html += '<div class="paste-table">';
-      _pasteItems.forEach(function(it, i) {
-        var conf = it.confidence || 'none';
-        var confLabel = ({ high: '高', medium: '中', low: '低', none: '未识别' })[conf] || '未识别';
-        var confColor = ({ high: 'var(--ok)', medium: 'var(--warn)', low: 'var(--text-muted)', none: 'var(--bad)' })[conf] || 'var(--bad)';
-        html += '<div class="paste-row" data-idx="' + i + '">';
-        html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
-        html += '<textarea class="form-input paste-f paste-title" id="pp-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">' + escapeHtml(it.title) + '</textarea>';
-        html += '<div class="paste-meta">';
-        html += '<input class="form-input paste-f" id="pp-assignee-' + i + '" value="' + escapeAttr(it.assignee) + '" placeholder="负责人">';
-        html += '<input class="form-input paste-f" id="pp-due-' + i + '" type="date" value="' + escapeAttr(it.dueDate) + '">';
-        html += '<select class="form-input paste-f" id="pp-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
-        html += '<span class="paste-conf" style="color:' + confColor + '" title="置信度: ' + conf + ' — ' + confHint(conf) + '">📅 ' + confLabel + '</span>';
-        html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
-        html += '</div>';
-        if (it.warnings && it.warnings.length) {
-          html += '<div class="paste-warning">⚠️ ' + escapeHtml(it.warnings.join(' · ')) + '</div>';
-        }
-        html += '</div>';
-      });
-      html += '</div>';
+      html += renderPreviewTable(result, rule, 'pp');
     }
-    // 跳过清单（可点击展开）
-    if (_pasteSkipped.length > 0) {
-      html += '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted)">⏭ 被识别为说明跳过 ' + _pasteSkipped.length + ' 行（点击展开）</summary>';
-      html += '<div style="margin-top:8px;padding:10px;background:var(--surface-2);border-radius:var(--radius);font-size:11px;color:var(--text-muted);line-height:1.7">';
-      _pasteSkipped.forEach(function(s) {
-        html += '<div style="margin-bottom:4px"><code style="color:var(--text-faint)">[' + escapeHtml(s.reason) + ']</code> ' + escapeHtml(s.line) + '</div>';
-      });
-      html += '</div></details>';
-    }
+    html += renderSkipped(result);
     box.innerHTML = html;
+  }
+
+  // 纯渲染：提取结果表格（粘贴弹窗与规则编辑器实时测试共用）。idPrefix 避免多实例 id 冲突
+  function renderPreviewTable(result, rule, idPrefix) {
+    idPrefix = idPrefix || 'pp';
+    var fields = orderedEnabledFields(rule);
+    var items = result.items;
+    if (!items.length) return '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">未识别到事项。</p>';
+    var html = '<div class="paste-table">';
+    items.forEach(function(it, i) {
+      var hasErr = it._errors && it._errors.length;
+      html += '<div class="paste-row' + (hasErr ? ' paste-row-error' : '') + '" data-idx="' + i + '">';
+      html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
+      html += '<textarea class="form-input paste-f paste-title" id="' + idPrefix + '-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">' + escapeHtml(it.title) + '</textarea>';
+      html += '<div class="paste-meta">';
+      fields.forEach(function(fld) {
+        var val = it[fld.key] || '';
+        var miss = fld.required && !val;
+        if (fld.key === 'dueDate') {
+          html += '<input class="form-input paste-f' + (miss ? ' paste-miss' : '') + '" id="' + idPrefix + '-due-' + i + '" type="date" value="' + escapeAttr(val) + '" title="' + (fld.required ? '必填字段' : '截止日期') + '">';
+        } else if (fld.key === 'priority') {
+          html += '<select class="form-input paste-f" id="' + idPrefix + '-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
+        } else if (fld.key === 'assignee') {
+          html += '<input class="form-input paste-f' + (miss ? ' paste-miss' : '') + '" id="' + idPrefix + '-assignee-' + i + '" value="' + escapeAttr(val) + '" placeholder="负责人" title="' + (fld.required ? '必填字段' : '负责人') + '">';
+        } else if (fld.key === 'time') {
+          html += '<input class="form-input paste-f" id="' + idPrefix + '-time-' + i + '" value="' + escapeAttr(val) + '" placeholder="时间">';
+        }
+      });
+      // 置信度胶囊
+      var conf = it.confidence || 'none';
+      var confLabel = ({ high: '高', medium: '中', low: '低', none: '未识别' })[conf] || '未识别';
+      var confColor = ({ high: 'var(--ok)', medium: 'var(--warn)', low: 'var(--text-muted)', none: 'var(--bad)' })[conf] || 'var(--bad)';
+      html += '<span class="paste-conf" style="color:' + confColor + '" title="置信度: ' + conf + ' — ' + confHint(conf) + '">📅 ' + confLabel + '</span>';
+      html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
+      html += '</div>';
+      if (it._errors && it._errors.length) {
+        html += '<div class="paste-warning">⚠️ ' + escapeHtml(it._errors.join(' · ')) + '</div>';
+      } else if (it.warnings && it.warnings.length) {
+        html += '<div class="paste-warning">⚠️ ' + escapeHtml(it.warnings.join(' · ')) + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderSkipped(result) {
+    if (!result.skipped || !result.skipped.length) return '';
+    var html = '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted)">⏭ 被识别为说明跳过 ' + result.skipped.length + ' 行（点击展开）</summary>';
+    html += '<div style="margin-top:8px;padding:10px;background:var(--surface-2);border-radius:var(--radius);font-size:11px;color:var(--text-muted);line-height:1.7">';
+    result.skipped.forEach(function(s) {
+      html += '<div style="margin-bottom:4px"><code style="color:var(--text-faint)">[' + escapeHtml(s.reason) + ']</code> ' + escapeHtml(s.line) + '</div>';
+    });
+    html += '</div></details>';
+    return html;
   }
 
   function removePasteRow(i) {
@@ -915,7 +989,8 @@
   function confirmPasteImport(close) {
     var tasks = getTasks();
     var added = 0;
-    for (var i = 0; i < _pasteItems.length; i++) {
+    var items = _pasteResult ? _pasteResult.items : _pasteItems;
+    for (var i = 0; i < items.length; i++) {
       var ck = document.querySelector('.paste-ck[data-idx="' + i + '"]');
       if (ck && !ck.checked) continue;
       var titleEl = document.getElementById('pp-title-' + i);
@@ -924,6 +999,7 @@
       var assignee = (document.getElementById('pp-assignee-' + i) || {}).value.trim();
       var due = (document.getElementById('pp-due-' + i) || {}).value;
       var prio = (document.getElementById('pp-prio-' + i) || {}).value;
+      var timeVal = (document.getElementById('pp-time-' + i) || {}).value.trim();
       tasks.push({
         id: App.store.uid('task'),
         title: title,
@@ -931,7 +1007,7 @@
         status: 'todo',
         assignee: assignee,
         dueDate: due || '',
-        note: '',
+        note: timeVal ? ('时间 ' + timeVal) : '',
         source: 'paste',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -942,6 +1018,288 @@
     App.store.set('tasks', tasks);
     if (close) close();
     App.util.toast('已生成 ' + added + ' 条待办（来自粘贴）', 'ok');
+    App.router.resolve();
+  }
+
+  /* ---------------- 规则管理 + 编辑器 ---------------- */
+  function openRulesModal() {
+    var ex = document.querySelector('.modal-overlay');
+    if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
+    App.util.modal({
+      title: '⚙ 提取规则管理',
+      content: '<p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.6">粘贴时系统按「触发关键词」自动选用最匹配的规则；都不命中时回退到<strong>默认规则</strong>。点击规则可编辑字段、格式、分隔符与跳过项。切换/删除后即时生效。</p>' +
+               '<div id="rules-list-wrap"></div>',
+      showCancel: true,
+      cancelText: '关闭',
+      confirmText: '＋ 新建规则',
+      onConfirm: function(close) { openRuleEditor(null); }
+    });
+    renderRulesList();
+  }
+
+  function renderRulesList() {
+    var wrap = document.getElementById('rules-list-wrap');
+    if (!wrap) return;
+    var rules = getRules();
+    var html = '<div class="rules-list">';
+    rules.forEach(function(r) {
+      var trig = (r.triggers || []).length ? r.triggers.join('、') : '<span class="rule-faint">（兜底，无触发词）</span>';
+      var fcount = Object.keys(r.fields || {}).filter(function(k) { return r.fields[k] && r.fields[k].enabled !== false; }).length;
+      html += '<div class="rule-card">';
+      html += '<div class="rule-card-head">';
+      html += '<label class="switch switch-sm"><input type="checkbox" ' + (r.enabled ? 'checked' : '') + ' onchange="App.views.tasks.toggleRule(\'' + r.id + '\')"><span class="slider"></span></label>';
+      html += '<span class="rule-name">' + escapeHtml(r.name) + '</span>';
+      if (r.isDefault) html += '<span class="rule-badge rule-badge-default">默认</span>';
+      html += '</div>';
+      html += '<div class="rule-card-meta">触发词：' + trig + ' · 启用字段 <b>' + fcount + '</b> 个</div>';
+      html += '<div class="rule-card-actions">';
+      if (!r.isDefault) html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.setDefaultRule(\'' + r.id + '\')">设为默认</button>';
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.openRuleEditor(\'' + r.id + '\')">编辑</button>';
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.duplicateRule(\'' + r.id + '\')">复制</button>';
+      if (rules.length > 1) html += '<button class="btn btn-danger btn-ghost btn-sm" onclick="App.views.tasks.deleteRule(\'' + r.id + '\')">删除</button>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+
+  function toggleRule(id) {
+    var rules = getRules();
+    var r = rules.filter(function(x) { return x.id === id; })[0];
+    if (r) { r.enabled = !r.enabled; saveRules(rules); renderRulesList(); }
+  }
+
+  function setDefaultRule(id) {
+    var rules = getRules();
+    rules.forEach(function(r) { r.isDefault = (r.id === id); });
+    saveRules(rules);
+    App.store.set('settings.defaultRuleId', id);
+    renderRulesList();
+  }
+
+  function duplicateRule(id) {
+    var rules = getRules();
+    var src = rules.filter(function(x) { return x.id === id; })[0];
+    if (!src) return;
+    var copy = JSON.parse(JSON.stringify(src));
+    copy.id = 'rule_' + Date.now().toString(36);
+    copy.name = src.name + ' 副本';
+    copy.isDefault = false;
+    rules.push(copy);
+    saveRules(rules);
+    renderRulesList();
+  }
+
+  function deleteRule(id) {
+    var rules = getRules();
+    if (rules.length <= 1) { App.util.toast('至少保留一条规则', 'warn'); return; }
+    var name = (rules.filter(function(x) { return x.id === id; })[0] || {}).name || '';
+    App.util.modal({
+      title: '确认删除规则',
+      content: '确定删除规则「<b>' + escapeHtml(name) + '</b>」？',
+      confirmText: '删除', confirmStyle: 'danger',
+      onConfirm: function(close) {
+        var remaining = rules.filter(function(x) { return x.id !== id; });
+        if (remaining.length && !remaining.some(function(r) { return r.isDefault; })) {
+          remaining[0].isDefault = true;
+          App.store.set('settings.defaultRuleId', remaining[0].id);
+        }
+        saveRules(remaining);
+        close();
+        renderRulesList();
+      }
+    });
+  }
+
+  function blankRule() {
+    return {
+      id: 'rule_' + Date.now().toString(36),
+      name: '新规则',
+      enabled: true,
+      isDefault: false,
+      triggers: [],
+      lineDelimiter: '\\n',
+      rowDelimiter: '',
+      fields: {
+        title:    { key: 'title',    label: '事项',     enabled: true,  required: true,  method: 'remainder', col: 0 },
+        dueDate:  { key: 'dueDate',  label: '截止日期', enabled: true,  required: false, method: 'auto', col: 0, formats: ['YMD', 'MD_CN', 'MD_DOT', 'MD_HAO', 'WEEKDAY', 'RELATIVE', 'RANGE'], rangeLatest: true },
+        time:     { key: 'time',     label: '时间',     enabled: true,  required: false, method: 'auto', col: 0 },
+        assignee: { key: 'assignee', label: '负责人',   enabled: true,  required: false, method: 'auto', col: 0, markers: ['at', 'colon', 'parens', 'dash', 'role'] },
+        priority: { key: 'priority', label: '优先级',   enabled: true,  required: false, method: 'auto', col: 0, keywords: ['紧急', '加急', '特急', '尽快', '重要', '高优'] }
+      },
+      lineFilters: { skipReply: true, skipSectionHeaders: true, skipNegative: true, skipEmailLines: true, skipPreface: true, skipNotice: true, groupBackfill: true }
+    };
+  }
+
+  var _FIELD_LABELS = { title: '事项', dueDate: '截止日期', time: '时间', assignee: '负责人', priority: '优先级' };
+
+  function openRuleEditor(ruleId) {
+    var rules = getRules();
+    var existing = ruleId ? rules.filter(function(r) { return r.id === ruleId; })[0] : null;
+    var rule = existing ? JSON.parse(JSON.stringify(existing)) : blankRule();
+    _editingRuleId = existing ? existing.id : null;
+
+    var html = '<div class="rule-editor">';
+    // 名称 + 启用
+    html += '<div class="form-row">';
+    html += '<div class="form-group" style="flex:2"><label class="form-label">规则名称</label><input class="form-input" id="re-name" value="' + escapeAttr(rule.name) + '"></div>';
+    html += '<div class="form-group" style="flex:0 0 90px"><label class="form-label">启用</label><label class="switch"><input type="checkbox" id="re-enabled" ' + (rule.enabled ? 'checked' : '') + '><span class="slider"></span></label></div>';
+    html += '</div>';
+    // 触发词
+    html += '<div class="form-group"><label class="form-label">触发关键词（粘贴内容含任一词即优先选用，逗号分隔；留空 = 兜底规则）</label><input class="form-input" id="re-triggers" value="' + escapeAttr((rule.triggers || []).join('，')) + '" placeholder="如：竞聘，9月事项，新生"></div>';
+    // 行内字段分隔符（分隔符模式）
+    html += '<div class="form-group"><label class="form-label">行内字段分隔符（留空 = 按整行智能提取；填「|」或「,」等可将一行拆列，再用下方「指定列」精确取字段）</label><input class="form-input" id="re-rowDelim" value="' + escapeAttr(rule.rowDelimiter || '') + '" placeholder="如： |  或  ， （单字符）"></div>';
+
+    // —— 字段配置 ——
+    html += '<h4 class="rule-sec-title">字段配置（勾选即提取该列；可设「指定列」用分隔符精确取数，或设必填）</h4>';
+    html += '<div class="rule-fields">';
+    ['title', 'dueDate', 'time', 'assignee', 'priority'].forEach(function(k) {
+      var fc = rule.fields[k] || {};
+      var method = fc.method || (k === 'title' ? 'remainder' : 'auto');
+      html += '<div class="rule-field-row">';
+      html += '<label class="switch switch-sm"><input type="checkbox" id="re-f-' + k + '" ' + (fc.enabled !== false ? 'checked' : '') + '><span class="slider"></span></label>';
+      html += '<span class="rule-field-label">' + _FIELD_LABELS[k] + '</span>';
+      // 提取方式：自动 / 指定列
+      html += '<span class="rule-field-opts">';
+      html += '<label class="chk-inline">方式<select class="form-input re-method" data-key="' + k + '" style="width:auto;display:inline-block;padding:2px 6px;margin-left:4px">' +
+        '<option value="' + (k === 'title' ? 'remainder' : 'auto') + '"' + (method === 'auto' || method === 'remainder' ? ' selected' : '') + '>自动</option>' +
+        '<option value="column"' + (method === 'column' ? ' selected' : '') + '>指定列</option>' +
+        '</select></label>';
+      html += '<label class="chk-inline">列号<input type="number" min="0" class="form-input re-col" data-key="' + k + '" value="' + (typeof fc.col === 'number' ? fc.col : 0) + '" style="width:54px;padding:2px 6px;margin-left:4px"></label>';
+      html += '</span>';
+      if (k === 'dueDate') {
+        var fmts = fc.formats || [];
+        var fmtDefs = [['YMD', '年-月-日'], ['MD_CN', 'M月D日'], ['MD_DOT', 'M.D / M/D'], ['MD_HAO', 'M号'], ['WEEKDAY', '星期/周X'], ['RELATIVE', '今天/明天'], ['RANGE', '区间 M-M']];
+        html += '<span class="rule-field-opts">';
+        fmtDefs.forEach(function(fd) {
+          html += '<label class="chk-inline"><input type="checkbox" class="re-dfmt" data-fmt="' + fd[0] + '" ' + (fmts.indexOf(fd[0]) >= 0 ? 'checked' : '') + '> ' + fd[1] + '</label>';
+        });
+        html += '<label class="chk-inline"><input type="checkbox" id="re-rangeLatest" ' + (fc.rangeLatest ? 'checked' : '') + '> 区间取最晚</label>';
+        html += '</span>';
+      }
+      if (k === 'assignee') {
+        var mk = fc.markers || [];
+        var mkDefs = [['at', '@姓名'], ['colon', '负责人：'], ['parens', '（姓名）'], ['dash', '行尾—姓名'], ['role', '请各位主管']];
+        html += '<span class="rule-field-opts">';
+        mkDefs.forEach(function(md) {
+          html += '<label class="chk-inline"><input type="checkbox" class="re-marker" data-mk="' + md[0] + '" ' + (mk.indexOf(md[0]) >= 0 ? 'checked' : '') + '> ' + md[1] + '</label>';
+        });
+        html += '</span>';
+      }
+      if (k === 'priority') {
+        html += '<span class="rule-field-opts"><input class="form-input" id="re-prio-kw" value="' + escapeAttr((fc.keywords || []).join('，')) + '" placeholder="关键词逗号分隔" style="width:200px"></span>';
+      }
+      if (k !== 'title') {
+        html += '<label class="chk-inline rule-req"><input type="checkbox" id="re-req-' + k + '" ' + (fc.required ? 'checked' : '') + '> 必填</label>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+
+    // —— 行级过滤 ——
+    html += '<h4 class="rule-sec-title">跳过项（识别为说明而非任务行）</h4>';
+    html += '<div class="rule-filters">';
+    var lfDefs = [
+      ['skipReply', '回复块（收到回复后整段跳过）'],
+      ['skipSectionHeaders', '章节标题（👉一、/ 一、事项）'],
+      ['skipNegative', '否定式告诫（不见…不…）'],
+      ['skipEmailLines', '邮件/抄送行（无日期才跳过）'],
+      ['skipPreface', '前言引出句（另有…说明）'],
+      ['skipNotice', '通知行（以上是/现将/各位…）'],
+      ['groupBackfill', '分组后置截止（以上N项+日期回填）']
+    ];
+    lfDefs.forEach(function(lfd) {
+      html += '<label class="chk-inline"><input type="checkbox" id="re-lf-' + lfd[0] + '" ' + (rule.lineFilters[lfd[0]] ? 'checked' : '') + '> ' + lfd[1] + '</label>';
+    });
+    html += '</div>';
+
+    // —— 实时测试 ——
+    html += '<h4 class="rule-sec-title">实时测试（按当前配置即时解析）</h4>';
+    html += '<textarea id="re-test-input" class="form-input" rows="4" style="font-family:var(--font-mono);font-size:12px" placeholder="在此粘贴示例文本，下方即时显示提取结果…"></textarea>';
+    html += '<div id="re-test-preview" style="margin-top:10px"></div>';
+    html += '</div>';
+
+    App.util.modal({
+      title: existing ? ('编辑规则 · ' + rule.name) : '新建提取规则',
+      content: html,
+      showCancel: true,
+      confirmText: '保存规则',
+      onConfirm: function(close) { saveRuleFromForm(existing ? existing.id : null, close); }
+    });
+
+    var ta = document.getElementById('re-test-input');
+    if (ta) {
+      ta.addEventListener('input', ruleTestInput);
+      ta.value = '@示例 提交周报 8月20日 紧急\n下周三前 完成排课 — 李教务\n9.14--9.18 集团竞聘述职';
+      ruleTestInput();
+    }
+  }
+
+  function gatherRuleFromForm() {
+    var name = ((document.getElementById('re-name') || {}).value || '').trim() || '新规则';
+    var enabled = document.getElementById('re-enabled') ? document.getElementById('re-enabled').checked : true;
+    var triggers = ((document.getElementById('re-triggers') || {}).value || '').split(/[，,\s]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+    var rowDelim = ((document.getElementById('re-rowDelim') || {}).value || '').trim();
+    var fields = {};
+    ['title', 'dueDate', 'time', 'assignee', 'priority'].forEach(function(k) {
+      var en = document.getElementById('re-f-' + k) ? document.getElementById('re-f-' + k).checked : false;
+      var methodSel = document.querySelector('.re-method[data-key="' + k + '"]');
+      var colInp = document.querySelector('.re-col[data-key="' + k + '"]');
+      var method = methodSel ? methodSel.value : (k === 'title' ? 'remainder' : 'auto');
+      var col = colInp ? parseInt(colInp.value, 10) || 0 : 0;
+      var base = { key: k, label: _FIELD_LABELS[k], enabled: en, required: false, method: method, col: col };
+      if (k === 'title' && method === 'auto') base.method = 'remainder';
+      if (k === 'dueDate') {
+        var fmts = []; document.querySelectorAll('.re-dfmt:checked').forEach(function(c) { fmts.push(c.getAttribute('data-fmt')); });
+        base.formats = fmts;
+        base.rangeLatest = document.getElementById('re-rangeLatest') ? document.getElementById('re-rangeLatest').checked : true;
+      }
+      if (k === 'assignee') {
+        var mk = []; document.querySelectorAll('.re-marker:checked').forEach(function(c) { mk.push(c.getAttribute('data-mk')); });
+        base.markers = mk;
+      }
+      if (k === 'priority') {
+        base.keywords = ((document.getElementById('re-prio-kw') || {}).value || '').split(/[，,\s]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+      }
+      if (k !== 'title') { base.required = document.getElementById('re-req-' + k) ? document.getElementById('re-req-' + k).checked : false; }
+      fields[k] = base;
+    });
+    var lf = {};
+    ['skipReply', 'skipSectionHeaders', 'skipNegative', 'skipEmailLines', 'skipPreface', 'skipNotice', 'groupBackfill'].forEach(function(k) {
+      lf[k] = document.getElementById('re-lf-' + k) ? document.getElementById('re-lf-' + k).checked : false;
+    });
+    return { name: name, enabled: enabled, triggers: triggers, lineDelimiter: '\\n', rowDelimiter: rowDelim, fields: fields, lineFilters: lf };
+  }
+
+  function ruleTestInput() {
+    var ta = document.getElementById('re-test-input');
+    var box = document.getElementById('re-test-preview');
+    if (!ta || !box) return;
+    var r = gatherRuleFromForm();
+    r.id = _editingRuleId || 'rule_test';
+    var result = parseWithRule(r, ta.value, new Date());
+    box.innerHTML = renderPasteBanner(result, r) + (result.items.length ? renderPreviewTable(result, r, 'rt') : '') + renderSkipped(result);
+  }
+
+  function saveRuleFromForm(existingId, close) {
+    var rules = getRules();
+    var r = gatherRuleFromForm();
+    if (existingId) {
+      var idx = rules.map(function(x) { return x.id; }).indexOf(existingId);
+      if (idx >= 0) {
+        r.id = existingId;
+        r.isDefault = rules[idx].isDefault;
+        rules[idx] = r;
+      } else { rules.push(r); }
+    } else {
+      r.id = 'rule_' + Date.now().toString(36);
+      if (rules.length === 0) { r.isDefault = true; App.store.set('settings.defaultRuleId', r.id); }
+      rules.push(r);
+    }
+    saveRules(rules);
+    App.util.toast('规则已保存', 'ok');
+    if (close) close();
+    if (document.getElementById('rules-list-wrap')) renderRulesList();
     App.router.resolve();
   }
 
@@ -956,76 +1314,86 @@
     var n = 0; for (var i = 0; i < s.length; i++) n += (_CN_NUM[s[i]] || 0); return n;
   }
 
-  /**
-   * 粘贴文本解析主入口（v2：输出结构化结果 + 跳过清单 + 每项置信度）
-   * 返回 { items, skipped, linesCount }
-   *  - items: 待办数组，含 title/dueDate/timeText/assignee/priority/confidence/warnings/_raw
-   *  - skipped: [{line, reason}] 被识别为说明/邮件/回复块而跳过的原始行
-   */
-  function parsePasteText(text, base) {
+  /* ---------------- 规则驱动解析引擎 ---------------- */
+  function getRules() {
+    var r = App.store.get('settings.extractionRules');
+    return Array.isArray(r) ? r : [];
+  }
+  function saveRules(rules) { App.store.set('settings.extractionRules', rules); }
+  function getDefaultRuleId() { return App.store.get('settings.defaultRuleId'); }
+
+  // 自动选规则：触发词命中数最多者优先；都未命中则回退默认/第一条
+  function selectRule(rules, text) {
+    var enabled = (rules || []).filter(function(r) { return r && r.enabled; });
+    if (!enabled.length) return null;
+    var best = null, bestScore = -1;
+    enabled.forEach(function(r) {
+      var score = 0;
+      (r.triggers || []).forEach(function(t) { if (t && text.indexOf(t) >= 0) score++; });
+      if (r.isDefault) score += 0.5;
+      if (score > bestScore) { bestScore = score; best = r; }
+    });
+    if (bestScore <= 0) {
+      var def = enabled.filter(function(r) { return r.isDefault; })[0];
+      return def || enabled[0] || null;
+    }
+    return best;
+  }
+
+  // 主入口（兼容旧签名）：未指定 rule 时自动选默认规则
+  function parsePasteText(text, base, rule) {
+    if (!rule) {
+      var rules = getRules();
+      rule = selectRule(rules, text) || rules[0];
+    }
+    if (!rule) return { items: [], skipped: [], linesCount: 0, errors: [] };
+    return parseWithRule(rule, text, base);
+  }
+
+  // 规则驱动解析（输出 items + skipped + errors；errors 为必填缺失的行下标）
+  function parseWithRule(rule, text, base) {
     if (!base) base = new Date();
     var lines = (text || '').split(/\r?\n/);
-    var items = [];
-    var skipped = [];
-    var lastGroupCount = 0;   // 来自「以上N项」
-    var inReply = false;      // 回复块之后不再当作任务
+    var items = [], skipped = [], errors = [];
+    var lastGroupCount = 0, inReply = false;
+    var lf = rule.lineFilters || {};
 
     lines.forEach(function (orig) {
       var line = (orig || '').trim();
       if (!line) return;
 
-      // 1) 回复块：收到回复 / 回复：之后均为留言，跳过
-      if (/^(收到回复|回复[:：]|回复如下|医生回复[:：]?)/.test(line)) {
-        inReply = true;
-        skipped.push({ line: line, reason: '回复块' });
-        return;
+      if (lf.skipReply && /^(收到回复|回复[:：]|回复如下|医生回复[:：]?)/.test(line)) {
+        inReply = true; skipped.push({ line: line, reason: '回复块' }); return;
       }
       if (inReply) { skipped.push({ line: line, reason: '回复块' }); return; }
 
-      // 0) 顶级章节标题（👉一、 / ▶二、 + 章节名词）→ 跳过，不当作任务
-      if (isSectionHeader(line)) { skipped.push({ line: line, reason: '章节标题' }); return; }
+      if (lf.skipSectionHeaders && isSectionHeader(line)) { skipped.push({ line: line, reason: '章节标题' }); return; }
 
-      // 2) 去掉行首序号 + emoji：先 emoji（顶格 👇）→ 再阿拉伯/中文序号
-      var content = line
-        .replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{2700}-\u{27BF}]/gu, '')
-        .replace(/^[一二三四五六七八九十]+[、.)\s]\s*/, '')
-        .replace(/^\d+[、)]\s*/, '')
-        // 阿拉伯序号 + 点仅当点后紧接非数字/点（"1." → 中文）才删；避免吞日期"9.9"
-        .replace(/^\d+[.]\s*(?=[^\d.])/, '');
-      content = content.trim();
+      var content = stripLeading(line);
       if (!content) return;
 
-      // 3) 分组指令行：以上N项…（含或不含完成日期）
-      var gfm = content.match(/^以上\s*([一二三四五六七八九十两俩\d]+)\s*项/);
-      if (gfm) {
-        lastGroupCount = cnToNum(gfm[1]);
-        var gd = parseDate(content, base);
-        if (gd && lastGroupCount) { applyDueToLast(items, lastGroupCount, gd); lastGroupCount = 0; }
-        skipped.push({ line: line, reason: '分组后置截止指令' });
-        return;
-      }
-
-      // 4) 单独的完成/截止指令行：本周六完成 / 今日完成
-      if (/完成|截止/.test(content) && isShortDirective(content)) {
-        var d = parseDate(content, base);
-        if (d) {
-          var n = lastGroupCount || countTasksWithoutDue(items);
-          applyDueToLast(items, n, d);
-          lastGroupCount = 0;
-          skipped.push({ line: line, reason: '截止指令' });
-          return;
+      if (lf.groupBackfill) {
+        var gfm = content.match(/^以上\s*([一二三四五六七八九十两俩\d]+)\s*项/);
+        if (gfm) {
+          lastGroupCount = cnToNum(gfm[1]);
+          var gd = parseDate(content, base, rule);
+          if (gd && gd.date && lastGroupCount) { applyDueToLast(items, lastGroupCount, gd); lastGroupCount = 0; }
+          skipped.push({ line: line, reason: '分组后置截止指令' }); return;
+        }
+        if (/完成|截止/.test(content) && isShortDirective(content)) {
+          var d = parseDate(content, base, rule);
+          if (d && d.date) {
+            var n = lastGroupCount || countTasksWithoutDue(items);
+            applyDueToLast(items, n, d); lastGroupCount = 0;
+            skipped.push({ line: line, reason: '截止指令' }); return;
+          }
         }
       }
 
-      // 5) 其它说明性标题行（真实条目如「针对家长…跟进」放行）
-      var hdrReason = classifyAsHeader(content);
-      if (hdrReason) {
-        skipped.push({ line: line, reason: hdrReason });
-        return;
-      }
+      var hdrReason = classifyAsHeader(content, rule);
+      if (hdrReason) { skipped.push({ line: line, reason: hdrReason }); return; }
 
-      // 6) 解析为任务
-      var item = extractOne(content, base);
+      var item = extractOne(content, base, rule);
       if (item && item.title && isMeaningfulTitle(item.title)) {
         items.push(item);
       } else if (item) {
@@ -1035,22 +1403,65 @@
       }
     });
 
-    return { items: items, skipped: skipped, linesCount: lines.length };
+    // 必填字段校验
+    var reqFields = requiredFields(rule);
+    items.forEach(function(it, i) {
+      it._errors = [];
+      reqFields.forEach(function(f) {
+        var v = it[f.key];
+        if (!v) it._errors.push(f.label + '缺失');
+      });
+      if (it._errors.length) errors.push(i);
+    });
+
+    return { items: items, skipped: skipped, linesCount: lines.length, errors: errors };
   }
 
-  // 说明/邮件/否定句分类：返回 reason 字符串（可优化为命中 token）；null 表示不是 header
-  function classifyAsHeader(content) {
+  function requiredFields(rule) {
+    var out = [];
+    var f = rule.fields || {};
+    Object.keys(f).forEach(function(k) {
+      var fc = f[k];
+      if (fc && fc.enabled !== false && fc.required) out.push({ key: k, label: fc.label || k });
+    });
+    return out;
+  }
+
+  function orderedEnabledFields(rule) {
+    var f = rule.fields || {};
+    var order = ['dueDate', 'time', 'assignee', 'priority'];
+    var out = [];
+    order.forEach(function(k) {
+      var fc = f[k];
+      if (fc && fc.enabled !== false) out.push({ key: k, label: fc.label || k, required: !!fc.required });
+    });
+    return out;
+  }
+
+  // 行首清洗：emoji → 中文序号 → 阿拉伯序号（点后必须非数字）→ trim（顺序不能换）
+  function stripLeading(line) {
+    return line
+      .replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{2700}-\u{27BF}]/gu, '')
+      .replace(/^[一二三四五六七八九十]+[、.)\s]\s*/, '')
+      .replace(/^\d+[、)]\s*/, '')
+      .replace(/^\d+[.]\s*(?=[^\d.])/, '')
+      .trim();
+  }
+
+  // 说明/邮件/否定句分类：受 rule.lineFilters 开关控制；返回 reason 字符串；null 表示不是 header
+  function classifyAsHeader(content, rule) {
+    var lf = (rule && rule.lineFilters) || {};
     // 前言/引出句：另有几项事项说明 / 以下是安排 / 共X项任务 等
-    if (/^(另有|还有|以下是?|现|今|共(?:有)?)\s*[\d几数多若干]+?\s*(?:项|个)?\s*(?:事项|任务|安排|说明|通知|要求|工作|部署|如下|以下)/.test(content)) return '说明引出句';
-    if (content.length >= 6 && /^(以上是|以下是|现将|现就|特此|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|注意[:：]?|任务如下|有如下|有以下|邮件发送|抄送|主送|发件人|收件人|转发|令)/.test(content)) return '邮件/说明行';
-    if (/^(针对|关于|根据|按照|请各|请将|请于|请在)/.test(content)) {
+    if (lf.skipPreface && /^(另有|还有|以下是?|现|今|共(?:有)?)\s*[\d几数多若干]+?\s*(?:项|个)?\s*(?:事项|任务|安排|说明|通知|要求|工作|部署|如下|以下)/.test(content)) return '说明引出句';
+    if (lf.skipNotice && content.length >= 6 && /^(以上是|以下是|现将|现就|特此|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|注意[:：]?|任务如下|有如下|有以下|邮件发送|抄送|主送|发件人|收件人|转发|令)/.test(content)) return '邮件/说明行';
+    if (lf.skipNotice && /^(针对|关于|根据|按照|请各|请将|请于|请在)/.test(content)) {
       if (/(有以下|有如下|任务如下|几项任务|以下任务|如下[:：]|任务清单|安排如下|具体任务)/.test(content)) return '说明引出句';
     }
     // 否定式限定/告诫：不见、不接、不准、不要、禁止、严禁、不允许、拒绝、绝不
-    if (/^(不见|不接|不准|不要|禁止|严禁|不允许|拒绝|绝不|不允许)[\u4e00-\u9fa5]/.test(content)) return '否定式告诫';
+    if (lf.skipNegative && /^(不见|不接|不准|不要|禁止|严禁|不允许|拒绝|绝不|不允许)[\u4e00-\u9fa5]/.test(content)) return '否定式告诫';
     // 邮件/通知 类时间戳行：仅有时间属性且不含具体日期 → 跳过；
     // 含具体事项 + 日期（如「竞聘邮件发送时间：8.21号」）→ 视为任务，向下交给 extractOne
-    if (/(发送时间|发送日期|发件时间|发送期限|提交时间|通知时间|到期时间|截止时间|截止日期)/.test(content)) {
+    if (lf.skipEmailLines && /(发送时间|发送日期|发件时间|发送期限|提交时间|通知时间|到期时间|截止时间|截止日期)/.test(content)) {
       if (!hasDateHint(content)) return '邮件时间说明';
     }
     return null;
@@ -1118,29 +1529,73 @@
    *   4) 标题 = 原行 - 日期片段 - 星期括号 - 优先级词 - 负责人残留 - emoji - 边界标点
    *   5) compute confidence + warnings
    */
-  function extractOne(line, base) {
+  function extractOne(line, base, rule) {
     var raw = line;
-    var working = line;
+    var f = (rule && rule.fields) || {};
+
+    // 分隔符模式：按 rowDelimiter 把一行拆成列，被「指定列」字段占用的列从自动文本中剔除
+    var cols = null, working;
+    if (rule && rule.rowDelimiter) {
+      cols = line.split(rule.rowDelimiter).map(function(c) { return c.trim(); });
+      var consumed = {};
+      Object.keys(f).forEach(function(k) {
+        var fc = f[k];
+        if (fc && fc.enabled !== false && fc.method === 'column' && typeof fc.col === 'number') consumed[fc.col] = true;
+      });
+      working = cols.filter(function(c, i) { return !consumed[i]; }).join(' ');
+    } else {
+      working = line;
+    }
 
     // 1) 负责人
-    var ap = extractAssignee(working);
-    var assignee = ap.assignee;
-    working = ap.rest;
+    var assignee = '';
+    var af = f.assignee;
+    if (af && af.enabled !== false) {
+      if (af.method === 'column' && typeof af.col === 'number' && cols && cols[af.col] !== undefined) {
+        assignee = cols[af.col].replace(/^负责人[：:]\s*/, '').trim();
+      } else {
+        var ap = extractAssignee(working, af);
+        assignee = ap.assignee;
+        working = ap.rest;
+      }
+    }
 
     // 2) 日期
-    var dp = parseDate(working, base);
-    var dueDate = dp.date;
-    var timeText = dp.timeText;
-
-    // 去掉日期片段 + 星期括号（"（周三）" 这种星期标签括号，不再被误作负责人）
-    working = stripDateAndWeekday(working);
+    var dueDate = '', timeText = '';
+    var df = f.dueDate;
+    if (df && df.enabled !== false) {
+      if (df.method === 'column' && typeof df.col === 'number' && cols && cols[df.col] !== undefined) {
+        var dpc = parseDate(cols[df.col], base, rule);
+        dueDate = dpc.date || '';
+        timeText = dpc.timeText || '';
+      } else {
+        var dp = parseDate(working, base, rule);
+        dueDate = dp.date || '';
+        timeText = dp.timeText || '';
+        working = stripDateAndWeekday(working);
+      }
+    }
 
     // 3) 优先级
-    var priority = detectPriority(raw);
-    working = stripPriority(working);
+    var priority = 'normal';
+    var pf = f.priority;
+    if (pf && pf.enabled !== false) {
+      if (pf.method === 'column' && typeof pf.col === 'number' && cols && cols[pf.col] !== undefined) {
+        priority = detectPriority(cols[pf.col], pf);
+      } else {
+        priority = detectPriority(raw, pf);
+        working = stripPriority(working);
+      }
+    }
 
     // 4) 清洗标题
-    var title = cleanTitle(working);
+    var title = '';
+    var tf = f.title;
+    if (tf && tf.method === 'column' && typeof tf.col === 'number' && cols && cols[tf.col] !== undefined) {
+      title = cleanTitle(cols[tf.col]);
+    } else {
+      title = cleanTitle(working);
+    }
     if (!title) return null;
 
     // 5) 置信度
@@ -1149,7 +1604,7 @@
       hasDate: !!dueDate,
       hasTime: !!timeText,
       hasAssignee: !!assignee,
-      dateConfidence: dp.dateConfidence
+      dateConfidence: (f.dueDate && f.dueDate.enabled !== false && dueDate) ? 'high' : null
     });
     var warnings = [];
     if (!dueDate) warnings.push('未能识别日期');
@@ -1159,13 +1614,14 @@
       title: title,
       assignee: assignee || '',
       dueDate: dueDate || '',
+      time: timeText || '',
       timeText: timeText || '',
       priority: priority,
       confidence: confidence,
       warnings: warnings,
       status: 'todo',
       _raw: raw,
-      _dateRaw: dp.raw
+      _dateRaw: ''
     };
   }
 
@@ -1228,72 +1684,92 @@
    *  - 8.21号 / 8月21号 ：high
    *  - 「13:00单独时间」返回 null + timeText
    */
-  function parseDate(text, base) {
+  function parseDate(text, base, rule) {
     if (!text) return { date: null, dateConfidence: null, raw: '', timeText: '' };
+    var df = (rule && rule.fields) ? rule.fields.dueDate : null;
+    var fmts = df ? (df.formats || null) : null;   // null = 全部启用
+    var allow = function (k) { return !fmts || fmts.indexOf(k) >= 0; };
 
     // 时间片段只识别「数字:数字」（不识别点号"9.10" → "9:10" 那是日期）
     var tm = text.match(/\b([01]?\d|2[0-3])[:：]\s*([0-5]\d)\b/);
-    var timeText = tm ? (tm[1].length <= 2 ? tm[1] + ':' : '') : '';
+    var timeText = '';
     if (tm) timeText = tm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
 
     // 1) 完整年-月-日 2026-08-20 / 2026/8/20
-    var m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-    if (m) {
-      var d1 = ymdStr(+m[1], +m[2], +m[3]);
-      if (d1) return { date: d1, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    if (allow('YMD')) {
+      var m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+      if (m) {
+        var d1 = ymdStr(+m[1], +m[2], +m[3]);
+        if (d1) return { date: d1, dateConfidence: 'high', raw: m[0], timeText: timeText };
+      }
     }
 
     // 2) M月D日 / M月D号
-    m = text.match(/(\d{1,2})月(\d{1,2})[日号]/);
-    if (m) {
-      var d2 = mdThisOrNextYear(+m[1], +m[2], base);
-      if (d2) return { date: d2, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    if (allow('MD_CN')) {
+      var m2 = text.match(/(\d{1,2})月(\d{1,2})[日号]/);
+      if (m2) {
+        var d2 = mdThisOrNextYear(+m2[1], +m2[2], base);
+        if (d2) return { date: d2, dateConfidence: 'high', raw: m2[0], timeText: timeText };
+      }
     }
 
     // 3) 多区间 MD--MD [&] MD--MD：单次全局扫描，找出每个 (from, to) 对，截止日取所有 to 的最晚
-    var rangeRe = /(\d{1,2})[\./](\d{1,2})\s*[-–—~到至]+\s*(\d{1,2})[\./](\d{1,2})/g;
-    var rangeMatches = [];
-    var rm;
-    while ((rm = rangeRe.exec(text)) !== null) {
-      var toDate = mdPairNum(+rm[3], +rm[4], base);
-      var fromDate = mdPairNum(+rm[1], +rm[2], base);
-      if (toDate) rangeMatches.push({ to: toDate, from: fromDate, raw: rm[0] });
-    }
-    if (rangeMatches.length) {
-      rangeMatches.sort(function (a, b) { return a.to < b.to ? -1 : 1; });
-      var latest = rangeMatches[rangeMatches.length - 1];
-      return { date: latest.to, dateConfidence: 'medium', raw: latest.raw, timeText: timeText };
-    }
-
-    // 4) 单日期 M/D 或 M.D（允许括号周X跟在后面）
-    m = text.match(/(\d{1,2})[\/.](\d{1,2})(?!\d)/);
-    if (m) {
-      var d4 = mdThisOrNextYear(+m[1], +m[2], base);
-      if (d4) return { date: d4, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    if (allow('RANGE') && df && df.rangeLatest) {
+      var rangeRe = /(\d{1,2})[\./](\d{1,2})\s*[-–—~到至]+\s*(\d{1,2})[\./](\d{1,2})/g;
+      var rangeMatches = [];
+      var rm;
+      while ((rm = rangeRe.exec(text)) !== null) {
+        var toDate = mdPairNum(+rm[3], +rm[4], base);
+        var fromDate = mdPairNum(+rm[1], +rm[2], base);
+        if (toDate) rangeMatches.push({ to: toDate, from: fromDate, raw: rm[0] });
+      }
+      if (rangeMatches.length) {
+        rangeMatches.sort(function (a, b) { return a.to < b.to ? -1 : 1; });
+        var latest = rangeMatches[rangeMatches.length - 1];
+        return { date: latest.to, dateConfidence: 'medium', raw: latest.raw, timeText: timeText };
+      }
     }
 
-    // 5) 单独 M号 或 M号：xxxx（信封/邮件时间戳）
-    m = text.match(/(\d{1,2})[\./](\d{1,2})\s*号/);
-    if (m) {
-      var d5 = mdThisOrNextYear(+m[1], +m[2], base);
-      if (d5) return { date: d5, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    // 4) 单日期 M/D 或 M.D
+    if (allow('MD_DOT')) {
+      var m4 = text.match(/(\d{1,2})[\/.](\d{1,2})(?!\d)/);
+      if (m4) {
+        var d4 = mdThisOrNextYear(+m4[1], +m4[2], base);
+        if (d4) return { date: d4, dateConfidence: 'high', raw: m4[0], timeText: timeText };
+      }
+    }
+
+    // 5) 单独 M号 / M号（信封/邮件时间戳）
+    if (allow('MD_HAO')) {
+      var m5 = text.match(/(\d{1,2})[\./](\d{1,2})\s*号/);
+      if (m5) {
+        var d5 = mdThisOrNextYear(+m5[1], +m5[2], base);
+        if (d5) return { date: d5, dateConfidence: 'high', raw: m5[0], timeText: timeText };
+      }
     }
 
     // 6) 相对星期
-    var rd = parseRelativeWeekday(text, base);
-    if (rd) return { date: rd, dateConfidence: 'high', raw: text.match(/(本周|这周|下周|下个?周|上周|上個?周)?\s*(?:周|星期)\s*[一二三四五六日天]|\b[一二三四五六日天]周(?:[一二三四五六日天])?/)[0], timeText: timeText };
+    if (allow('WEEKDAY')) {
+      var rd = parseRelativeWeekday(text, base);
+      if (rd) {
+        var wm = text.match(/(本周|这周|下周|下个?周|上周|上個?周)?\s*(?:周|星期)\s*[一二三四五六日天]|\b[一二三四五六日天]周(?:[一二三四五六日天])?/);
+        return { date: rd, dateConfidence: 'high', raw: wm ? wm[0] : '', timeText: timeText };
+      }
+    }
 
     // 7) 今天/明天/后天
-    if (/明天|明日/.test(text)) {
-      var dt = new Date(base); dt.setDate(dt.getDate() + 1);
-      return { date: App.util.formatDate(dt, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '明天', timeText: timeText };
-    }
-    if (/后天/.test(text)) {
-      var dt2 = new Date(base); dt2.setDate(dt2.getDate() + 2);
-      return { date: App.util.formatDate(dt2, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '后天', timeText: timeText };
-    }
-    if (/今天|今日|今晚/.test(text)) {
-      return { date: App.util.formatDate(base, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '今天', timeText: timeText };
+    if (allow('RELATIVE')) {
+      if (/明天|明日/.test(text)) {
+        var dt = new Date(base); dt.setDate(dt.getDate() + 1);
+        return { date: App.util.formatDate(dt, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '明天', timeText: timeText };
+      }
+      if (/后天/.test(text)) {
+        var dt2 = new Date(base); dt2.setDate(dt2.getDate() + 2);
+        return { date: App.util.formatDate(dt2, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '后天', timeText: timeText };
+      }
+      if (/今天|今日|今晚/.test(text)) {
+        return { date: App.util.formatDate(base, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '今天', timeText: timeText };
+      }
     }
 
     // 仅时间无日期
@@ -1357,28 +1833,31 @@
   var _BLACK_PARENS = /^(?:周[一二三四五六日天]|星期[一二三四五六日天]|全员|不限制|不限|不参与|不请假|均不|均需|所有|全部|普通|高层|基层|统一|同时|自定|自定义|TBD|TBA|TBC|N\/A|na|n\/a|[一二三四五六日天]|可接可不接)$/i;
   var _NAME_RE = /[\u4e00-\u9fa5·]{2,6}/;
 
-  function extractAssignee(text) {
+  function extractAssignee(text, cfg) {
+    var markers = (cfg && cfg.markers) || ['at', 'colon', 'parens', 'dash', 'role'];
     var assignee = '';
     var rest = text;
 
     // 1. @姓名
-    var m = rest.match(/@([^\s，。；、,;：:）)】\]]+)/);
-    if (m && _NAME_RE.test(m[1])) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    if (markers.indexOf('at') >= 0) {
+      var m = rest.match(/@([^\s，。；、,;：:）)】\]]+)/);
+      if (m && _NAME_RE.test(m[1])) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    }
 
     // 2. 负责人：姓名
-    if (!assignee) {
+    if (!assignee && markers.indexOf('colon') >= 0) {
       m = rest.match(/负责人[：:\s]*([^\s，。；、,;]{1,10}?)(?=[，,。；;：:、\s)]|$)/);
       if (m && _NAME_RE.test(m[1].trim())) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
     }
 
     // 2.5 请各位/各/全体 + 角色（主管/老师/经理…）→ 负责人
-    if (!assignee) {
+    if (!assignee && markers.indexOf('role') >= 0) {
       m = rest.match(/请\s*(?:各位|各|全体|所有)?\s*([\u4e00-\u9fa5]{0,4}(?:主管|老师|经理|校长|组长|负责人|专员|部长|主任|科长|教务|客服|科组))/);
       if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
     }
 
     // 3. （姓名）或(姓名) — 但只接受"明确人名特征"的（如带"老师"/"经理"/"主管"/"校长"等）或 2~6 字姓名
-    if (!assignee) {
+    if (!assignee && markers.indexOf('parens') >= 0) {
       m = rest.match(/[（(]([\u4e00-\u9fa5·]{2,6})[）)]/);
       if (m) {
         var cand = m[1].trim();
@@ -1387,7 +1866,7 @@
     }
 
     // 4. 行尾 — 姓名 / - 姓名（破折号接 2~6 字姓名）
-    if (!assignee) {
+    if (!assignee && markers.indexOf('dash') >= 0) {
       m = rest.match(/[—\-–=]\s*([\u4e00-\u9fa5·]{2,6})\s*$/);
       if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
     }
@@ -1395,9 +1874,14 @@
     return { assignee: assignee, rest: rest };
   }
 
-  function detectPriority(text) {
-    if (/紧急|加急|特急|尽快|🔴/.test(text)) return 'urgent';
-    if (/重要|高优|⚠/.test(text)) return 'high';
+  function detectPriority(text, cfg) {
+    var kws = (cfg && cfg.keywords) || [];
+    var urgentMark = ['紧急', '加急', '特急', '尽快', '🔴'];
+    var highMark = ['重要', '高优', '⚠'];
+    var custom = kws.filter(function (k) { return urgentMark.indexOf(k) < 0 && highMark.indexOf(k) < 0; });
+    if (urgentMark.some(function (k) { return text.indexOf(k) >= 0; })) return 'urgent';
+    if (highMark.some(function (k) { return text.indexOf(k) >= 0; })) return 'high';
+    if (custom.some(function (k) { return k && text.indexOf(k) >= 0; })) return 'high';
     return 'normal';
   }
 
@@ -1465,8 +1949,18 @@
     saveTask: saveTask,
     generateFromTimeline: generateFromTimeline,
     openPasteModal: openPasteModal,
+    onPasteRuleChange: onPasteRuleChange,
+    onPasteInput: onPasteInput,
     removePasteRow: removePasteRow,
     toggleAllPaste: toggleAllPaste,
+    // —— 规则管理 + 编辑器 ——
+    openRulesModal: openRulesModal,
+    openRuleEditor: openRuleEditor,
+    toggleRule: toggleRule,
+    setDefaultRule: setDefaultRule,
+    duplicateRule: duplicateRule,
+    deleteRule: deleteRule,
+    saveRuleFromForm: saveRuleFromForm,
     toggleHideDone: toggleHideDone,
     archiveTask: archiveTask,
     archiveAllDone: archiveAllDone,
