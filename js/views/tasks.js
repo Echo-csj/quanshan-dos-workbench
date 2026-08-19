@@ -23,6 +23,7 @@
 
   var dragId = null;
     var _pasteItems = [];              // 粘贴解析预览暂存
+  var _pasteSkipped = [];            // 被识别为说明/邮件/否定句而跳过的行
 
   /* ---------------- 路由 ---------------- */
   App.router.register('/tasks', function() {
@@ -817,11 +818,12 @@
     var ex = document.querySelector('.modal-overlay');
     if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
     _pasteItems = [];
+    _pasteSkipped = [];
 
     var html = '';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">从工作群复制内容粘贴到下方，系统自动识别 <b>事项 / 负责人 / 时间</b>。每行一条；支持 ' +
       '<code>@张三</code>、<code>负责人：张三</code>、<code>（张三）</code>、<code>8月20日</code>、<code>下周三</code>、<code>明天</code> 等格式。' +
-      '还支持「<b>以上N项 + 日期完成</b>」批量设截止日、自动跳过「抄送/邮件发送/收到回复」等说明行。解析结果可勾选并编辑后再生成。</p>';
+      '还支持「<b>以上N项 + 日期完成</b>」批量设截止日、自动跳过「抄送/邮件发送/收到回复/否定式告诫」等说明行；每行右侧显示置信度。</p>';
     html += '<textarea id="paste-input" class="form-input" rows="6" style="font-family:var(--font-mono);font-size:12px" placeholder="示例：\n@张老师 完成次月预排课表 8月20日\n下周三前 提交教务周报 — 李教务\n（王主管）核对新生名单 截止8/25 紧急"></textarea>';
     html += '<div id="paste-preview" style="margin-top:14px"></div>';
 
@@ -844,35 +846,58 @@
   function onPasteInput() {
     var ta = document.getElementById('paste-input');
     if (!ta) return;
-    _pasteItems = parsePasteText(ta.value);
+    var result = parsePasteText(ta.value);
+    _pasteItems = result.items;
+    _pasteSkipped = result.skipped;
     renderPastePreview();
   }
 
   function renderPastePreview() {
     var box = document.getElementById('paste-preview');
     if (!box) return;
-    if (_pasteItems.length === 0) {
+    if (_pasteItems.length === 0 && _pasteSkipped.length === 0) {
       box.innerHTML = '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">粘贴文本后将在此预览解析结果，可勾选并编辑后生成。</p>';
       return;
     }
-    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-    html += '<span style="font-size:12px;color:var(--text-muted)">已识别 <b>' + _pasteItems.length + '</b> 条，可编辑后生成</span>';
-    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleAllPaste()">全选 / 取消</button>';
-    html += '</div>';
-    html += '<div class="paste-table">';
-    _pasteItems.forEach(function(it, i) {
-      html += '<div class="paste-row" data-idx="' + i + '">';
-      html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
-      html += '<textarea class="form-input paste-f paste-title" id="pp-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">' + escapeHtml(it.title) + '</textarea>';
-      html += '<div class="paste-meta">';
-      html += '<input class="form-input paste-f" id="pp-assignee-' + i + '" value="' + escapeAttr(it.assignee) + '" placeholder="负责人">';
-      html += '<input class="form-input paste-f" id="pp-due-' + i + '" type="date" value="' + escapeAttr(it.dueDate) + '">';
-      html += '<select class="form-input paste-f" id="pp-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
-      html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
+    var html = '';
+    if (_pasteItems.length === 0 && _pasteSkipped.length > 0) {
+      html += '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">全部 ' + _pasteSkipped.length + ' 行被识别为说明/邮件/否定告诫，未识别出待办事项。</p>';
+    } else {
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      html += '<span style="font-size:12px;color:var(--text-muted)">已识别 <b>' + _pasteItems.length + '</b> 条，可编辑后生成</span>';
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleAllPaste()">全选 / 取消</button>';
       html += '</div>';
+      html += '<div class="paste-table">';
+      _pasteItems.forEach(function(it, i) {
+        var conf = it.confidence || 'none';
+        var confLabel = ({ high: '高', medium: '中', low: '低', none: '未识别' })[conf] || '未识别';
+        var confColor = ({ high: 'var(--ok)', medium: 'var(--warn)', low: 'var(--text-muted)', none: 'var(--bad)' })[conf] || 'var(--bad)';
+        html += '<div class="paste-row" data-idx="' + i + '">';
+        html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
+        html += '<textarea class="form-input paste-f paste-title" id="pp-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">' + escapeHtml(it.title) + '</textarea>';
+        html += '<div class="paste-meta">';
+        html += '<input class="form-input paste-f" id="pp-assignee-' + i + '" value="' + escapeAttr(it.assignee) + '" placeholder="负责人">';
+        html += '<input class="form-input paste-f" id="pp-due-' + i + '" type="date" value="' + escapeAttr(it.dueDate) + '">';
+        html += '<select class="form-input paste-f" id="pp-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
+        html += '<span class="paste-conf" style="color:' + confColor + '" title="置信度: ' + conf + ' — ' + confHint(conf) + '">📅 ' + confLabel + '</span>';
+        html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
+        html += '</div>';
+        if (it.warnings && it.warnings.length) {
+          html += '<div class="paste-warning">⚠️ ' + escapeHtml(it.warnings.join(' · ')) + '</div>';
+        }
+        html += '</div>';
+      });
       html += '</div>';
-    });
-    html += '</div>';
+    }
+    // 跳过清单（可点击展开）
+    if (_pasteSkipped.length > 0) {
+      html += '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted)">⏭ 被识别为说明跳过 ' + _pasteSkipped.length + ' 行（点击展开）</summary>';
+      html += '<div style="margin-top:8px;padding:10px;background:var(--surface-2);border-radius:var(--radius);font-size:11px;color:var(--text-muted);line-height:1.7">';
+      _pasteSkipped.forEach(function(s) {
+        html += '<div style="margin-bottom:4px"><code style="color:var(--text-faint)">[' + escapeHtml(s.reason) + ']</code> ' + escapeHtml(s.line) + '</div>';
+      });
+      html += '</div></details>';
+    }
     box.innerHTML = html;
   }
 
@@ -931,23 +956,40 @@
     var n = 0; for (var i = 0; i < s.length; i++) n += (_CN_NUM[s[i]] || 0); return n;
   }
 
-  function parsePasteText(text) {
+  /**
+   * 粘贴文本解析主入口（v2：输出结构化结果 + 跳过清单 + 每项置信度）
+   * 返回 { items, skipped, linesCount }
+   *  - items: 待办数组，含 title/dueDate/timeText/assignee/priority/confidence/warnings/_raw
+   *  - skipped: [{line, reason}] 被识别为说明/邮件/回复块而跳过的原始行
+   */
+  function parsePasteText(text, base) {
+    if (!base) base = new Date();
     var lines = (text || '').split(/\r?\n/);
     var items = [];
-    var base = new Date();
+    var skipped = [];
     var lastGroupCount = 0;   // 来自「以上N项」
     var inReply = false;      // 回复块之后不再当作任务
 
-    lines.forEach(function(orig) {
+    lines.forEach(function (orig) {
       var line = (orig || '').trim();
       if (!line) return;
 
       // 1) 回复块：收到回复 / 回复：之后均为留言，跳过
-      if (/^(收到回复|回复[:：]|回复如下|医生回复[:：]?)/.test(line)) { inReply = true; return; }
-      if (inReply) return;
+      if (/^(收到回复|回复[:：]|回复如下|医生回复[:：]?)/.test(line)) {
+        inReply = true;
+        skipped.push({ line: line, reason: '回复块' });
+        return;
+      }
+      if (inReply) { skipped.push({ line: line, reason: '回复块' }); return; }
 
-      // 2) 去掉行首序号 / 项目符号
-      var content = line.replace(/^[\d]+[.、)]\s*/, '').replace(/^[-*•·]\s*/, '');
+      // 2) 去掉行首序号 + emoji：先 emoji（顶格 👇）→ 再阿拉伯/中文序号
+      var content = line
+        .replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{2700}-\u{27BF}]/gu, '')
+        .replace(/^[一二三四五六七八九十]+[、.)\s]\s*/, '')
+        .replace(/^\d+[、)]\s*/, '')
+        // 阿拉伯序号 + 点仅当点后紧接非数字/点（"1." → 中文）才删；避免吞日期"9.9"
+        .replace(/^\d+[.]\s*(?=[^\d.])/, '');
+      content = content.trim();
       if (!content) return;
 
       // 3) 分组指令行：以上N项…（含或不含完成日期）
@@ -956,35 +998,61 @@
         lastGroupCount = cnToNum(gfm[1]);
         var gd = parseDate(content, base);
         if (gd && lastGroupCount) { applyDueToLast(items, lastGroupCount, gd); lastGroupCount = 0; }
-        return; // 不当作任务
+        skipped.push({ line: line, reason: '分组后置截止指令' });
+        return;
       }
 
-      // 4) 单独的完成/截止指令行：本周六完成 / 今日完成（把日期填给上面 N 项）
+      // 4) 单独的完成/截止指令行：本周六完成 / 今日完成
       if (/完成|截止/.test(content) && isShortDirective(content)) {
         var d = parseDate(content, base);
         if (d) {
           var n = lastGroupCount || countTasksWithoutDue(items);
           applyDueToLast(items, n, d);
           lastGroupCount = 0;
+          skipped.push({ line: line, reason: '截止指令' });
           return;
         }
       }
 
       // 5) 其它说明性标题行（真实条目如「针对家长…跟进」放行）
-      if (isLikelyHeader(content)) return;
+      var hdrReason = classifyAsHeader(content);
+      if (hdrReason) {
+        skipped.push({ line: line, reason: hdrReason });
+        return;
+      }
 
       // 6) 解析为任务
-      var item = parseLine(content, base);
-      if (item && item.title && isMeaningfulTitle(item.title)) items.push(item);
+      var item = extractOne(content, base);
+      if (item && item.title && isMeaningfulTitle(item.title)) {
+        items.push(item);
+      } else if (item) {
+        skipped.push({ line: line, reason: '标题无意义' });
+      } else {
+        skipped.push({ line: line, reason: '未能识别' });
+      }
     });
 
-    return items;
+    return { items: items, skipped: skipped, linesCount: lines.length };
   }
 
-  function applyDueToLast(items, n, date) {
-    if (!date || n <= 0) return;
+  // 说明/邮件/否定句分类：返回 reason 字符串（可优化为命中 token）；null 表示不是 header
+  function classifyAsHeader(content) {
+    if (content.length >= 6 && /^(以上是|以下是|现将|现就|特此|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|注意[:：]?|任务如下|有如下|有以下|邮件发送|抄送|主送|发件人|收件人|转发|令)/.test(content)) return '邮件/说明行';
+    if (/^(针对|关于|根据|按照|请各|请将|请于|请在)/.test(content)) {
+      if (/(有以下|有如下|任务如下|几项任务|以下任务|如下[:：]|任务清单|安排如下|具体任务)/.test(content)) return '说明引出句';
+    }
+    // 否定式限定/告诫：不见、不接、不准、不要、禁止、严禁、不允许、拒绝、绝不
+    if (/^(不见|不接|不准|不要|禁止|严禁|不允许|拒绝|绝不|不要|不允许)[\u4e00-\u9fa5]/.test(content)) return '否定式告诫';
+    // 邮件/通知 类时间戳行：*邮件发送时间：xx号 / 通知时间 / 提交时间
+    if (/(发送时间|发送日期|发件时间|发送期限|提交时间|通知时间|到期时间|截止时间|截止日期)/.test(content)) return '邮件时间说明';
+    return null;
+  }
+
+  function applyDueToLast(items, n, dateOrGd) {
+    var dateStr = dateOrGd && dateOrGd.date !== undefined ? dateOrGd.date : dateOrGd;
+    if (!dateStr || n <= 0) return;
     var start = Math.max(0, items.length - n);
-    for (var i = start; i < items.length; i++) items[i].dueDate = date; // 分组截止日是权威日期
+    for (var i = start; i < items.length; i++) items[i].dueDate = dateStr; // 分组截止日是权威日期
   }
   function countTasksWithoutDue(items) {
     var c = 0; items.forEach(function(it) { if (!it.dueDate) c++; }); return c;
@@ -1019,37 +1087,202 @@
     return true;
   }
 
-  function parseLine(line, base) {
+  /**
+   * 单行解析（v2：结构化 + 置信度 + 不可识别警告）
+   * 流程：
+   *   1) extract assignee
+   *   2) extract date range (含 timeText)
+   *   3) extract priority
+   *   4) 标题 = 原行 - 日期片段 - 星期括号 - 优先级词 - 负责人残留 - emoji - 边界标点
+   *   5) compute confidence + warnings
+   */
+  function extractOne(line, base) {
     var raw = line;
-    var title = line;
-    var dueDate = parseDate(title, base);     // 仅提取，不改 title
-    var ap = extractAssignee(title);          // 提取并清理负责人
+    var working = line;
+
+    // 1) 负责人
+    var ap = extractAssignee(working);
     var assignee = ap.assignee;
-    title = ap.rest;
-    var priority = detectPriority(line);
-    title = cleanTitle(title);                // 清理日期/星期/优先级残留
+    working = ap.rest;
+
+    // 2) 日期
+    var dp = parseDate(working, base);
+    var dueDate = dp.date;
+    var timeText = dp.timeText;
+
+    // 去掉日期片段 + 星期括号（"（周三）" 这种星期标签括号，不再被误作负责人）
+    working = stripDateAndWeekday(working);
+
+    // 3) 优先级
+    var priority = detectPriority(raw);
+    working = stripPriority(working);
+
+    // 4) 清洗标题
+    var title = cleanTitle(working);
     if (!title) return null;
-    return { title: title, assignee: assignee || '', dueDate: dueDate || '', priority: priority, status: 'todo', _raw: raw };
+
+    // 5) 置信度
+    var confidence = computeConfidence({
+      hasTitle: !!title,
+      hasDate: !!dueDate,
+      hasTime: !!timeText,
+      hasAssignee: !!assignee,
+      dateConfidence: dp.dateConfidence
+    });
+    var warnings = [];
+    if (!dueDate) warnings.push('未能识别日期');
+    if (!assignee) warnings.push('未识别负责人');
+
+    return {
+      title: title,
+      assignee: assignee || '',
+      dueDate: dueDate || '',
+      timeText: timeText || '',
+      priority: priority,
+      confidence: confidence,
+      warnings: warnings,
+      status: 'todo',
+      _raw: raw,
+      _dateRaw: dp.raw
+    };
   }
 
-  // 返回 'YYYY-MM-DD' 或 null
+  // 把行内已经"识别走"的日期片段 + 星期括号 删掉（避免重复出现）
+  // 不用 \b：JS \b 只对 \w 有效，中文/全角标点全无边界，导致 9.9、（ 之间的边界缺失
+  function stripDateAndWeekday(s) {
+    return s
+      // 9.14--9.18 / 9.14-9.18（区间，可能含 & 连接）
+      .replace(/\d{1,2}[\./]\d{1,2}\s*[-–—~到至]+\s*\d{1,2}[\./]\d{1,2}(?:\s*&\s*\d{1,2}[\./]\d{1,2}\s*[-–—~到至]+\s*\d{1,2}[\./]\d{1,2})?/g, ' ')
+      // 8月21号 / 8月21日
+      .replace(/\d{1,2}月\d{1,2}[日号]/g, ' ')
+      // 8.21 号  / 8.21号
+      .replace(/\d{1,2}[\./]\d{1,2}\s*号/g, ' ')
+      // 9.9 / 9/9 / 9.10
+      .replace(/\d{1,2}[\./]\d{1,2}/g, ' ')
+      // 2026-08-20
+      .replace(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g, ' ')
+      // （周三）/ (周四)
+      .replace(/[（(]\s*[周星期]\s*[一二三四五六日天]\s*[）)]/g, ' ')
+      // 13:00 / 9:30 / 14:30（不再含点号，避免 9.10 被误判为时间）
+      .replace(/[01]?\d[:：][0-5]\d/g, ' ');
+  }
+
+  function stripPriority(s) {
+    return s.replace(/紧急|加急|特急|尽快|重要|高优|🔴|⚠|⭐/g, ' ');
+  }
+
+  // 置信度 → 简短原因（用于 hover 提示，告诉用户为什么是这个等级）
+  function confHint(c) {
+    return ({
+      high: '要素齐全、日期明确（绝对日期/具体星期）',
+      medium: '识别到区间/相对日期或缺一项关键字段',
+      low: '仅有标题或日期模糊',
+      none: '无可识别的标题/日期/负责人'
+    })[c] || '未知';
+  }
+
+  function computeConfidence(c) {
+    var score = 0;
+    if (c.hasTitle) score += 1;
+    if (c.hasDate && c.dateConfidence === 'high') score += 3;
+    else if (c.hasDate && c.dateConfidence === 'medium') score += 2;
+    else if (c.hasDate) score += 1;
+    if (c.hasTime) score += 0.5;
+    if (c.hasAssignee) score += 1;
+    if (score >= 4.5) return 'high';
+    if (score >= 3) return 'medium';
+    if (score >= 1.5) return 'low';
+    return 'none';
+  }
+
+  /**
+   * 日期提取（v2：分级解析 + 区间 + 报告）
+   * 返回 { date: 'YYYY-MM-DD'|null, dateConfidence: 'high'|'medium'|'low'|null, raw: 命中片段原文 }
+   *  - 完整日期（年-月-日） / M月D日 / M/D / M.D ：high
+   *  - 相对星期（本周X/下周X/X） ：high
+   *  - 今天/明天/后天/今日/明日 ：high
+   *  - 「9.14--9.18」 区间 ：medium（取截止日 9.18）
+   *  - 多区间「9.14--9.18 & 9.21--9.25」 ：medium（取所有区间截止日的最晚）
+   *  - 8.21号 / 8月21号 ：high
+   *  - 「13:00单独时间」返回 null + timeText
+   */
   function parseDate(text, base) {
-    // 绝对：年-月-日 / 年/月/日
+    if (!text) return { date: null, dateConfidence: null, raw: '', timeText: '' };
+
+    // 时间片段只识别「数字:数字」（不识别点号"9.10" → "9:10" 那是日期）
+    var tm = text.match(/\b([01]?\d|2[0-3])[:：]\s*([0-5]\d)\b/);
+    var timeText = tm ? (tm[1].length <= 2 ? tm[1] + ':' : '') : '';
+    if (tm) timeText = tm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
+
+    // 1) 完整年-月-日 2026-08-20 / 2026/8/20
     var m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-    if (m) return ymdStr(+m[1], +m[2], +m[3]);
-    // M月D日 / M月D号
+    if (m) {
+      var d1 = ymdStr(+m[1], +m[2], +m[3]);
+      if (d1) return { date: d1, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    }
+
+    // 2) M月D日 / M月D号
     m = text.match(/(\d{1,2})月(\d{1,2})[日号]/);
-    if (m) return mdThisOrNextYear(+m[1], +m[2], base);
-    // M/D 或 M.D
+    if (m) {
+      var d2 = mdThisOrNextYear(+m[1], +m[2], base);
+      if (d2) return { date: d2, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    }
+
+    // 3) 多区间 MD--MD [&] MD--MD：单次全局扫描，找出每个 (from, to) 对，截止日取所有 to 的最晚
+    var rangeRe = /(\d{1,2})[\./](\d{1,2})\s*[-–—~到至]+\s*(\d{1,2})[\./](\d{1,2})/g;
+    var rangeMatches = [];
+    var rm;
+    while ((rm = rangeRe.exec(text)) !== null) {
+      var toDate = mdPairNum(+rm[3], +rm[4], base);
+      var fromDate = mdPairNum(+rm[1], +rm[2], base);
+      if (toDate) rangeMatches.push({ to: toDate, from: fromDate, raw: rm[0] });
+    }
+    if (rangeMatches.length) {
+      rangeMatches.sort(function (a, b) { return a.to < b.to ? -1 : 1; });
+      var latest = rangeMatches[rangeMatches.length - 1];
+      return { date: latest.to, dateConfidence: 'medium', raw: latest.raw, timeText: timeText };
+    }
+
+    // 4) 单日期 M/D 或 M.D（允许括号周X跟在后面）
     m = text.match(/(\d{1,2})[\/.](\d{1,2})(?!\d)/);
-    if (m) return mdThisOrNextYear(+m[1], +m[2], base);
-    // 相对星期（本周六 / 下周三 / 周六 …）
+    if (m) {
+      var d4 = mdThisOrNextYear(+m[1], +m[2], base);
+      if (d4) return { date: d4, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    }
+
+    // 5) 单独 M号 或 M号：xxxx（信封/邮件时间戳）
+    m = text.match(/(\d{1,2})[\./](\d{1,2})\s*号/);
+    if (m) {
+      var d5 = mdThisOrNextYear(+m[1], +m[2], base);
+      if (d5) return { date: d5, dateConfidence: 'high', raw: m[0], timeText: timeText };
+    }
+
+    // 6) 相对星期
     var rd = parseRelativeWeekday(text, base);
-    if (rd) return rd;
-    if (/明天|明日/.test(text)) { var d2 = new Date(base); d2.setDate(d2.getDate() + 1); return App.util.formatDate(d2, 'YYYY-MM-DD'); }
-    if (/后天/.test(text)) { var d3 = new Date(base); d3.setDate(d3.getDate() + 2); return App.util.formatDate(d3, 'YYYY-MM-DD'); }
-    if (/今天|今日/.test(text)) { return App.util.formatDate(base, 'YYYY-MM-DD'); }
-    return null;
+    if (rd) return { date: rd, dateConfidence: 'high', raw: text.match(/(本周|这周|下周|下个?周|上周|上個?周)?\s*(?:周|星期)\s*[一二三四五六日天]|\b[一二三四五六日天]周(?:[一二三四五六日天])?/)[0], timeText: timeText };
+
+    // 7) 今天/明天/后天
+    if (/明天|明日/.test(text)) {
+      var dt = new Date(base); dt.setDate(dt.getDate() + 1);
+      return { date: App.util.formatDate(dt, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '明天', timeText: timeText };
+    }
+    if (/后天/.test(text)) {
+      var dt2 = new Date(base); dt2.setDate(dt2.getDate() + 2);
+      return { date: App.util.formatDate(dt2, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '后天', timeText: timeText };
+    }
+    if (/今天|今日|今晚/.test(text)) {
+      return { date: App.util.formatDate(base, 'YYYY-MM-DD'), dateConfidence: 'high', raw: '今天', timeText: timeText };
+    }
+
+    // 仅时间无日期
+    if (timeText) return { date: null, dateConfidence: null, raw: '', timeText: timeText };
+
+    return { date: null, dateConfidence: null, raw: '', timeText: '' };
+  }
+
+  // 工具：把 (月, 日) 解析（直接走 mdThisOrNextYear）
+  function mdPairNum(mo, d, base) {
+    return mdThisOrNextYear(mo, d, base);
   }
 
   function parseRelativeWeekday(text, base) {
@@ -1089,27 +1322,48 @@
     return App.util.formatDate(dt, 'YYYY-MM-DD');
   }
 
+  // 标签分析：尝试在文本上找出所有人名候选。规则：
+  //  - 「@张三」 → 必为负责人
+  //  - 「负责人：张三」 → 必为负责人
+  //  - 「（张三）」或「(张三)」 → 候选；优先于后置「—张三」
+  //  - 行尾「—张三」/「-张三」 → 候选
+  // 反向黑名单：括号内命中以下不当作负责人
+  //  - 星期/日期标签：周一…周日、天
+  //  - 全员/不限制/不参与等通用说明
+  //  - 单字（无姓氏名特征） / 含数字 / 含标点的杂项
+  var _WEEKDAY_TOKENS = '一二三四五六日天';
+  var _BLACK_PARENS = /^(?:周[一二三四五六日天]|星期[一二三四五六日天]|全员|不限制|不限|不参与|不请假|均不|均需|所有|全部|普通|高层|基层|统一|同时|自定|自定义|TBD|TBA|TBC|N\/A|na|n\/a|[一二三四五六日天]|可接可不接)$/i;
+  var _NAME_RE = /[\u4e00-\u9fa5·]{2,6}/;
+
   function extractAssignee(text) {
     var assignee = '';
     var rest = text;
+
     // 1. @姓名
     var m = rest.match(/@([^\s，。；、,;：:）)】\]]+)/);
-    if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    if (m && _NAME_RE.test(m[1])) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+
     // 2. 负责人：姓名
     if (!assignee) {
-      m = rest.match(/负责人[：:\s]*([^\s，。；、,;]{1,10})/);
-      if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+      m = rest.match(/负责人[：:\s]*([^\s，。；、,;]{1,10}?)(?=[，,。；;：:、\s)]|$)/);
+      if (m && _NAME_RE.test(m[1].trim())) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
     }
-    // 3. （姓名）或(姓名)
+
+    // 3. （姓名）或(姓名) — 但只接受"明确人名特征"的（如带"老师"/"经理"/"主管"/"校长"等）或 2~6 字姓名
     if (!assignee) {
       m = rest.match(/[（(]([\u4e00-\u9fa5·]{2,6})[）)]/);
-      if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+      if (m) {
+        var cand = m[1].trim();
+        if (!_BLACK_PARENS.test(cand)) { assignee = cand; rest = rest.replace(m[0], ' '); }
+      }
     }
-    // 4. 行尾 — 姓名 / - 姓名
+
+    // 4. 行尾 — 姓名 / - 姓名（破折号接 2~6 字姓名）
     if (!assignee) {
       m = rest.match(/[—\-–=]\s*([\u4e00-\u9fa5·]{2,6})\s*$/);
       if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
     }
+
     return { assignee: assignee, rest: rest };
   }
 
@@ -1119,24 +1373,29 @@
     return 'normal';
   }
 
+  // 清洗标题——只删除已经抽取出去的字段，不能再把日期/负责人/优先级删第二次
+  // 这里负责删: emoji / [@] / 「负责人」提示文字 / [方括号表情] / 边界标点 / 多余空白
   function cleanTitle(s) {
-    s = s.replace(/@/g, ' ')
-      .replace(/负责人[：:\s]*/g, ' ')
-      .replace(/[（(][\u4e00-\u9fa5·]{2,6}[）)]/g, ' ')
-      .replace(/[—\-–=]\s*[\u4e00-\u9fa5·]{2,6}\s*$/g, ' ')
-      .replace(/(?:本周|这周|下周|下个?周|上周|上個?周|周|星期)\s*[一二三四五六日天](?:\s*前)?/g, ' ')
-      .replace(/明天|今天|今日|后天/g, ' ')
-      .replace(/截止/g, ' ')
-      .replace(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, ' ')
-      .replace(/(\d{1,2})月(\d{1,2})[日号]/g, ' ')
-      .replace(/(\d{1,2})[\/.](\d{1,2})/g, ' ')
-      .replace(/\[[\u4e00-\u9fa5]+\]/g, ' ')
-      .replace(/[\[【]/g, ' ')
-      .replace(/紧急|加急|特急|尽快|重要|高优/g, ' ')
+    if (!s) return '';
+    var x = String(s)
+      // 微信方括号表情 [加油] [抱拳] 等
+      .replace(/\[[\u4e00-\u9fa5a-zA-Z0-9 _+]{1,10}\]/g, ' ')
+      // 单左方括号残留
+      .replace(/[\[【]([^】\]]*)/g, ' ')
+      .replace(/[】\]]/g, ' ')
+      // emoji（包含全字符集）
+      .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{2700}-\u{27BF}\u{1F100}-\u{1F1FF}\u{1F200}-\u{1F2FF}\u{1F600}-\u{1F64F}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}]/gu, ' ')
+      // 「另、」一类的虚词前缀（前缀若是序号/虚词可以删）
+      .replace(/^(?:另|另外|再|额外|附加|还|还有|以及)\s*[、,，]\s*/, '')
+      // 微信括号说明（全员.../不予请假）— 因为前面已经过滤过负责人括号，这里剩下的（xxx）可以认为是非负责人说明
+      .replace(/[（(][\u4e00-\u9fa5a-zA-Z0-9_,，。：:；;·\s]{2,30}[）)]/g, ' ')
+      // 多余空白
       .replace(/\s{2,}/g, ' ')
-      .replace(/^[：:、，。\-—\s]+|[：:、，。\-—\s]+$/g, '')
+      // 边界标点
+      .replace(/^[\s：:、，。\-—–=·•,.;；]+/, '')
+      .replace(/[\s：:、，。\-—–=·•,.;；]+$/, '')
       .trim();
-    return s;
+    return x;
   }
 
   /* ---------------- 工具 ---------------- */

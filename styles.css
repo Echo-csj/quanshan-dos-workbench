@@ -473,12 +473,28 @@ a:hover { color: var(--accent-hover); }
 .paste-row .paste-meta {
   grid-column: 2 / 3;
   display: grid;
-  grid-template-columns: 1fr 130px 80px 28px;
+  grid-template-columns: 1fr 130px 80px auto 28px;
   gap: 8px;
   align-items: center;
 }
+.paste-row .paste-conf {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  font-weight: 500;
+  justify-self: start;
+}
+.paste-row .paste-warning {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--warn);
+  padding: 4px 6px 0 26px;
+}
 @media (max-width: 767px) {
-  .paste-row .paste-meta { grid-template-columns: 1fr 110px 70px 24px; }
+  .paste-row .paste-meta { grid-template-columns: 1fr 100px 70px 28px; }
+  .paste-row .paste-conf { grid-column: 1 / -1; }
 }
 
 /* --- Timeline --- */
