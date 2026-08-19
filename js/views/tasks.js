@@ -22,9 +22,7 @@
   ];
 
   var dragId = null;
-  var doneExpanded = false;          // 已完成列是否展开全部
-  var MAX_VISIBLE_DONE = 6;          // 已完成列默认折叠阈值
-  var _pasteItems = [];              // 粘贴解析预览暂存
+    var _pasteItems = [];              // 粘贴解析预览暂存
 
   /* ---------------- 路由 ---------------- */
   App.router.register('/tasks', function() {
@@ -45,108 +43,426 @@
     return m[p] || p || '普通';
   }
 
+  /* ---------------- 视图设置（持久化）---------------- */
+  var VIEW_DEFAULT = { mode:'kanban', density:'standard', filters:{status:[],priority:[],source:[]}, sortBy:'dueDate', sortDir:'asc', search:'', expanded:{}, columnLimit:10 };
+  function getViewSettings() {
+    var s = App.store.get('settings.tasksView');
+    if (!s) return JSON.parse(JSON.stringify(VIEW_DEFAULT));
+    if (!s.filters) s.filters = { status:[], priority:[], source:[] };
+    if (!s.expanded) s.expanded = {};
+    if (!s.columnLimit) s.columnLimit = 10;
+    return s;
+  }
+  function saveViewSettings(v) { App.store.set('settings.tasksView', v); }
+  function updateView(patch) {
+    var v = getViewSettings();
+    Object.keys(patch).forEach(function(k) { v[k] = patch[k]; });
+    saveViewSettings(v);
+  }
+
+  /* ---------------- 筛选 / 搜索 / 排序 ---------------- */
+  function applyFilters(tasks, view) {
+    var q = (view.search || '').trim().toLowerCase();
+    var fs = view.filters || {};
+    var st = fs.status || [], pr = fs.priority || [], sr = fs.source || [];
+    return tasks.filter(function(t) {
+      if (st.length && st.indexOf(t.status) === -1) return false;
+      if (pr.length && pr.indexOf(t.priority || 'normal') === -1) return false;
+      if (sr.length) {
+        var src = t.source || 'manual';
+        if (sr.indexOf(src) === -1) return false;
+      }
+      if (q) {
+        var hay = ((t.title||'') + ' ' + (t.assignee||'') + ' ' + (t.note||'') + ' ' + (t.priority||'') + ' ' + (t.status||'')).toLowerCase();
+        if (hay.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+  }
+  var _PRIO_W = { urgent:3, high:2, normal:1, low:0 };
+  function prioWeight(p) { return _PRIO_W[p] || 1; }
+  // 默认排序：优先级降序 → 截止日升序 → 创建时间降序
+  function sortTasksDefault(tasks) {
+    return tasks.slice().sort(function(a,b) {
+      var dw = prioWeight(b.priority) - prioWeight(a.priority);
+      if (dw) return dw;
+      var da = a.dueDate || '9999-99-99', db = b.dueDate || '9999-99-99';
+      if (da !== db) return da < db ? -1 : 1;
+      return (b.createdAt||'').localeCompare(a.createdAt||'');
+    });
+  }
+  // 列表视图的自定义排序
+  function sortTasksBy(tasks, view) {
+    var dir = view.sortDir === 'desc' ? -1 : 1;
+    return tasks.slice().sort(function(a,b) {
+      var cmp = 0;
+      if (view.sortBy === 'priority') cmp = prioWeight(a.priority) - prioWeight(b.priority);
+      else if (view.sortBy === 'createdAt') cmp = (a.createdAt||'').localeCompare(b.createdAt||'');
+      else if (view.sortBy === 'title') cmp = (a.title||'').localeCompare(b.title||'','zh');
+      else cmp = (a.dueDate||'9999-99-99').localeCompare(b.dueDate||'9999-99-99');
+      if (cmp === 0) cmp = prioWeight(b.priority) - prioWeight(a.priority);
+      return cmp * dir;
+    });
+  }
+  // 已完成列：按完成时间倒序
+  function sortDoneTasks(tasks) {
+    return tasks.slice().sort(function(a,b) {
+      var ta = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+      var tb = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+      return tb - ta;
+    });
+  }
+
+  /* ---------------- 视图切换操作（onclick 触发）---------------- */
+  function setViewMode(mode) { updateView({ mode: mode }); App.router.resolve(); }
+  function setDensity(d) { updateView({ density: d }); App.router.resolve(); }
+  function setSearch(q) { updateView({ search: q }); App.router.resolve(); }
+  function toggleFilter(kind, val) {
+    var v = getViewSettings();
+    var arr = (v.filters[kind] || []).slice();
+    var i = arr.indexOf(val);
+    if (i >= 0) arr.splice(i, 1); else arr.push(val);
+    var f = JSON.parse(JSON.stringify(v.filters));
+    f[kind] = arr;
+    updateView({ filters: f });
+    App.router.resolve();
+  }
+  function clearFilters() {
+    updateView({ filters: { status:[], priority:[], source:[] }, search: '' });
+    App.router.resolve();
+  }
+  function setSort(by) {
+    var v = getViewSettings();
+    if (v.sortBy === by) updateView({ sortDir: v.sortDir === 'asc' ? 'desc' : 'asc' });
+    else updateView({ sortBy: by, sortDir: 'asc' });
+    App.router.resolve();
+  }
+  function toggleSortDir() {
+    var v = getViewSettings();
+    updateView({ sortDir: v.sortDir === 'asc' ? 'desc' : 'asc' });
+    App.router.resolve();
+  }
+  function toggleGroup(key) {
+    var v = getViewSettings();
+    v.expanded[key] = !v.expanded[key];
+    saveViewSettings(v);
+    App.router.resolve();
+  }
+  function setColumnLimit(n) { updateView({ columnLimit: n }); App.router.resolve(); }
+
   /* ---------------- 渲染 ---------------- */
   function renderBoard() {
     var allTasks = getTasks();
-    autoArchive(allTasks); // 超期已完成自动归档（移出看板，保留数据）
+    autoArchive(allTasks); // 超期已完成自动归档
 
     var tasks = allTasks.filter(function(t) { return !t.archived; });
+    var view = getViewSettings();
     var hideDone = getHideDone();
-    var doneVisible = tasks.filter(function(t) { return t.status === 'done'; });
     var archivedCount = allTasks.filter(function(t) { return t.archived; }).length;
+
+    // 筛选 + 搜索 + 隐藏已完成
+    var filtered = applyFilters(tasks, view);
+    if (hideDone) filtered = filtered.filter(function(t) { return t.status !== 'done'; });
+    var doneVisible = tasks.filter(function(t) { return t.status === 'done'; });
+
     var html = '';
 
-    // 页头 + 工具条
+    // 页头（按当前视图给不同副标题）
+    var modeHint = view.mode === 'kanban' ? '待办 → 进行中 → 审阅中 → 已完成 · 拖拽卡片即可流转状态'
+      : (view.mode === 'list' ? '一屏看全所有事项，支持排序 / 筛选 / 搜索'
+      : (view.mode === 'date' ? '按截止日折叠分组：逾期 / 今日 / 未来 7 天 / 更远 / 无截止'
+      : '按优先级分组：紧急 / 高 / 普通'));
     html += '<div class="page-head"><h1 class="page-title">事项看板</h1>';
-    html += '<p class="page-sub">待办 → 进行中 → 审阅中 → 已完成 · 拖拽卡片即可流转状态</p></div>';
-    html += '<div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;align-items:center">';
-    html += '<button class="btn btn-primary" onclick="App.views.tasks.openTaskModal()">' + App.util.svgIcon('plus', 15) + ' 新建任务</button>';
-    html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
-    html += '<button class="btn btn-secondary" onclick="App.views.tasks.openPasteModal()">📋 粘贴提取</button>';
-    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer;margin-left:6px"><input type="checkbox" ' + (hideDone ? 'checked' : '') + ' onchange="App.views.tasks.toggleHideDone()"> 隐藏已完成</label>';
-    if (doneVisible.length > 0) {
-      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.archiveAllDone()">📦 归档已完成 (' + doneVisible.length + ')</button>';
-    }
-    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.openArchiveModal()">📦 已归档 (' + archivedCount + ')</button>';
-    html += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted);align-self:center">活动 ' + tasks.length + ' 条 · 已归档 ' + archivedCount + ' 条</span>';
-    html += '</div>';
+    html += '<p class="page-sub">' + modeHint + '</p></div>';
 
-    if (tasks.length === 0 && archivedCount === 0) {
-      html += '<div class="empty-state" style="padding:50px"><h4>暂无任务</h4><p>点击「新建任务」手动添加，或点「从时间轴生成」把周/月节律节点一键转为待办。</p><button class="btn btn-primary btn-sm" onclick="App.views.tasks.generateFromTimeline()">从时间轴生成</button></div>';
+    // 工具条
+    html += renderToolbar(view, filtered, archivedCount, doneVisible);
+
+    if (filtered.length === 0) {
+      var emptyBody = tasks.length === 0
+        ? '<p>点击「新建任务」手动添加，或点「从时间轴生成」把周/月节律节点一键转为待办。</p><button class="btn btn-primary btn-sm" onclick="App.views.tasks.generateFromTimeline()">从时间轴生成</button>'
+        : '<p>当前筛选/搜索条件下没有匹配的任务，试试调整搜索词或清空筛选。</p><button class="btn btn-ghost btn-sm" onclick="App.views.tasks.clearFilters()">清空筛选</button>';
+      html += '<div class="empty-state" style="padding:50px"><h4>' + (tasks.length === 0 ? '暂无任务' : '没有匹配的任务') + '</h4>' + emptyBody + '</div>';
       return html;
     }
 
-    // 看板
-    html += '<div class="kanban-board">';
-    COLUMNS.forEach(function(col) {
-      if (col.status === 'done') {
-        html += renderDoneColumn(doneVisible, hideDone);
-      } else {
-        var colTasks = tasks.filter(function(t) { return t.status === col.status; });
-        html += renderNormalColumn(col, colTasks);
-      }
-    });
-    html += '</div>';
+    if (view.mode === 'kanban') html += renderKanbanView(filtered, view);
+    else if (view.mode === 'list') html += renderListView(filtered, view);
+    else if (view.mode === 'date') html += renderDateGroupedView(filtered, view);
+    else if (view.mode === 'priority') html += renderPriorityGroupedView(filtered, view);
 
     return html;
   }
 
-  function renderNormalColumn(col, colTasks) {
+  /* ---------------- 工具条 ---------------- */
+  function renderToolbar(view, filtered, archivedCount, doneVisible) {
+    var f = view.filters || {};
+    var html = '<div class="tasks-toolbar">';
+
+    // Row 1: 主操作 + 视图 tabs + 搜索 + 计数
+    html += '<div class="tasks-toolbar-row">';
+    html += '<button class="btn btn-primary" onclick="App.views.tasks.openTaskModal()">' + App.util.svgIcon('plus', 15) + ' 新建任务</button>';
+    html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
+    html += '<button class="btn btn-secondary" onclick="App.views.tasks.openPasteModal()">📋 粘贴提取</button>';
+    html += '<span class="toolbar-sep"></span>';
+    var modes = [
+      { v: 'kanban', icon: '📋', label: '看板' },
+      { v: 'list',   icon: '📑', label: '列表' },
+      { v: 'date',   icon: '📅', label: '按日期' },
+      { v: 'priority', icon: '⭐', label: '按优先级' }
+    ];
+    html += '<div class="view-tabs">';
+    modes.forEach(function(m) {
+      var active = view.mode === m.v;
+      html += '<button class="view-tab' + (active ? ' active' : '') + '" onclick="App.views.tasks.setViewMode(\'' + m.v + '\')">' + m.icon + ' ' + m.label + '</button>';
+    });
+    html += '</div>';
+    html += '<span class="toolbar-sep"></span>';
+    html += '<input class="form-input tasks-search" placeholder="🔍 搜索 标题/负责人/备注" value="' + escapeAttr(view.search) + '" oninput="App.views.tasks.setSearch(this.value)">';
+    html += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">活动 ' + filtered.length + ' 条 · 已归档 ' + archivedCount + ' 条</span>';
+    html += '</div>';
+
+    // Row 2: 筛选 chips + 排序（仅列表）+ 密度 + 隐藏已完成 + 归档
+    html += '<div class="tasks-toolbar-row">';
+    html += '<div class="tasks-filters">';
+    var stMap = { todo: '待办', doing: '进行中', review: '审阅中', done: '已完成' };
+    ['todo', 'doing', 'review', 'done'].forEach(function(s) {
+      var on = (f.status || []).indexOf(s) >= 0;
+      html += '<button class="chip chip-status-' + s + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'status\',\'' + s + '\')">' + stMap[s] + '</button>';
+    });
+    html += '<span class="filter-sep"></span>';
+    var prMap = { urgent: '紧急', high: '高', normal: '普通' };
+    ['urgent', 'high', 'normal'].forEach(function(p) {
+      var on = (f.priority || []).indexOf(p) >= 0;
+      html += '<button class="chip chip-prio-' + p + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'priority\',\'' + p + '\')">' + prMap[p] + '</button>';
+    });
+    html += '<span class="filter-sep"></span>';
+    var srMap = { manual: '手动', timeline: '⏱时间轴', paste: '📋粘贴' };
+    ['manual', 'timeline', 'paste'].forEach(function(s) {
+      var on = (f.source || []).indexOf(s) >= 0;
+      html += '<button class="chip' + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'source\',\'' + s + '\')">' + srMap[s] + '</button>';
+    });
+    var anyFilter = (f.status && f.status.length) || (f.priority && f.priority.length) || (f.source && f.source.length) || view.search;
+    if (anyFilter) html += '<button class="chip chip-clear" onclick="App.views.tasks.clearFilters()">清空</button>';
+    html += '</div>';
+
+    if (view.mode === 'list') {
+      var sortLabelMap = { dueDate: '截止日', priority: '优先级', createdAt: '创建时间', title: '标题' };
+      html += '<select class="form-input tasks-sort" onchange="App.views.tasks.setSort(this.value)">';
+      Object.keys(sortLabelMap).forEach(function(k) {
+        html += '<option value="' + k + '"' + (view.sortBy === k ? ' selected' : '') + '>排序：' + sortLabelMap[k] + '</option>';
+      });
+      html += '</select>';
+      html += '<button class="btn-icon" title="切换方向" onclick="App.views.tasks.toggleSortDir()">' + (view.sortDir === 'asc' ? '↑' : '↓') + '</button>';
+    }
+
+    html += '<div class="density-tabs">';
+    [{ v: 'compact', label: '紧凑' }, { v: 'standard', label: '标准' }, { v: 'comfortable', label: '宽松' }].forEach(function(d) {
+      html += '<button class="density-tab' + (view.density === d.v ? ' active' : '') + '" onclick="App.views.tasks.setDensity(\'' + d.v + '\')">' + d.label + '</button>';
+    });
+    html += '</div>';
+
+    html += '<span class="toolbar-sep"></span>';
+    html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer"><input type="checkbox" ' + (getHideDone() ? 'checked' : '') + ' onchange="App.views.tasks.toggleHideDone()"> 隐藏已完成</label>';
+    if (doneVisible.length > 0) html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.archiveAllDone()">📦 归档已完成 (' + doneVisible.length + ')</button>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.openArchiveModal()">📦 已归档 (' + archivedCount + ')</button>';
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  function expandFooter(key, hidden, expanded, limit, total) {
+    if (hidden > 0) return '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">展开 ' + hidden + ' 条 ▾</button>';
+    if (expanded && total > limit) return '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">收起 ▴</button>';
+    return '';
+  }
+
+  /* ---------------- 看板视图 ---------------- */
+  function renderKanbanView(tasks, view) {
+    var html = '<div class="kanban-board density-' + view.density + '">';
+    COLUMNS.forEach(function(col) {
+      var colTasks = tasks.filter(function(t) { return t.status === col.status; });
+      if (col.status === 'done') html += renderKanbanDoneColumn(sortDoneTasks(colTasks), view);
+      else html += renderKanbanColumn(col, sortTasksDefault(colTasks), view);
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function renderKanbanColumn(col, sorted, view) {
+    var key = 'col:' + col.status;
+    var expanded = !!view.expanded[key];
+    var limit = view.columnLimit;
+    var visible = expanded ? sorted : sorted.slice(0, limit);
+    var hidden = sorted.length - visible.length;
     var html = '<div class="kanban-column">';
     html += '<div class="kanban-col-header" style="border-bottom-color:' + col.accent + '">';
     html += '<span class="kanban-col-title">' + col.label + '</span>';
-    html += '<span class="kanban-col-count" style="color:' + col.accent + '">' + colTasks.length + '</span>';
+    html += '<span class="kanban-col-count" style="color:' + col.accent + '">' + sorted.length + '</span>';
     html += '</div>';
     html += '<div class="kanban-cards" data-status="' + col.status + '" ' +
       'ondragover="App.views.tasks.onDragOver(event)" ' +
       'ondragenter="App.views.tasks.onDragEnter(event)" ' +
       'ondragleave="App.views.tasks.onDragLeave(event)" ' +
       'ondrop="App.views.tasks.onDrop(event, \'' + col.status + '\')">';
-    if (colTasks.length === 0) {
-      html += '<div class="kanban-empty">拖动任务到此</div>';
-    } else {
-      colTasks.forEach(function(t) { html += renderCard(t); });
+    if (sorted.length === 0) html += '<div class="kanban-empty">拖动任务到此</div>';
+    else {
+      visible.forEach(function(t) { html += renderCard(t); });
+      html += expandFooter(key, hidden, expanded, limit, sorted.length);
     }
     html += '</div></div>';
     return html;
   }
 
-  function renderDoneColumn(doneTasks, hideDone) {
+  function renderKanbanDoneColumn(sorted, view) {
     var html = '<div class="kanban-column">';
     html += '<div class="kanban-col-header" style="border-bottom-color:var(--ok)">';
     html += '<span class="kanban-col-title">已完成</span>';
-    html += '<span class="kanban-col-count" style="color:var(--ok)">' + doneTasks.length + '</span>';
+    html += '<span class="kanban-col-count" style="color:var(--ok)">' + sorted.length + '</span>';
     html += '</div>';
     html += '<div class="kanban-cards" data-status="done" ' +
       'ondragover="App.views.tasks.onDragOver(event)" ' +
       'ondragenter="App.views.tasks.onDragEnter(event)" ' +
       'ondragleave="App.views.tasks.onDragLeave(event)" ' +
       'ondrop="App.views.tasks.onDrop(event, \'done\')">';
+    if (getHideDone()) {
+      html += '<div class="kanban-empty">已完成已隐藏<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="App.views.tasks.toggleHideDone()">显示已完成</button></div></div></div>';
+      return html;
+    }
+    var key = 'col:done';
+    var expanded = !!view.expanded[key];
+    var limit = view.columnLimit;
+    var visible = expanded ? sorted : sorted.slice(0, limit);
+    var hidden = sorted.length - visible.length;
+    if (sorted.length === 0) html += '<div class="kanban-empty">拖动任务到此</div>';
+    else {
+      visible.forEach(function(t) { html += renderCard(t); });
+      html += expandFooter(key, hidden, expanded, limit, sorted.length);
+    }
+    html += '</div></div>';
+    return html;
+  }
 
-    if (hideDone) {
-      html += '<div class="kanban-empty">已完成已隐藏<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="App.views.tasks.toggleHideDone()">显示已完成</button></div>';
+  /* ---------------- 列表视图 ---------------- */
+  function renderListView(tasks, view) {
+    var sorted = sortTasksBy(tasks, view);
+    var key = 'list:all';
+    var expanded = !!view.expanded[key];
+    var limit = 30;
+    var visible = expanded ? sorted : sorted.slice(0, limit);
+    var hidden = sorted.length - visible.length;
+    var html = '<div class="tasks-list-wrap density-' + view.density + '">';
+    html += '<table class="tasks-list-table">';
+    html += '<thead><tr><th>标题</th><th>状态</th><th>优先级</th><th>负责人</th><th>截止</th><th>来源</th><th>操作</th></tr></thead><tbody>';
+    if (visible.length === 0) html += '<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:30px">无任务</td></tr>';
+    else visible.forEach(function(t) { html += renderListRow(t); });
+    html += '</tbody></table>';
+    if (hidden > 0) html += '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">展开 ' + hidden + ' 条 ▾</button>';
+    else if (expanded && sorted.length > limit) html += '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">收起 ▴</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderListRow(t) {
+    var overdue = t.status !== 'done' && t.dueDate && isOverdue(t.dueDate);
+    var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : '手动');
+    var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
+    html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + escapeHtml(t.title || '未命名任务');
+    if (t.note) html += '<div class="list-note">' + escapeHtml(t.note) + '</div>';
+    html += '</td>';
+    html += '<td><span class="tag status-' + t.status + '">' + statusLabel(t.status) + '</span></td>';
+    html += '<td><span class="tag priority-' + (t.priority || 'normal') + '">' + priorityLabel(t.priority) + '</span></td>';
+    html += '<td>' + (t.assignee ? escapeHtml(t.assignee) : '<span style="color:var(--text-faint)">—</span>') + '</td>';
+    html += '<td style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">' + (t.dueDate || '<span style="color:var(--text-faint)">—</span>') + '</td>';
+    html += '<td><span style="font-size:11px;color:var(--text-muted)">' + srcLabel + '</span></td>';
+    html += '<td class="list-actions">';
+    html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
+    if (t.status === 'done') html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
+    html += '<button class="btn-icon btn-icon-danger" title="删除" onclick="App.views.tasks.deleteTask(\'' + t.id + '\')">' + App.util.svgIcon('trash-2', 14) + '</button>';
+    html += '</td>';
+    html += '</tr>';
+    return html;
+  }
+
+  /* ---------------- 按日期分组 ---------------- */
+  function renderDateGroupedView(tasks, view) {
+    var today = App.util.formatDate(new Date(), 'YYYY-MM-DD');
+    var t7 = new Date(); t7.setDate(t7.getDate() + 7);
+    var t7str = App.util.formatDate(t7, 'YYYY-MM-DD');
+    var groups = [
+      { key: 'gdate:overdue', label: '⚠ 逾期', tasks: [] },
+      { key: 'gdate:today',   label: '📅 今日 (' + today + ')', tasks: [] },
+      { key: 'gdate:week',    label: '📅 未来 7 天（截至 ' + t7str + '）', tasks: [] },
+      { key: 'gdate:later',   label: '📅 更远', tasks: [] },
+      { key: 'gdate:nodue',   label: '— 无截止日期', tasks: [] }
+    ];
+    tasks.forEach(function(t) {
+      if (!t.dueDate) groups[4].tasks.push(t);
+      else if (t.status !== 'done' && t.dueDate < today) groups[0].tasks.push(t);
+      else if (t.dueDate === today) groups[1].tasks.push(t);
+      else if (t.dueDate <= t7str) groups[2].tasks.push(t);
+      else groups[3].tasks.push(t);
+    });
+    var html = '<div class="tasks-grouped density-' + view.density + '">';
+    groups.forEach(function(g) { html += renderGroupedSection(g.key, g.label, sortTasksDefault(g.tasks), view); });
+    html += '</div>';
+    return html;
+  }
+
+  /* ---------------- 按优先级分组 ---------------- */
+  function renderPriorityGroupedView(tasks, view) {
+    var groups = [
+      { key: 'gprio:urgent', label: '⚡ 紧急', tasks: [] },
+      { key: 'gprio:high',   label: '⚠ 高',   tasks: [] },
+      { key: 'gprio:normal', label: '● 普通', tasks: [] }
+    ];
+    tasks.forEach(function(t) {
+      var p = t.priority || 'normal';
+      groups[p === 'urgent' ? 0 : (p === 'high' ? 1 : 2)].tasks.push(t);
+    });
+    groups.forEach(function(g) { g.tasks = sortTasksDefault(g.tasks); });
+    var html = '<div class="tasks-grouped density-' + view.density + '">';
+    groups.forEach(function(g) { html += renderGroupedSection(g.key, g.label, g.tasks, view); });
+    html += '</div>';
+    return html;
+  }
+
+  /* ---------------- 分组区块（日期/优先级 视图共用）---------------- */
+  function renderGroupedSection(key, label, tasks, view) {
+    var html = '<div class="tasks-group">';
+    if (tasks.length === 0) {
+      html += '<div class="tasks-group-head empty" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">';
+      html += '<span class="group-toggle">▸</span>';
+      html += '<span class="group-label">' + label + '</span>';
+      html += '<span class="group-count">0</span>';
       html += '</div></div>';
       return html;
     }
-
-    // 按完成时间倒序（最近完成在上），便于定位近期完成项
-    var sorted = doneTasks.slice().sort(function(a, b) {
-      var ta = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-      var tb = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-      return tb - ta;
-    });
-    var visible = doneExpanded ? sorted : sorted.slice(0, MAX_VISIBLE_DONE);
-    var hiddenCount = sorted.length - visible.length;
-
-    if (sorted.length === 0) {
-      html += '<div class="kanban-empty">拖动任务到此</div>';
-    } else {
+    var expanded = !!view.expanded[key];
+    var limit = view.columnLimit;
+    var visible = expanded ? tasks : tasks.slice(0, limit);
+    var hidden = tasks.length - visible.length;
+    html += '<div class="tasks-group-head" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">';
+    html += '<span class="group-toggle">' + (expanded ? '▾' : '▸') + '</span>';
+    html += '<span class="group-label">' + label + '</span>';
+    html += '<span class="group-count">' + tasks.length + '</span>';
+    html += '</div>';
+    if (expanded || tasks.length <= limit) {
+      html += '<div class="tasks-group-body">';
       visible.forEach(function(t) { html += renderCard(t); });
-      if (hiddenCount > 0) {
-        html += '<button class="kanban-expand-btn" onclick="App.views.tasks.expandDone()">展开全部 ' + sorted.length + ' 条已完成 ▾</button>';
-      }
+      html += '</div>';
+    } else {
+      html += '<div class="tasks-group-preview">';
+      visible.slice(0, 3).forEach(function(t) {
+        html += '<div class="group-preview-item">' + escapeHtml(App.util.truncate(t.title || '未命名任务', 50)) + '</div>';
+      });
+      if (hidden > 0) html += '<div class="group-preview-more">+ 还有 ' + hidden + ' 条，点击展开</div>';
+      html += '</div>';
     }
-    html += '</div></div>';
+    if (hidden > 0) html += '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">展开 ' + hidden + ' 条 ▾</button>';
+    else if (expanded && tasks.length > limit) html += '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">收起 ▴</button>';
+    html += '</div>';
     return html;
   }
 
@@ -317,7 +633,7 @@
 
   function getHideDone() { return localStorage.getItem('tasks_hide_done') === '1'; }
   function toggleHideDone() { localStorage.setItem('tasks_hide_done', getHideDone() ? '0' : '1'); App.router.resolve(); }
-  function expandDone() { doneExpanded = true; App.router.resolve(); }
+  function expandDone() { /* 已迁移至 toggleGroup('col:done')，保留为 no-op 以防历史引用 */ }
 
   function archiveTask(id) {
     var tasks = getTasks();
@@ -863,13 +1179,22 @@
     removePasteRow: removePasteRow,
     toggleAllPaste: toggleAllPaste,
     toggleHideDone: toggleHideDone,
-    expandDone: expandDone,
     archiveTask: archiveTask,
     archiveAllDone: archiveAllDone,
     openArchiveModal: openArchiveModal,
     unarchiveTask: unarchiveTask,
     purgeArchived: purgeArchived,
-    clearAllArchived: clearAllArchived
+    clearAllArchived: clearAllArchived,
+    // —— 视图增强 v2 ——
+    setViewMode: setViewMode,
+    setDensity: setDensity,
+    setSearch: setSearch,
+    toggleFilter: toggleFilter,
+    clearFilters: clearFilters,
+    setSort: setSort,
+    toggleSortDir: toggleSortDir,
+    toggleGroup: toggleGroup,
+    setColumnLimit: setColumnLimit
   };
 
 })();

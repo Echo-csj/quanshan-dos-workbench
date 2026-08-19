@@ -20,7 +20,17 @@ window.App = window.App || {};
         reminders: true,
         theme: 'light',
         remindBackup: true, // 每月提醒导出备份
-        tasksArchiveDays: 30 // 已完成事项超过该天数自动归档
+        tasksArchiveDays: 30, // 已完成事项超过该天数自动归档
+        tasksView: { // 事项看板视图设置（持久化）
+          mode: 'kanban',          // kanban | list | date | priority
+          density: 'standard',     // compact | standard | comfortable
+          filters: { status: [], priority: [], source: [] }, // 空数组 = 不过滤
+          sortBy: 'dueDate',       // dueDate | priority | createdAt | title
+          sortDir: 'asc',          // asc | desc
+          search: '',              // 搜索关键字（标题/负责人/备注）
+          expanded: {},            // 分组/列 展开状态，key -> bool
+          columnLimit: 10          // 每列/每组前 N 条折叠
+        }
       },
       timeline: {
         fixedNodes: [
