@@ -504,7 +504,8 @@
 
     var html = '';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">从工作群复制内容粘贴到下方，系统自动识别 <b>事项 / 负责人 / 时间</b>。每行一条；支持 ' +
-      '<code>@张三</code>、<code>负责人：张三</code>、<code>（张三）</code>、<code>8月20日</code>、<code>下周三</code>、<code>明天</code> 等格式。解析结果可勾选并编辑后再生成。</p>';
+      '<code>@张三</code>、<code>负责人：张三</code>、<code>（张三）</code>、<code>8月20日</code>、<code>下周三</code>、<code>明天</code> 等格式。' +
+      '还支持「<b>以上N项 + 日期完成</b>」批量设截止日、自动跳过「抄送/邮件发送/收到回复」等说明行。解析结果可勾选并编辑后再生成。</p>';
     html += '<textarea id="paste-input" class="form-input" rows="6" style="font-family:var(--font-mono);font-size:12px" placeholder="示例：\n@张老师 完成次月预排课表 8月20日\n下周三前 提交教务周报 — 李教务\n（王主管）核对新生名单 截止8/25 紧急"></textarea>';
     html += '<div id="paste-preview" style="margin-top:14px"></div>';
 
@@ -603,30 +604,94 @@
     App.router.resolve();
   }
 
-  // —— 解析纯函数（不依赖 DOM）——
+  // —— 解析纯函数（不依赖 DOM，支持「分组后置截止日期 / 抄送行 / 回复块」）——
+  var _CN_NUM = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9, '十': 10, '两': 2, '俩': 2 };
+  function cnToNum(s) {
+    if (/^\d+$/.test(s)) return parseInt(s, 10);
+    if (s === '十') return 10;
+    if (s.length === 2 && s[0] === '十') return 10 + (_CN_NUM[s[1]] || 0);
+    if (s.length === 2 && s[1] === '十') return (_CN_NUM[s[0]] || 0) * 10;
+    if (s.length === 3 && s[1] === '十') return (_CN_NUM[s[0]] || 0) * 10 + (_CN_NUM[s[2]] || 0);
+    var n = 0; for (var i = 0; i < s.length; i++) n += (_CN_NUM[s[i]] || 0); return n;
+  }
+
   function parsePasteText(text) {
     var lines = (text || '').split(/\r?\n/);
     var items = [];
     var base = new Date();
-    lines.forEach(function(line) {
-      line = line.trim();
+    var lastGroupCount = 0;   // 来自「以上N项」
+    var inReply = false;      // 回复块之后不再当作任务
+
+    lines.forEach(function(orig) {
+      var line = (orig || '').trim();
       if (!line) return;
-      // 去掉行首序号 / 项目符号
-      line = line.replace(/^[\d]+[.、)]\s*/, '').replace(/^[-*•·]\s*/, '');
-      if (!line) return;
-      // 跳过明显的"列表说明"行（不当作任务）
-      if (isLikelyHeader(line)) return;
-      var item = parseLine(line, base);
-      // 过滤掉标题为空或仅含标点/数字的项
+
+      // 1) 回复块：收到回复 / 回复：之后均为留言，跳过
+      if (/^(收到回复|回复[:：]|回复如下|医生回复[:：]?)/.test(line)) { inReply = true; return; }
+      if (inReply) return;
+
+      // 2) 去掉行首序号 / 项目符号
+      var content = line.replace(/^[\d]+[.、)]\s*/, '').replace(/^[-*•·]\s*/, '');
+      if (!content) return;
+
+      // 3) 分组指令行：以上N项…（含或不含完成日期）
+      var gfm = content.match(/^以上\s*([一二三四五六七八九十两俩\d]+)\s*项/);
+      if (gfm) {
+        lastGroupCount = cnToNum(gfm[1]);
+        var gd = parseDate(content, base);
+        if (gd && lastGroupCount) { applyDueToLast(items, lastGroupCount, gd); lastGroupCount = 0; }
+        return; // 不当作任务
+      }
+
+      // 4) 单独的完成/截止指令行：本周六完成 / 今日完成（把日期填给上面 N 项）
+      if (/完成|截止/.test(content) && isShortDirective(content)) {
+        var d = parseDate(content, base);
+        if (d) {
+          var n = lastGroupCount || countTasksWithoutDue(items);
+          applyDueToLast(items, n, d);
+          lastGroupCount = 0;
+          return;
+        }
+      }
+
+      // 5) 其它说明性标题行（真实条目如「针对家长…跟进」放行）
+      if (isLikelyHeader(content)) return;
+
+      // 6) 解析为任务
+      var item = parseLine(content, base);
       if (item && item.title && isMeaningfulTitle(item.title)) items.push(item);
     });
+
     return items;
   }
 
-  // 跳过"以上是…数据"、"针对…有以下几项任务"等说明性行
+  function applyDueToLast(items, n, date) {
+    if (!date || n <= 0) return;
+    var start = Math.max(0, items.length - n);
+    for (var i = start; i < items.length; i++) items[i].dueDate = date; // 分组截止日是权威日期
+  }
+  function countTasksWithoutDue(items) {
+    var c = 0; items.forEach(function(it) { if (!it.dueDate) c++; }); return c;
+  }
+  // 行很短，去掉日期词与「完成/截止/前」后基本无残留 → 判定为纯指令行
+  function isShortDirective(line) {
+    if (line.length > 24) return false;
+    var rest = line
+      .replace(/(本周|这周|下周|上周)?\s*[周星期]?\s*[一二三四五六日天]/g, '')
+      .replace(/今天|今日|明天|明日|后天/g, '')
+      .replace(/完成|截止|前/g, '')
+      .replace(/\s/g, '');
+    return rest.length <= 2;
+  }
+
+  // 跳过明显的"列表说明"行（不当作任务）；真实条目（如"针对家长…跟进"）放行
   function isLikelyHeader(line) {
     if (line.length < 8) return false;
-    return /^(以上|以下是|针对|关于|根据|按照|请注意|请各|请将|请于|请在|注意[:：]?|任务如下|有如下|有以下|现将|现就|特此|另外|此外|同时|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|抄送|邮件发送|邮件抄送|令)/.test(line);
+    if (/^(以上是|以下是|现将|现就|特此|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|注意[:：]?|任务如下|有如下|有以下|邮件发送|抄送|主送|发件人|收件人|转发|令)/.test(line)) return true;
+    if (/^(针对|关于|根据|按照|请各|请将|请于|请在)/.test(line)) {
+      return /(有以下|有如下|任务如下|几项任务|以下任务|如下[:：]|任务清单|安排如下|具体任务)/.test(line);
+    }
+    return false;
   }
 
   // 标题必须包含至少 2 个有效字符（排除纯标点/纯数字/纯空白）
@@ -662,29 +727,35 @@
     // M/D 或 M.D
     m = text.match(/(\d{1,2})[\/.](\d{1,2})(?!\d)/);
     if (m) return mdThisOrNextYear(+m[1], +m[2], base);
-    // 相对星期
-    m = text.match(/(本周|这周|下周|下个?周)?\s*(周[一二三四五六日天]|星期[一二三四五六日天])/);
-    if (m) {
-      var wd = weekdayNum(m[2]);
-      if (wd == null) return null;
-      var d = new Date(base);
-      var diff = wd - d.getDay();
-      if (m[1] === '下周' || m[1] === '下个周') diff += 7;
-      else if (m[1] === '本周' || m[1] === '这周') { if (diff < 0) diff += 7; }
-      else { if (diff <= 0) diff += 7; } // 默认取下一个该星期
-      d.setDate(d.getDate() + diff);
-      return App.util.formatDate(d, 'YYYY-MM-DD');
-    }
-    if (/明天/.test(text)) { var d2 = new Date(base); d2.setDate(d2.getDate() + 1); return App.util.formatDate(d2, 'YYYY-MM-DD'); }
+    // 相对星期（本周六 / 下周三 / 周六 …）
+    var rd = parseRelativeWeekday(text, base);
+    if (rd) return rd;
+    if (/明天|明日/.test(text)) { var d2 = new Date(base); d2.setDate(d2.getDate() + 1); return App.util.formatDate(d2, 'YYYY-MM-DD'); }
     if (/后天/.test(text)) { var d3 = new Date(base); d3.setDate(d3.getDate() + 2); return App.util.formatDate(d3, 'YYYY-MM-DD'); }
     if (/今天|今日/.test(text)) { return App.util.formatDate(base, 'YYYY-MM-DD'); }
     return null;
   }
 
-  function weekdayNum(s) {
-    var c = s.replace(/周|星期/, '');
-    var map = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 };
-    return map.hasOwnProperty(c) ? map[c] : null;
+  function parseRelativeWeekday(text, base) {
+    var wdMap = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 };
+    var m = text.match(/(本周|这周|下周|下个?周|上周|上個?周)\s*(?:周|星期)?\s*([一二三四五六日天])/);
+    var dir = null, dayChar = null;
+    if (m) { dir = m[1]; dayChar = m[2]; }
+    else {
+      m = text.match(/(?:周|星期)\s*([一二三四五六日天])/);
+      if (m) dayChar = m[1];
+    }
+    if (!dayChar) return null;
+    var wd = wdMap[dayChar];
+    if (wd == null) return null;
+    var d = new Date(base);
+    var diff = wd - d.getDay();
+    if (dir === '下周' || dir === '下个周') diff += 7;
+    else if (dir === '上周' || dir === '上個周') diff -= 7;
+    else if (dir === '本周' || dir === '这周') { if (diff < 0) diff += 7; }
+    else { if (diff <= 0) diff += 7; } // 无方向词，默认下一个该星期
+    d.setDate(d.getDate() + diff);
+    return App.util.formatDate(d, 'YYYY-MM-DD');
   }
 
   function ymdStr(y, mo, d) {
@@ -737,7 +808,7 @@
       .replace(/负责人[：:\s]*/g, ' ')
       .replace(/[（(][\u4e00-\u9fa5·]{2,6}[）)]/g, ' ')
       .replace(/[—\-–=]\s*[\u4e00-\u9fa5·]{2,6}\s*$/g, ' ')
-      .replace(/(本周|这周|下周|下个?周)?(周|星期)?[一二三四五六日天](?:\s*前)?/g, ' ')
+      .replace(/(?:本周|这周|下周|下个?周|上周|上個?周|周|星期)\s*[一二三四五六日天](?:\s*前)?/g, ' ')
       .replace(/明天|今天|今日|后天/g, ' ')
       .replace(/截止/g, ' ')
       .replace(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, ' ')
