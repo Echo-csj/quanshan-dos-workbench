@@ -546,11 +546,13 @@
     _pasteItems.forEach(function(it, i) {
       html += '<div class="paste-row" data-idx="' + i + '">';
       html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
-      html += '<input class="form-input paste-f paste-title" id="pp-title-' + i + '" value="' + escapeAttr(it.title) + '" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">';
+      html += '<textarea class="form-input paste-f paste-title" id="pp-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">' + escapeHtml(it.title) + '</textarea>';
+      html += '<div class="paste-meta">';
       html += '<input class="form-input paste-f" id="pp-assignee-' + i + '" value="' + escapeAttr(it.assignee) + '" placeholder="负责人">';
       html += '<input class="form-input paste-f" id="pp-due-' + i + '" type="date" value="' + escapeAttr(it.dueDate) + '">';
       html += '<select class="form-input paste-f" id="pp-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
       html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
+      html += '</div>';
       html += '</div>';
     });
     html += '</div>';
@@ -623,8 +625,8 @@
 
   // 跳过"以上是…数据"、"针对…有以下几项任务"等说明性行
   function isLikelyHeader(line) {
-    if (line.length < 12) return false;
-    return /^(以上是|以下是|针对|关于|根据|按照|请注意|请各|请将|请于|请在|注意[:：]?|任务如下|有如下|有以下|现将|现就|特此|另外|此外|同时|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家)/.test(line);
+    if (line.length < 8) return false;
+    return /^(以上|以下是|针对|关于|根据|按照|请注意|请各|请将|请于|请在|注意[:：]?|任务如下|有如下|有以下|现将|现就|特此|另外|此外|同时|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|抄送|邮件发送|邮件抄送|令)/.test(line);
   }
 
   // 标题必须包含至少 2 个有效字符（排除纯标点/纯数字/纯空白）
@@ -741,6 +743,8 @@
       .replace(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, ' ')
       .replace(/(\d{1,2})月(\d{1,2})[日号]/g, ' ')
       .replace(/(\d{1,2})[\/.](\d{1,2})/g, ' ')
+      .replace(/\[[\u4e00-\u9fa5]+\]/g, ' ')
+      .replace(/[\[【]/g, ' ')
       .replace(/紧急|加急|特急|尽快|重要|高优/g, ' ')
       .replace(/\s{2,}/g, ' ')
       .replace(/^[：:、，。\-—\s]+|[：:、，。\-—\s]+$/g, '')
