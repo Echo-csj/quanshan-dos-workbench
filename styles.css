@@ -449,6 +449,24 @@ a:hover { color: var(--accent-hover); }
 .archive-row-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--text-faint); }
 .archive-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
+/* 粘贴提取预览表格（弹窗） */
+.paste-table { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; }
+.paste-row {
+  display: grid;
+  grid-template-columns: 22px 1fr 110px 150px 92px 30px;
+  gap: 8px; align-items: center;
+  padding: 8px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.paste-row .paste-ck { width: 16px; height: 16px; }
+.paste-row .paste-f { font-size: 12px; padding: 6px 8px; }
+.paste-row .paste-title { min-width: 0; }
+@media (max-width: 767px) {
+  .paste-row { grid-template-columns: 20px 1fr; grid-auto-rows: auto; }
+  .paste-row .paste-f, .paste-row .btn-icon { grid-column: 2 / 3; }
+  .paste-row .paste-ck { grid-column: 1 / 2; align-self: start; margin-top: 6px; }
+}
+
 /* --- Timeline --- */
 .timeline-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
 .timeline-day {

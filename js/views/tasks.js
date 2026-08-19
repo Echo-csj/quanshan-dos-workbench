@@ -24,6 +24,7 @@
   var dragId = null;
   var doneExpanded = false;          // 已完成列是否展开全部
   var MAX_VISIBLE_DONE = 6;          // 已完成列默认折叠阈值
+  var _pasteItems = [];              // 粘贴解析预览暂存
 
   /* ---------------- 路由 ---------------- */
   App.router.register('/tasks', function() {
@@ -61,6 +62,7 @@
     html += '<div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;align-items:center">';
     html += '<button class="btn btn-primary" onclick="App.views.tasks.openTaskModal()">' + App.util.svgIcon('plus', 15) + ' 新建任务</button>';
     html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
+    html += '<button class="btn btn-secondary" onclick="App.views.tasks.openPasteModal()">📋 粘贴提取</button>';
     html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-muted);cursor:pointer;margin-left:6px"><input type="checkbox" ' + (hideDone ? 'checked' : '') + ' onchange="App.views.tasks.toggleHideDone()"> 隐藏已完成</label>';
     if (doneVisible.length > 0) {
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.archiveAllDone()">📦 归档已完成 (' + doneVisible.length + ')</button>';
@@ -175,6 +177,7 @@
     if (t.dueDate) html += '<span style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">📅 ' + escapeHtml(t.dueDate) + '</span>';
     html += '</div>';
     if (t.source === 'timeline') html += '<div class="kanban-card-note">⏱ 来自时间轴</div>';
+    else if (t.source === 'paste') html += '<div class="kanban-card-note">📋 来自粘贴</div>';
     else if (t.note) html += '<div class="kanban-card-note">' + escapeHtml(t.note) + '</div>';
     html += '</div></div>';
 
@@ -492,6 +495,240 @@
     return null;
   }
 
+  /* ---------------- 粘贴提取 ---------------- */
+  // 入口：粘贴框 + 实时解析预览
+  function openPasteModal() {
+    var ex = document.querySelector('.modal-overlay');
+    if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
+    _pasteItems = [];
+
+    var html = '';
+    html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;line-height:1.6">从工作群复制内容粘贴到下方，系统自动识别 <b>事项 / 负责人 / 时间</b>。每行一条；支持 ' +
+      '<code>@张三</code>、<code>负责人：张三</code>、<code>（张三）</code>、<code>8月20日</code>、<code>下周三</code>、<code>明天</code> 等格式。解析结果可勾选并编辑后再生成。</p>';
+    html += '<textarea id="paste-input" class="form-input" rows="6" style="font-family:var(--font-mono);font-size:12px" placeholder="示例：\n@张老师 完成次月预排课表 8月20日\n下周三前 提交教务周报 — 李教务\n（王主管）核对新生名单 截止8/25 紧急"></textarea>';
+    html += '<div id="paste-preview" style="margin-top:14px"></div>';
+
+    App.util.modal({
+      title: '📋 粘贴提取待办',
+      content: html,
+      showCancel: true,
+      confirmText: '生成待办',
+      onConfirm: function(close) { confirmPasteImport(close); }
+    });
+
+    var ta = document.getElementById('paste-input');
+    if (ta) {
+      ta.addEventListener('input', onPasteInput);
+      ta.focus();
+    }
+    onPasteInput();
+  }
+
+  function onPasteInput() {
+    var ta = document.getElementById('paste-input');
+    if (!ta) return;
+    _pasteItems = parsePasteText(ta.value);
+    renderPastePreview();
+  }
+
+  function renderPastePreview() {
+    var box = document.getElementById('paste-preview');
+    if (!box) return;
+    if (_pasteItems.length === 0) {
+      box.innerHTML = '<p style="font-size:12px;color:var(--text-faint);text-align:center;padding:14px">粘贴文本后将在此预览解析结果，可勾选并编辑后生成。</p>';
+      return;
+    }
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    html += '<span style="font-size:12px;color:var(--text-muted)">已识别 <b>' + _pasteItems.length + '</b> 条，可编辑后生成</span>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleAllPaste()">全选 / 取消</button>';
+    html += '</div>';
+    html += '<div class="paste-table">';
+    _pasteItems.forEach(function(it, i) {
+      html += '<div class="paste-row" data-idx="' + i + '">';
+      html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
+      html += '<input class="form-input paste-f paste-title" id="pp-title-' + i + '" value="' + escapeAttr(it.title) + '" placeholder="事项描述">';
+      html += '<input class="form-input paste-f" id="pp-assignee-' + i + '" value="' + escapeAttr(it.assignee) + '" placeholder="负责人">';
+      html += '<input class="form-input paste-f" id="pp-due-' + i + '" type="date" value="' + escapeAttr(it.dueDate) + '">';
+      html += '<select class="form-input paste-f" id="pp-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
+      html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
+      html += '</div>';
+    });
+    html += '</div>';
+    box.innerHTML = html;
+  }
+
+  function removePasteRow(i) {
+    _pasteItems.splice(i, 1);
+    renderPastePreview();
+  }
+
+  function toggleAllPaste() {
+    var cks = document.querySelectorAll('.paste-ck');
+    var allChecked = Array.prototype.every.call(cks, function(c) { return c.checked; });
+    Array.prototype.forEach.call(cks, function(c) { c.checked = !allChecked; });
+  }
+
+  function confirmPasteImport(close) {
+    var tasks = getTasks();
+    var added = 0;
+    for (var i = 0; i < _pasteItems.length; i++) {
+      var ck = document.querySelector('.paste-ck[data-idx="' + i + '"]');
+      if (ck && !ck.checked) continue;
+      var titleEl = document.getElementById('pp-title-' + i);
+      var title = titleEl ? titleEl.value.trim() : '';
+      if (!title) continue;
+      var assignee = (document.getElementById('pp-assignee-' + i) || {}).value.trim();
+      var due = (document.getElementById('pp-due-' + i) || {}).value;
+      var prio = (document.getElementById('pp-prio-' + i) || {}).value;
+      tasks.push({
+        id: App.store.uid('task'),
+        title: title,
+        priority: prio,
+        status: 'todo',
+        assignee: assignee,
+        dueDate: due || '',
+        note: '',
+        source: 'paste',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      added++;
+    }
+    if (added === 0) { App.util.toast('没有可生成的待办', 'warn'); return; }
+    App.store.set('tasks', tasks);
+    if (close) close();
+    App.util.toast('已生成 ' + added + ' 条待办（来自粘贴）', 'ok');
+    App.router.resolve();
+  }
+
+  // —— 解析纯函数（不依赖 DOM）——
+  function parsePasteText(text) {
+    var lines = (text || '').split(/\r?\n/);
+    var items = [];
+    var base = new Date();
+    lines.forEach(function(line) {
+      line = line.trim();
+      if (!line) return;
+      // 去掉行首序号 / 项目符号
+      line = line.replace(/^[\d]+[.、)]\s*/, '').replace(/^[-*•·]\s*/, '');
+      if (!line) return;
+      var item = parseLine(line, base);
+      if (item && item.title) items.push(item);
+    });
+    return items;
+  }
+
+  function parseLine(line, base) {
+    var title = line;
+    var dueDate = parseDate(title, base);     // 仅提取，不改 title
+    var ap = extractAssignee(title);          // 提取并清理负责人
+    var assignee = ap.assignee;
+    title = ap.rest;
+    var priority = detectPriority(line);
+    title = cleanTitle(title);                // 清理日期/星期/优先级残留
+    if (!title) return null;
+    return { title: title, assignee: assignee || '', dueDate: dueDate || '', priority: priority, status: 'todo' };
+  }
+
+  // 返回 'YYYY-MM-DD' 或 null
+  function parseDate(text, base) {
+    // 绝对：年-月-日 / 年/月/日
+    var m = text.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+    if (m) return ymdStr(+m[1], +m[2], +m[3]);
+    // M月D日 / M月D号
+    m = text.match(/(\d{1,2})月(\d{1,2})[日号]/);
+    if (m) return mdThisOrNextYear(+m[1], +m[2], base);
+    // M/D 或 M.D
+    m = text.match(/(\d{1,2})[\/.](\d{1,2})(?!\d)/);
+    if (m) return mdThisOrNextYear(+m[1], +m[2], base);
+    // 相对星期
+    m = text.match(/(本周|这周|下周|下个?周)?\s*(周[一二三四五六日天]|星期[一二三四五六日天])/);
+    if (m) {
+      var wd = weekdayNum(m[2]);
+      if (wd == null) return null;
+      var d = new Date(base);
+      var diff = wd - d.getDay();
+      if (m[1] === '下周' || m[1] === '下个周') diff += 7;
+      else if (m[1] === '本周' || m[1] === '这周') { if (diff < 0) diff += 7; }
+      else { if (diff <= 0) diff += 7; } // 默认取下一个该星期
+      d.setDate(d.getDate() + diff);
+      return App.util.formatDate(d, 'YYYY-MM-DD');
+    }
+    if (/明天/.test(text)) { var d2 = new Date(base); d2.setDate(d2.getDate() + 1); return App.util.formatDate(d2, 'YYYY-MM-DD'); }
+    if (/后天/.test(text)) { var d3 = new Date(base); d3.setDate(d3.getDate() + 2); return App.util.formatDate(d3, 'YYYY-MM-DD'); }
+    if (/今天|今日/.test(text)) { return App.util.formatDate(base, 'YYYY-MM-DD'); }
+    return null;
+  }
+
+  function weekdayNum(s) {
+    var c = s.replace(/周|星期/, '');
+    var map = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 };
+    return map.hasOwnProperty(c) ? map[c] : null;
+  }
+
+  function ymdStr(y, mo, d) {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    var dt = new Date(y, mo - 1, d);
+    if (dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null; // 无效日期
+    return App.util.formatDate(dt, 'YYYY-MM-DD');
+  }
+
+  function mdThisOrNextYear(mo, d, base) {
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    var dt = new Date(base.getFullYear(), mo - 1, d);
+    if (dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+    if (dt.getTime() < base.getTime()) dt.setFullYear(base.getFullYear() + 1); // 已过去则视为明年
+    return App.util.formatDate(dt, 'YYYY-MM-DD');
+  }
+
+  function extractAssignee(text) {
+    var assignee = '';
+    var rest = text;
+    // 1. @姓名
+    var m = rest.match(/@([^\s，。；、,;：:）)】\]]+)/);
+    if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    // 2. 负责人：姓名
+    if (!assignee) {
+      m = rest.match(/负责人[：:\s]*([^\s，。；、,;]{1,10})/);
+      if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    }
+    // 3. （姓名）或(姓名)
+    if (!assignee) {
+      m = rest.match(/[（(]([\u4e00-\u9fa5·]{2,6})[）)]/);
+      if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    }
+    // 4. 行尾 — 姓名 / - 姓名
+    if (!assignee) {
+      m = rest.match(/[—\-–=]\s*([\u4e00-\u9fa5·]{2,6})\s*$/);
+      if (m) { assignee = m[1].trim(); rest = rest.replace(m[0], ' '); }
+    }
+    return { assignee: assignee, rest: rest };
+  }
+
+  function detectPriority(text) {
+    if (/紧急|加急|特急|尽快|🔴/.test(text)) return 'urgent';
+    if (/重要|高优|⚠/.test(text)) return 'high';
+    return 'normal';
+  }
+
+  function cleanTitle(s) {
+    s = s.replace(/@/g, ' ')
+      .replace(/负责人[：:\s]*/g, ' ')
+      .replace(/[（(][\u4e00-\u9fa5·]{2,6}[）)]/g, ' ')
+      .replace(/[—\-–=]\s*[\u4e00-\u9fa5·]{2,6}\s*$/g, ' ')
+      .replace(/(本周|这周|下周|下个?周)?(周|星期)?[一二三四五六日天]/g, ' ')
+      .replace(/明天|今天|今日|后天/g, ' ')
+      .replace(/截止/g, ' ')
+      .replace(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/g, ' ')
+      .replace(/(\d{1,2})月(\d{1,2})[日号]/g, ' ')
+      .replace(/(\d{1,2})[\/.](\d{1,2})/g, ' ')
+      .replace(/紧急|加急|特急|尽快|重要|高优/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^[：:、，。\-—\s]+|[：:、，。\-—\s]+$/g, '')
+      .trim();
+    return s;
+  }
+
   /* ---------------- 工具 ---------------- */
   function priorityOptions(sel) {
     return PRIORITIES.map(function(p) {
@@ -528,6 +765,9 @@
     deleteTask: deleteTask,
     saveTask: saveTask,
     generateFromTimeline: generateFromTimeline,
+    openPasteModal: openPasteModal,
+    removePasteRow: removePasteRow,
+    toggleAllPaste: toggleAllPaste,
     toggleHideDone: toggleHideDone,
     expandDone: expandDone,
     archiveTask: archiveTask,
