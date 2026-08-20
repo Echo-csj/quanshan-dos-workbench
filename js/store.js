@@ -61,6 +61,27 @@ window.App = window.App || {};
               skipNotice: true,           // 以上是/现将/特此/各位/大家/注意/任务如下 等通知行
               groupBackfill: true         // 以上N项 + 日期 → 批量回填截止日
             }
+          },
+          {
+            id: 'rule_template',
+            name: '任务表格模板',
+            enabled: true,
+            isDefault: false,
+            triggers: ['|', '任务表', '任务清单', '事项表', '工作表'], // 含「|」即优先选用（模板表格式）
+            lineDelimiter: '\\n',
+            rowDelimiter: '|',            // 行内以 | 分隔字段（兼容全角 ｜）
+            headerTokens: ['事项', '任务', '标题', '名称', '内容', '工作'],
+            fields: {
+              title:    { key:'title',    label:'事项',     enabled:true,  required:true,  method:'column', col:0 },
+              assignee: { key:'assignee', label:'负责人',   enabled:true,  required:false, method:'column', col:1 },
+              dueDate:  { key:'dueDate',  label:'截止日期', enabled:true,  required:false, method:'column', col:2 },
+              time:     { key:'time',     label:'时间',     enabled:true,  required:false, method:'column', col:3 },
+              priority: { key:'priority', label:'优先级',   enabled:true,  required:false, method:'column', col:4 }
+            },
+            lineFilters: {
+              skipReply: false, skipSectionHeaders: false, skipNegative: false,
+              skipEmailLines: false, skipPreface: false, skipNotice: false, groupBackfill: false
+            }
           }
         ]
       },

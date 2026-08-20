@@ -1369,6 +1369,17 @@
 
       if (lf.skipSectionHeaders && isSectionHeader(line)) { skipped.push({ line: line, reason: '章节标题' }); return; }
 
+      // 分隔符（表格）模式：非表格行与表头行直接跳过，不当作任务（实现「模板=规则、零调整」）
+      if (rule && rule.rowDelimiter) {
+        var _normLine = line.replace(/｜/g, '|');
+        if (_normLine.indexOf(rule.rowDelimiter) < 0) {
+          skipped.push({ line: line, reason: '非表格行' }); return;
+        }
+        var _hdTokens = ['事项', '任务', '标题', '名称', '内容', '工作'].concat((rule.headerTokens || []));
+        var _firstCol = _normLine.split(rule.rowDelimiter)[0].trim();
+        if (_hdTokens.indexOf(_firstCol) >= 0) { skipped.push({ line: line, reason: '表头行' }); return; }
+      }
+
       var content = stripLeading(line);
       if (!content) return;
 
@@ -1536,7 +1547,7 @@
     // 分隔符模式：按 rowDelimiter 把一行拆成列，被「指定列」字段占用的列从自动文本中剔除
     var cols = null, working;
     if (rule && rule.rowDelimiter) {
-      cols = line.split(rule.rowDelimiter).map(function(c) { return c.trim(); });
+      cols = line.replace(/｜/g, '|').split(rule.rowDelimiter).map(function(c) { return c.trim(); });
       var consumed = {};
       Object.keys(f).forEach(function(k) {
         var fc = f[k];
@@ -1576,12 +1587,19 @@
       }
     }
 
+    // 2.5) 独立时间列（time 字段单独成列时，取该列的时间，不污染日期）
+    var tf2 = f.time;
+    if (tf2 && tf2.enabled !== false && tf2.method === 'column' && typeof tf2.col === 'number' && cols && cols[tf2.col] !== undefined) {
+      var tpc = parseDate(cols[tf2.col], base, rule);
+      if (tpc && tpc.timeText) timeText = tpc.timeText;
+    }
+
     // 3) 优先级
     var priority = 'normal';
     var pf = f.priority;
     if (pf && pf.enabled !== false) {
       if (pf.method === 'column' && typeof pf.col === 'number' && cols && cols[pf.col] !== undefined) {
-        priority = detectPriority(cols[pf.col], pf);
+        priority = normalizePriorityText(cols[pf.col]);
       } else {
         priority = detectPriority(raw, pf);
         working = stripPriority(working);
@@ -1882,6 +1900,17 @@
     if (urgentMark.some(function (k) { return text.indexOf(k) >= 0; })) return 'urgent';
     if (highMark.some(function (k) { return text.indexOf(k) >= 0; })) return 'high';
     if (custom.some(function (k) { return k && text.indexOf(k) >= 0; })) return 'high';
+    return 'normal';
+  }
+
+  // 优先级列中文归一到应用枚举（紧急/重要/普通/低），容忍「高/中」等口语写法
+  function normalizePriorityText(s) {
+    if (!s) return 'normal';
+    var t = String(s).replace(/[\s（(].*$/, '').trim();
+    if (/紧急|加急|特急|尽快|urgent/i.test(t)) return 'urgent';
+    if (/重要|高优|高|优先|high/i.test(t)) return 'high';
+    if (/低|low/i.test(t)) return 'low';
+    if (/普通|中|正常|一般|normal/i.test(t)) return 'normal';
     return 'normal';
   }
 
