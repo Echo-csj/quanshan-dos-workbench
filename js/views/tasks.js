@@ -36,15 +36,6 @@
   /* ---------------- 数据访问 ---------------- */
   function getTasks() { return App.store.get('tasks') || []; }
 
-  function statusLabel(s) {
-    var c = COLUMNS.filter(function(x) { return x.status === s; })[0];
-    return c ? c.label : s;
-  }
-  function priorityLabel(p) {
-    var m = { urgent: '紧急', high: '高', normal: '普通', low: '低' };
-    return m[p] || p || '普通';
-  }
-
   /* ---------------- 视图设置（持久化）---------------- */
   var VIEW_DEFAULT = { mode:'kanban', density:'standard', filters:{status:[],priority:[],source:[]}, sortBy:'dueDate', sortDir:'asc', search:'', expanded:{}, columnLimit:10 };
   function getViewSettings() {
@@ -221,7 +212,7 @@
     });
     html += '</div>';
     html += '<span class="toolbar-sep"></span>';
-    html += '<input class="form-input tasks-search" placeholder="🔍 搜索 标题/负责人/备注" value="' + escapeAttr(view.search) + '" oninput="App.views.tasks.setSearch(this.value)">';
+    html += '<input class="form-input tasks-search" placeholder="🔍 搜索 标题/负责人/备注" value="' + App.util.escapeAttr(view.search) + '" oninput="App.views.tasks.setSearch(this.value)">';
     html += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">活动 ' + filtered.length + ' 条 · 已归档 ' + archivedCount + ' 条</span>';
     html += '</div>';
 
@@ -368,15 +359,15 @@
   }
 
   function renderListRow(t) {
-    var overdue = t.status !== 'done' && t.dueDate && isOverdue(t.dueDate);
+    var overdue = t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate);
     var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : '手动');
     var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
-    html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + escapeHtml(t.title || '未命名任务');
-    if (t.note) html += '<div class="list-note">' + escapeHtml(t.note) + '</div>';
+    html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.escapeHtml(t.title || '未命名任务');
+    if (t.note) html += '<div class="list-note">' + App.util.escapeHtml(t.note) + '</div>';
     html += '</td>';
-    html += '<td><span class="tag status-' + t.status + '">' + statusLabel(t.status) + '</span></td>';
-    html += '<td><span class="tag priority-' + (t.priority || 'normal') + '">' + priorityLabel(t.priority) + '</span></td>';
-    html += '<td>' + (t.assignee ? escapeHtml(t.assignee) : '<span style="color:var(--text-faint)">—</span>') + '</td>';
+    html += '<td><span class="tag status-' + t.status + '">' + App.util.statusLabel(t.status) + '</span></td>';
+    html += '<td><span class="tag priority-' + (t.priority || 'normal') + '">' + App.util.priorityLabel(t.priority) + '</span></td>';
+    html += '<td>' + (t.assignee ? App.util.escapeHtml(t.assignee) : '<span style="color:var(--text-faint)">—</span>') + '</td>';
     html += '<td style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">' + (t.dueDate || '<span style="color:var(--text-faint)">—</span>') + '</td>';
     html += '<td><span style="font-size:11px;color:var(--text-muted)">' + srcLabel + '</span></td>';
     html += '<td class="list-actions">';
@@ -458,7 +449,7 @@
     } else {
       html += '<div class="tasks-group-preview">';
       visible.slice(0, 3).forEach(function(t) {
-        html += '<div class="group-preview-item">' + escapeHtml(App.util.truncate(t.title || '未命名任务', 50)) + '</div>';
+        html += '<div class="group-preview-item">' + App.util.escapeHtml(App.util.truncate(t.title || '未命名任务', 50)) + '</div>';
       });
       if (hidden > 0) html += '<div class="group-preview-more">+ 还有 ' + hidden + ' 条，点击展开</div>';
       html += '</div>';
@@ -471,7 +462,7 @@
 
   function renderCard(t) {
     var prio = t.priority || 'normal';
-    var overdue = t.status !== 'done' && t.dueDate && isOverdue(t.dueDate);
+    var overdue = t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate);
     var tags = '';
 
     var html = '<div class="kanban-card" draggable="true" data-id="' + t.id + '" ' +
@@ -489,15 +480,15 @@
 
     // 主体（点击编辑）
     html += '<div class="kanban-card-body" onclick="App.views.tasks.editTask(\'' + t.id + '\')">';
-    html += '<div class="kanban-card-title">' + escapeHtml(t.title || '未命名任务') + '</div>';
+    html += '<div class="kanban-card-title">' + App.util.escapeHtml(t.title || '未命名任务') + '</div>';
     html += '<div class="kanban-card-meta">';
-    html += '<span class="tag priority-' + prio + '">' + priorityLabel(prio) + '</span>';
-    if (t.assignee) html += '<span>👤 ' + escapeHtml(t.assignee) + '</span>';
-    if (t.dueDate) html += '<span style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">📅 ' + escapeHtml(t.dueDate) + '</span>';
+    html += '<span class="tag priority-' + prio + '">' + App.util.priorityLabel(prio) + '</span>';
+    if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
+    if (t.dueDate) html += '<span style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">📅 ' + App.util.escapeHtml(t.dueDate) + '</span>';
     html += '</div>';
     if (t.source === 'timeline') html += '<div class="kanban-card-note">⏱ 来自时间轴</div>';
     else if (t.source === 'paste') html += '<div class="kanban-card-note">📋 来自粘贴</div>';
-    else if (t.note) html += '<div class="kanban-card-note">' + escapeHtml(t.note) + '</div>';
+    else if (t.note) html += '<div class="kanban-card-note">' + App.util.escapeHtml(t.note) + '</div>';
     html += '</div></div>';
 
     return html;
@@ -542,7 +533,7 @@
       t.completedAt = null; // 移出已完成则清除完成时间
     }
     App.store.set('tasks', tasks);
-    App.util.toast('「' + escapeHtml(t.title) + '」→ ' + statusLabel(status), 'ok');
+    App.util.toast('「' + App.util.escapeHtml(t.title) + '」→ ' + App.util.statusLabel(status), 'ok');
     App.router.resolve();
   }
 
@@ -553,16 +544,16 @@
     var data = t || { title: '', priority: 'normal', status: 'todo', assignee: '', dueDate: '', note: '' };
 
     var html = '<div style="display:flex;flex-direction:column;gap:14px">';
-    html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="task-title" value="' + escapeAttr(data.title) + '" placeholder="如：完成次月预排课表"></div>';
+    html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="task-title" value="' + App.util.escapeAttr(data.title) + '" placeholder="如：完成次月预排课表"></div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label class="form-label">优先级</label><select class="form-input" id="task-priority">' + priorityOptions(data.priority) + '</select></div>';
     html += '<div class="form-group"><label class="form-label">所属状态</label><select class="form-input" id="task-status">' + statusOptions(data.status) + '</select></div>';
     html += '</div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label class="form-label">负责人</label><input class="form-input" id="task-assignee" value="' + escapeAttr(data.assignee) + '" placeholder="如：张老师"></div>';
-    html += '<div class="form-group"><label class="form-label">截止日期</label><input class="form-input" id="task-due" type="date" value="' + escapeAttr(data.dueDate) + '"></div>';
+    html += '<div class="form-group"><label class="form-label">负责人</label><input class="form-input" id="task-assignee" value="' + App.util.escapeAttr(data.assignee) + '" placeholder="如：张老师"></div>';
+    html += '<div class="form-group"><label class="form-label">截止日期</label><input class="form-input" id="task-due" type="date" value="' + App.util.escapeAttr(data.dueDate) + '"></div>';
     html += '</div>';
-    html += '<div class="form-group"><label class="form-label">备注</label><textarea class="form-input" id="task-note" placeholder="补充说明（可选）">' + escapeHtml(data.note || '') + '</textarea></div>';
+    html += '<div class="form-group"><label class="form-label">备注</label><textarea class="form-input" id="task-note" placeholder="补充说明（可选）">' + App.util.escapeHtml(data.note || '') + '</textarea></div>';
     html += '</div>';
 
     App.util.modal({
@@ -607,7 +598,7 @@
     if (!t) return;
     App.util.modal({
       title: '确认删除任务',
-      content: '确定删除任务「' + escapeHtml(t.title) + '」？此操作不可撤销。',
+      content: '确定删除任务「' + App.util.escapeHtml(t.title) + '」？此操作不可撤销。',
       confirmText: '删除', confirmStyle: 'danger',
       onConfirm: function(close) {
         var tasks = getTasks().filter(function(x) { return x.id !== id; });
@@ -636,7 +627,6 @@
 
   function getHideDone() { return localStorage.getItem('tasks_hide_done') === '1'; }
   function toggleHideDone() { localStorage.setItem('tasks_hide_done', getHideDone() ? '0' : '1'); App.router.resolve(); }
-  function expandDone() { /* 已迁移至 toggleGroup('col:done')，保留为 no-op 以防历史引用 */ }
 
   function archiveTask(id) {
     var tasks = getTasks();
@@ -644,7 +634,7 @@
     if (!t) return;
     t.archived = true;
     App.store.set('tasks', tasks);
-    App.util.toast('已归档「' + escapeHtml(t.title) + '」', 'ok');
+    App.util.toast('已归档「' + App.util.escapeHtml(t.title) + '」', 'ok');
     App.router.resolve();
   }
 
@@ -684,10 +674,10 @@
       archived.forEach(function(t) {
         html += '<div class="archive-row">';
         html += '<div class="archive-row-main">';
-        html += '<div class="archive-row-title">' + escapeHtml(t.title || '未命名任务') + '</div>';
+        html += '<div class="archive-row-title">' + App.util.escapeHtml(t.title || '未命名任务') + '</div>';
         html += '<div class="archive-row-meta">';
-        html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + priorityLabel(t.priority) + '</span>';
-        if (t.assignee) html += '<span>👤 ' + escapeHtml(t.assignee) + '</span>';
+        html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + App.util.priorityLabel(t.priority) + '</span>';
+        if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
         if (t.completedAt) html += '<span>✅ 完成于 ' + App.util.formatDate(new Date(t.completedAt), 'YYYY-MM-DD') + '</span>';
         html += '</div></div>';
         html += '<div class="archive-row-actions">';
@@ -710,7 +700,7 @@
     t.archived = false;
     t.completedAt = null; // 恢复为活跃，不再按旧完成时间自动归档
     App.store.set('tasks', tasks);
-    App.util.toast('已恢复「' + escapeHtml(t.title) + '」到看板', 'ok');
+    App.util.toast('已恢复「' + App.util.escapeHtml(t.title) + '」到看板', 'ok');
     openArchiveModal();
     App.router.resolve();
   }
@@ -720,7 +710,7 @@
     if (!t) return;
     App.util.modal({
       title: '确认彻底删除',
-      content: '确定彻底删除「' + escapeHtml(t.title) + '」？此操作不可恢复，且不会保留在归档列表中。',
+      content: '确定彻底删除「' + App.util.escapeHtml(t.title) + '」？此操作不可恢复，且不会保留在归档列表中。',
       confirmText: '彻底删除', confirmStyle: 'danger',
       onConfirm: function(close) {
         var tasks = getTasks().filter(function(x) { return x.id !== id; });
@@ -837,7 +827,7 @@
     html += '<select id="paste-rule" class="form-input" onchange="App.views.tasks.onPasteRuleChange(this.value)">';
     getRules().forEach(function(r) {
       if (!r.enabled) return;
-      html += '<option value="' + r.id + '"' + (_currentRule && _currentRule.id === r.id ? ' selected' : '') + '>' + escapeHtml(r.name) + (r.isDefault ? '（默认）' : '') + '</option>';
+      html += '<option value="' + r.id + '"' + (_currentRule && _currentRule.id === r.id ? ' selected' : '') + '>' + App.util.escapeHtml(r.name) + (r.isDefault ? '（默认）' : '') + '</option>';
     });
     html += '</select>';
     html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.openRulesModal()">⚙ 管理规则</button>';
@@ -931,19 +921,19 @@
       var hasErr = it._errors && it._errors.length;
       html += '<div class="paste-row' + (hasErr ? ' paste-row-error' : '') + '" data-idx="' + i + '">';
       html += '<input type="checkbox" class="paste-ck" data-idx="' + i + '" checked>';
-      html += '<textarea class="form-input paste-f paste-title" id="' + idPrefix + '-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + escapeAttr(it._raw || '') + '">' + escapeHtml(it.title) + '</textarea>';
+      html += '<textarea class="form-input paste-f paste-title" id="' + idPrefix + '-title-' + i + '" rows="1" placeholder="事项描述" title="原文：' + App.util.escapeAttr(it._raw || '') + '">' + App.util.escapeHtml(it.title) + '</textarea>';
       html += '<div class="paste-meta">';
       fields.forEach(function(fld) {
         var val = it[fld.key] || '';
         var miss = fld.required && !val;
         if (fld.key === 'dueDate') {
-          html += '<input class="form-input paste-f' + (miss ? ' paste-miss' : '') + '" id="' + idPrefix + '-due-' + i + '" type="date" value="' + escapeAttr(val) + '" title="' + (fld.required ? '必填字段' : '截止日期') + '">';
+          html += '<input class="form-input paste-f' + (miss ? ' paste-miss' : '') + '" id="' + idPrefix + '-due-' + i + '" type="date" value="' + App.util.escapeAttr(val) + '" title="' + (fld.required ? '必填字段' : '截止日期') + '">';
         } else if (fld.key === 'priority') {
           html += '<select class="form-input paste-f" id="' + idPrefix + '-prio-' + i + '">' + priorityOptions(it.priority) + '</select>';
         } else if (fld.key === 'assignee') {
-          html += '<input class="form-input paste-f' + (miss ? ' paste-miss' : '') + '" id="' + idPrefix + '-assignee-' + i + '" value="' + escapeAttr(val) + '" placeholder="负责人" title="' + (fld.required ? '必填字段' : '负责人') + '">';
+          html += '<input class="form-input paste-f' + (miss ? ' paste-miss' : '') + '" id="' + idPrefix + '-assignee-' + i + '" value="' + App.util.escapeAttr(val) + '" placeholder="负责人" title="' + (fld.required ? '必填字段' : '负责人') + '">';
         } else if (fld.key === 'time') {
-          html += '<input class="form-input paste-f" id="' + idPrefix + '-time-' + i + '" value="' + escapeAttr(val) + '" placeholder="时间">';
+          html += '<input class="form-input paste-f" id="' + idPrefix + '-time-' + i + '" value="' + App.util.escapeAttr(val) + '" placeholder="时间">';
         }
       });
       // 置信度胶囊
@@ -954,9 +944,9 @@
       html += '<button class="btn-icon btn-icon-danger" title="移除" onclick="App.views.tasks.removePasteRow(' + i + ')">✕</button>';
       html += '</div>';
       if (it._errors && it._errors.length) {
-        html += '<div class="paste-warning">⚠️ ' + escapeHtml(it._errors.join(' · ')) + '</div>';
+        html += '<div class="paste-warning">⚠️ ' + App.util.escapeHtml(it._errors.join(' · ')) + '</div>';
       } else if (it.warnings && it.warnings.length) {
-        html += '<div class="paste-warning">⚠️ ' + escapeHtml(it.warnings.join(' · ')) + '</div>';
+        html += '<div class="paste-warning">⚠️ ' + App.util.escapeHtml(it.warnings.join(' · ')) + '</div>';
       }
       html += '</div>';
     });
@@ -969,7 +959,7 @@
     var html = '<details style="margin-top:14px"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted)">⏭ 被识别为说明跳过 ' + result.skipped.length + ' 行（点击展开）</summary>';
     html += '<div style="margin-top:8px;padding:10px;background:var(--surface-2);border-radius:var(--radius);font-size:11px;color:var(--text-muted);line-height:1.7">';
     result.skipped.forEach(function(s) {
-      html += '<div style="margin-bottom:4px"><code style="color:var(--text-faint)">[' + escapeHtml(s.reason) + ']</code> ' + escapeHtml(s.line) + '</div>';
+      html += '<div style="margin-bottom:4px"><code style="color:var(--text-faint)">[' + App.util.escapeHtml(s.reason) + ']</code> ' + App.util.escapeHtml(s.line) + '</div>';
     });
     html += '</div></details>';
     return html;
@@ -1048,7 +1038,7 @@
       html += '<div class="rule-card">';
       html += '<div class="rule-card-head">';
       html += '<label class="switch switch-sm"><input type="checkbox" ' + (r.enabled ? 'checked' : '') + ' onchange="App.views.tasks.toggleRule(\'' + r.id + '\')"><span class="slider"></span></label>';
-      html += '<span class="rule-name">' + escapeHtml(r.name) + '</span>';
+      html += '<span class="rule-name">' + App.util.escapeHtml(r.name) + '</span>';
       if (r.isDefault) html += '<span class="rule-badge rule-badge-default">默认</span>';
       html += '</div>';
       html += '<div class="rule-card-meta">触发词：' + trig + ' · 启用字段 <b>' + fcount + '</b> 个</div>';
@@ -1096,7 +1086,7 @@
     var name = (rules.filter(function(x) { return x.id === id; })[0] || {}).name || '';
     App.util.modal({
       title: '确认删除规则',
-      content: '确定删除规则「<b>' + escapeHtml(name) + '</b>」？',
+      content: '确定删除规则「<b>' + App.util.escapeHtml(name) + '</b>」？',
       confirmText: '删除', confirmStyle: 'danger',
       onConfirm: function(close) {
         var remaining = rules.filter(function(x) { return x.id !== id; });
@@ -1142,13 +1132,13 @@
     var html = '<div class="rule-editor">';
     // 名称 + 启用
     html += '<div class="form-row">';
-    html += '<div class="form-group" style="flex:2"><label class="form-label">规则名称</label><input class="form-input" id="re-name" value="' + escapeAttr(rule.name) + '"></div>';
+    html += '<div class="form-group" style="flex:2"><label class="form-label">规则名称</label><input class="form-input" id="re-name" value="' + App.util.escapeAttr(rule.name) + '"></div>';
     html += '<div class="form-group" style="flex:0 0 90px"><label class="form-label">启用</label><label class="switch"><input type="checkbox" id="re-enabled" ' + (rule.enabled ? 'checked' : '') + '><span class="slider"></span></label></div>';
     html += '</div>';
     // 触发词
-    html += '<div class="form-group"><label class="form-label">触发关键词（粘贴内容含任一词即优先选用，逗号分隔；留空 = 兜底规则）</label><input class="form-input" id="re-triggers" value="' + escapeAttr((rule.triggers || []).join('，')) + '" placeholder="如：竞聘，9月事项，新生"></div>';
+    html += '<div class="form-group"><label class="form-label">触发关键词（粘贴内容含任一词即优先选用，逗号分隔；留空 = 兜底规则）</label><input class="form-input" id="re-triggers" value="' + App.util.escapeAttr((rule.triggers || []).join('，')) + '" placeholder="如：竞聘，9月事项，新生"></div>';
     // 行内字段分隔符（分隔符模式）
-    html += '<div class="form-group"><label class="form-label">行内字段分隔符（留空 = 按整行智能提取；填「|」或「,」等可将一行拆列，再用下方「指定列」精确取字段）</label><input class="form-input" id="re-rowDelim" value="' + escapeAttr(rule.rowDelimiter || '') + '" placeholder="如： |  或  ， （单字符）"></div>';
+    html += '<div class="form-group"><label class="form-label">行内字段分隔符（留空 = 按整行智能提取；填「|」或「,」等可将一行拆列，再用下方「指定列」精确取字段）</label><input class="form-input" id="re-rowDelim" value="' + App.util.escapeAttr(rule.rowDelimiter || '') + '" placeholder="如： |  或  ， （单字符）"></div>';
 
     // —— 字段配置 ——
     html += '<h4 class="rule-sec-title">字段配置（勾选即提取该列；可设「指定列」用分隔符精确取数，或设必填）</h4>';
@@ -1187,7 +1177,7 @@
         html += '</span>';
       }
       if (k === 'priority') {
-        html += '<span class="rule-field-opts"><input class="form-input" id="re-prio-kw" value="' + escapeAttr((fc.keywords || []).join('，')) + '" placeholder="关键词逗号分隔" style="width:200px"></span>';
+        html += '<span class="rule-field-opts"><input class="form-input" id="re-prio-kw" value="' + App.util.escapeAttr((fc.keywords || []).join('，')) + '" placeholder="关键词逗号分隔" style="width:200px"></span>';
       }
       if (k !== 'title') {
         html += '<label class="chk-inline rule-req"><input type="checkbox" id="re-req-' + k + '" ' + (fc.required ? 'checked' : '') + '> 必填</label>';
@@ -1501,16 +1491,6 @@
       .replace(/完成|截止|前/g, '')
       .replace(/\s/g, '');
     return rest.length <= 2;
-  }
-
-  // 跳过明显的"列表说明"行（不当作任务）；真实条目（如"针对家长…跟进"）放行
-  function isLikelyHeader(line) {
-    if (line.length < 8) return false;
-    if (/^(以上是|以下是|现将|现就|特此|综上|总之|本次|本周期|本季度|本学期|本学年|同学们|各位|大家|注意[:：]?|任务如下|有如下|有以下|邮件发送|抄送|主送|发件人|收件人|转发|令)/.test(line)) return true;
-    if (/^(针对|关于|根据|按照|请各|请将|请于|请在)/.test(line)) {
-      return /(有以下|有如下|任务如下|几项任务|以下任务|如下[:：]|任务清单|安排如下|具体任务)/.test(line);
-    }
-    return false;
   }
 
   // 顶级章节标题：👉一、新生 / ▶二、9月事项安排 / 一、任务部署 等 → 跳过，不当作任务
@@ -1952,17 +1932,6 @@
       return '<option value="' + c.status + '"' + (c.status === sel ? ' selected' : '') + '>' + c.label + '</option>';
     }).join('');
   }
-  function escapeHtml(s) {
-    if (!s) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-  function escapeAttr(s) { return escapeHtml(s); }
-  function isOverdue(dateStr) {
-    if (!dateStr) return false;
-    var d = new Date(dateStr + 'T23:59:59');
-    return d.getTime() < Date.now();
-  }
-
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.tasks = {

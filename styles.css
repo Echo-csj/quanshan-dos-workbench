@@ -497,6 +497,59 @@ a:hover { color: var(--accent-hover); }
   .paste-row .paste-conf { grid-column: 1 / -1; }
 }
 
+/* 粘贴：规则选择条 + 校验横幅 + 必填缺失 */
+.paste-rulebar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.paste-rulebar label { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.paste-rulebar select { flex: 1; min-width: 150px; }
+.paste-rulebar .btn-sm { white-space: nowrap; }
+
+.paste-banner { padding: 9px 12px; border-radius: var(--radius); font-size: 12px; line-height: 1.5; margin-bottom: 12px; display: flex; gap: 8px; align-items: flex-start; border: 1px solid transparent; }
+.paste-banner .pb-icon { font-size: 14px; line-height: 1.35; flex-shrink: 0; }
+.paste-banner .pb-body { flex: 1; }
+.paste-banner .pb-body b { font-weight: 600; }
+.paste-banner.ok { background: var(--ok-soft); border-color: var(--ok); color: var(--ok-text); }
+.paste-banner.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn-text); }
+.paste-banner.error { background: var(--bad-soft); border-color: var(--bad); color: var(--bad-text); }
+
+.paste-miss { border-color: var(--bad) !important; box-shadow: 0 0 0 1px var(--bad); }
+.paste-miss-hint { grid-column: 1 / -1; font-size: 11px; color: var(--bad-text); padding: 2px 6px 0 26px; }
+
+/* 开关（switch）*/
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; cursor: pointer; inset: 0; background: var(--border-strong); border-radius: 22px; transition: background .2s; }
+.switch .slider:before { content: ""; position: absolute; height: 16px; width: 16px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider:before { transform: translateX(18px); }
+.switch-sm { width: 34px; height: 18px; }
+.switch-sm .slider:before { height: 12px; width: 12px; left: 3px; top: 3px; }
+.switch-sm input:checked + .slider:before { transform: translateX(16px); }
+
+/* 规则管理列表 */
+.rules-list { display: flex; flex-direction: column; gap: 10px; }
+.rule-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--surface); }
+.rule-card-head { display: flex; align-items: center; gap: 10px; }
+.rule-name { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; }
+.rule-badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 600; }
+.rule-badge-default { background: var(--accent-soft); color: var(--accent-text); }
+.rule-card-meta { font-size: 12px; color: var(--text-muted); margin: 6px 0 10px 44px; line-height: 1.5; }
+.rule-card-meta b { color: var(--text); }
+.rule-faint { color: var(--text-faint); }
+.rule-card-actions { display: flex; gap: 6px; margin-left: 44px; flex-wrap: wrap; }
+
+/* 规则编辑器 */
+.rule-editor { max-height: 64vh; overflow-y: auto; }
+.rule-sec-title { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin: 18px 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.rule-fields { display: flex; flex-direction: column; gap: 8px; }
+.rule-field-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; flex-wrap: wrap; }
+.rule-field-label { font-size: 13px; color: var(--text); width: 56px; flex-shrink: 0; font-weight: 500; }
+.rule-field-opts { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; flex: 1; }
+.rule-req { color: var(--text-muted); }
+.rule-filters { display: flex; gap: 10px 18px; flex-wrap: wrap; }
+.chk-inline { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.chk-inline input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+.rule-field-opts .form-input { width: 220px; }
+
 /* --- Timeline --- */
 .timeline-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; }
 .timeline-day {

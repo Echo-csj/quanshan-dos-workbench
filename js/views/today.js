@@ -39,7 +39,7 @@
     var todoTasks = tasks.filter(function(t) { return t.status === 'todo'; });
     var doingTasks = tasks.filter(function(t) { return t.status === 'doing'; });
     var reviewTasks = tasks.filter(function(t) { return t.status === 'review'; });
-    var overdueTasks = tasks.filter(function(t) { return t.status !== 'done' && t.dueDate && isOverdue(t.dueDate); });
+    var overdueTasks = tasks.filter(function(t) { return t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate); });
 
     var html = '';
 
@@ -287,12 +287,6 @@
     });
     result.sort(function(a, b) { return a.weekday - b.weekday; });
     return result;
-  }
-
-  function isOverdue(dateStr) {
-    if (!dateStr) return false;
-    var d = new Date(dateStr + 'T23:59:59');
-    return d.getTime() < Date.now();
   }
 
   function statChip(label, count, color) {

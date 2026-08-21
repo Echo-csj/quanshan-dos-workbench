@@ -17,13 +17,6 @@ window.App = window.App || {};
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   }
 
-  // 获取某年某月的周数
-  function getWeeksInMonth(year, month) {
-    var firstDay = new Date(year, month, 1);
-    var lastDay = new Date(year, month + 1, 0);
-    return getWeekNumber(lastDay) - getWeekNumber(firstDay) + 1;
-  }
-
   // 获取当月第几周（基于周一起始）
   function getMonthWeek(d) {
     var firstOfMonth = new Date(d.getFullYear(), d.getMonth(), 1);
@@ -350,17 +343,24 @@ window.App = window.App || {};
   // --- Priority & Status helpers ---
   function priorityLabel(p) {
     var map = { urgent: '紧急', high: '高', normal: '普通', low: '低' };
-    return map[p] || p;
+    return map[p] || p || '普通';
   }
 
   function statusLabel(s) {
-    var map = { todo: '待办', doing: '进行中', following: '待跟进', done: '已完成', overdue: '已逾期' };
+    var map = { todo: '待办', doing: '进行中', review: '审阅中', following: '待跟进', done: '已完成', overdue: '已逾期' };
     return map[s] || s;
   }
 
   function statusColor(s) {
     var map = { todo: 'neutral', doing: 'accent', following: 'warn', done: 'ok', overdue: 'bad' };
     return map[s] || 'neutral';
+  }
+
+  // 是否逾期（截止日当天 23:59:59 前未完成即逾期）
+  function isOverdue(dateStr) {
+    if (!dateStr) return false;
+    var d = new Date(dateStr + 'T23:59:59');
+    return d.getTime() < Date.now();
   }
 
   // --- SVG 折线图（离线渲染，用于趋势）---
@@ -445,6 +445,7 @@ window.App = window.App || {};
     priorityLabel: priorityLabel,
     statusLabel: statusLabel,
     statusColor: statusColor,
+    isOverdue: isOverdue,
     lineChart: lineChart,
     chartFmt: chartFmt,
     escapeHtml: escapeHtml,
