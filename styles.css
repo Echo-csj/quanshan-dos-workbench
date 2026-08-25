@@ -598,8 +598,10 @@ a:hover { color: var(--accent-hover); }
 .color-swatch.selected { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--nc); }
 
 /* 月视图格子节点小条 */
-.tl-month-chip { font-size:9px; background:var(--accent-soft); color:var(--accent-text); padding:1px 4px; border-radius:2px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; }
+.tl-month-chip { display:flex; align-items:center; gap:3px; font-size:9px; background:var(--accent-soft); color:var(--accent-text); padding:1px 4px; border-radius:2px; margin-top:2px; white-space:nowrap; overflow:hidden; cursor:pointer; }
 .tl-month-chip[data-color] { background:var(--nc-bg); color:var(--nc-text); border-left:2px solid var(--nc); }
+.tl-chip-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; flex:1 1 auto; }
+.abs-flag { flex:none; font-size:9px; opacity:.7; white-space:nowrap; }
 .tl-month-chip.dragging { opacity:.4; }
 
 /* 拖动状态 */

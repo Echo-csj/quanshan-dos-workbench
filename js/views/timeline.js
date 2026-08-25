@@ -32,7 +32,7 @@
     html += '</div>';
     html += '<button class="btn btn-primary btn-sm" onclick="App.views.timeline.openNodeModal()">' + App.util.svgIcon('plus', 15) + ' 新建节点</button>';
     html += '</div>';
-    html += '<p style="font-size:12px;color:var(--text-faint);margin:0 0 12px">💡 点击卡片可编辑<b>类型/颜色</b>，<b>拖动卡片</b>到其它星期列即可调整时间位置（实时生效）。</p>';
+    html += '<p style="font-size:12px;color:var(--text-faint);margin:0 0 12px">💡 点击卡片可编辑<b>类型/颜色</b>；<b>周视图拖动</b>改星期，<b>月视图拖动到某天</b>即设为<b>绝对日期</b>（仅当天显示，不再每周重复）。</p>';
 
     if (viewMode === 'week') {
       html += renderWeekView(anchor, today, allNodes, weekdayNames);
@@ -66,7 +66,7 @@
       var dateStr = App.util.formatDate(date, 'YYYY-MM-DD');
       var isToday = dateStr === App.util.formatDate(today, 'YYYY-MM-DD');
 
-      html += '<div class="timeline-day' + (isToday ? ' today' : '') + '" ondragover="App.views.timeline.onDragOver(event)" ondragleave="App.views.timeline.onDragLeave(event)" ondrop="App.views.timeline.onDrop(event, ' + date.getDay() + ')">';
+      html += '<div class="timeline-day' + (isToday ? ' today' : '') + '" ondragover="App.views.timeline.onDragOver(event)" ondragleave="App.views.timeline.onDragLeave(event)" ondrop="App.views.timeline.onDrop(event, ' + date.getDay() + ', null)">';
       html += '<div class="timeline-day-header">';
       html += '<span>' + weekdayNames[date.getDay()] + '</span>';
       html += '<span class="mono" style="font-size:11px;color:var(--text-faint)">' + (date.getMonth() + 1) + '/' + date.getDate() + '</span>';
@@ -74,6 +74,7 @@
 
       // 渲染该日的节点（含"最后一周周三"类月度节点）
       var dayNodes = allNodes.filter(function(n) {
+        if (n.date) return n.date === dateStr;
         if (n.type === 'monthly') {
           if (n.weekday != null && n.weekday === date.getDay()) {
             if (n.which === 'last') return App.util.isLastWeekOfMonth(date);
@@ -90,6 +91,7 @@
         var draggable = (node.type === 'monthly' && node.weekday == null) ? '' : ' draggable="true" ondragstart="App.views.timeline.onDragStart(event, \'' + node.id + '\')"';
         html += '<div class="timeline-node ' + nodeClass + colorCls + '"' + colorAttr + draggable + ' title="点击编辑 · 拖动可改星期" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<strong>' + App.util.escapeHtml(node.title) + '</strong>';
+        if (node.date) { html += '<span class="abs-flag" title="绝对日期：' + node.date + '">📅</span>'; }
         if (node.time) { html += '<span class="mono" style="margin-left:auto;font-size:10px">' + node.time + '</span>'; }
         html += '<span class="node-edit-hint">✎</span>';
         html += '</div>';
@@ -158,6 +160,7 @@
 
       // 找到这天的固定节点（含"最后一周周三"类月度节点）
       var dayFixedNodes = allNodes.filter(function(n) {
+        if (n.date) return n.date === dateStr;
         if (n.type === 'monthly') {
           if (n.weekday != null && n.weekday === d.getDay() && n.which === 'last') {
             return App.util.isLastWeekOfMonth(d);
@@ -167,14 +170,15 @@
         return n.weekday === d.getDay();
       });
 
-      html += '<div class="tl-month-cell" style="background:' + (isToday ? 'var(--accent-soft)' : 'var(--bg)') + ';min-height:70px;padding:4px 6px;position:relative" ondragover="App.views.timeline.onDragOver(event)" ondragleave="App.views.timeline.onDragLeave(event)" ondrop="App.views.timeline.onDrop(event, ' + d.getDay() + ')">';
+      html += '<div class="tl-month-cell" style="background:' + (isToday ? 'var(--accent-soft)' : 'var(--bg)') + ';min-height:70px;padding:4px 6px;position:relative" ondragover="App.views.timeline.onDragOver(event)" ondragleave="App.views.timeline.onDragLeave(event)" ondrop="App.views.timeline.onDrop(event, ' + d.getDay() + ', \'' + dateStr + '\')">';
       html += '<span style="font-size:12px;font-weight:' + (isToday ? '700;color:var(--accent)' : '500') + '">' + day + '</span>';
 
       if (dayFixedNodes.length > 0) {
         dayFixedNodes.forEach(function(n) {
           var colorCls = n.color ? ' nl-' + n.color : '';
           var colorAttr = n.color ? ' data-color="' + App.util.escapeAttr(n.color) + '"' : '';
-          html += '<div class="tl-month-chip' + colorCls + '"' + colorAttr + ' draggable="true" ondragstart="App.views.timeline.onDragStart(event, \'' + n.id + '\')" onclick="App.views.timeline.openNodeModal(\'' + n.id + '\')" title="' + App.util.escapeAttr(n.title) + ' · 点击编辑/拖动改星期">' + App.util.escapeHtml(n.title) + '</div>';
+          var absFlag = n.date ? '<span class="abs-flag" title="绝对日期：' + n.date + '">📅' + n.date.slice(5) + '</span>' : '';
+          html += '<div class="tl-month-chip' + colorCls + '"' + colorAttr + ' draggable="true" ondragstart="App.views.timeline.onDragStart(event, \'' + n.id + '\')" onclick="App.views.timeline.openNodeModal(\'' + n.id + '\')" title="' + App.util.escapeAttr(n.title) + (n.date ? ' · 绝对日期 ' + n.date : ' · 点击编辑/拖动改星期') + '"><span class="tl-chip-title">' + App.util.escapeHtml(n.title) + '</span>' + absFlag + '</div>';
         });
       }
 
@@ -237,6 +241,8 @@
       html += '<option value="' + i + '"' + (weekdayVal === String(i) ? ' selected' : '') + '>' + n + '</option>';
     });
     html += '</select></div>';
+    // 具体日期（绝对日期）：设定后按具体某天显示，清空则回到周度/月度
+    html += '<div class="form-group"><label class="form-label">具体日期（可选，设定后按绝对日期显示）</label><input class="form-input" id="node-date" type="date" value="' + App.util.escapeAttr(data.date || '') + '" style="max-width:220px"></div>';
     // 颜色标记
     html += '<div class="form-group"><label class="form-label">颜色标记（用于区分事项）</label><div id="node-color-swatches" class="color-swatches">';
     PALETTE.forEach(function(c) {
@@ -278,6 +284,8 @@
     var reminder = document.getElementById('node-reminder').checked;
     var note = document.getElementById('node-note').value.trim();
     var color = document.getElementById('node-color').value;
+    var dateEl = document.getElementById('node-date');
+    var dateVal = dateEl ? dateEl.value.trim() : '';
 
     var newNode = {
       title: title,
@@ -288,7 +296,13 @@
       note: note
     };
     if (color) newNode.color = color; else newNode.color = null;
-    if (isMonthly) {
+    if (dateVal) {
+      // 设定具体日期 → 转为绝对日期事项（type 归 fixed，清除月度相位）
+      newNode.type = 'fixed';
+      newNode.date = dateVal;
+      newNode.weekday = new Date(dateVal + 'T00:00:00').getDay();
+      delete newNode.which; delete newNode.cron;
+    } else if (isMonthly) {
       if (weekday != null) newNode.which = 'last';
       else newNode.cron = 'last-week-of-month';
     }
@@ -299,8 +313,8 @@
       var fi = -1, ci = -1;
       fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
       custom.forEach(function(n, i) { if (n.id === id) ci = i; });
-      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); if (newNode.color === null) delete fixed[fi].color; App.store.set('timeline.fixedNodes', fixed); }
-      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); if (newNode.color === null) delete custom[ci].color; App.store.set('timeline.customNodes', custom); }
+      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); if (newNode.color === null) delete fixed[fi].color; if (!newNode.date) delete fixed[fi].date; App.store.set('timeline.fixedNodes', fixed); }
+      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); if (newNode.color === null) delete custom[ci].color; if (!newNode.date) delete custom[ci].date; App.store.set('timeline.customNodes', custom); }
     } else {
       newNode.id = App.store.uid('node');
       App.store.push('timeline.customNodes', newNode);
@@ -361,13 +375,14 @@
   function onDragLeave(e) {
     if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.remove('drop-target');
   }
-  function onDrop(e, weekday) {
+  function onDrop(e, weekday, dateStr) {
     e.preventDefault();
     if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.remove('drop-target');
     clearDragging();
     var id = e.dataTransfer ? e.dataTransfer.getData('text/plain') : null;
     if (!id) return;
-    moveNodeWeekday(id, weekday);
+    if (dateStr) moveNodeDate(id, dateStr);
+    else moveNodeWeekday(id, weekday);
   }
 
   // 把节点移动到新的星期列（校准 time 坐标），不影响其它节点
@@ -378,15 +393,56 @@
     fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
     custom.forEach(function(n, i) { if (n.id === id) ci = i; });
     if (fi >= 0) {
-      fixed[fi] = Object.assign({}, fixed[fi], { weekday: weekday });
+      var upd = { weekday: weekday };
+      if (fixed[fi].date) {
+        // 绝对日期事项：把 date 重算到本周该星期几
+        var a = getAnchor();
+        var diff = a.getDay() === 0 ? 6 : a.getDay() - 1;
+        var sow = new Date(a.getFullYear(), a.getMonth(), a.getDate() - diff);
+        var nd = new Date(sow.getTime() + (weekday - 1) * 86400000);
+        upd.date = App.util.formatDate(nd, 'YYYY-MM-DD');
+      }
+      fixed[fi] = Object.assign({}, fixed[fi], upd);
       App.store.set('timeline.fixedNodes', fixed);
     } else if (ci >= 0) {
-      custom[ci] = Object.assign({}, custom[ci], { weekday: weekday });
+      var cupd = { weekday: weekday };
+      if (custom[ci].date) {
+        var a2 = getAnchor();
+        var diff2 = a2.getDay() === 0 ? 6 : a2.getDay() - 1;
+        var sow2 = new Date(a2.getFullYear(), a2.getMonth(), a2.getDate() - diff2);
+        var nd2 = new Date(sow2.getTime() + (weekday - 1) * 86400000);
+        cupd.date = App.util.formatDate(nd2, 'YYYY-MM-DD');
+      }
+      custom[ci] = Object.assign({}, custom[ci], cupd);
       App.store.set('timeline.customNodes', custom);
     } else {
       return;
     }
     App.util.toast('已更新时间位置', 'ok');
+    App.router.resolve();
+  }
+
+  // 把节点移动到指定绝对日期（月视图拖动）；同步更新 weekday，清除月度相位
+  function moveNodeDate(id, dateStr) {
+    var d = new Date(dateStr + 'T00:00:00');
+    if (isNaN(d.getTime())) return;
+    var fixed = App.store.get('timeline.fixedNodes') || [];
+    var custom = App.store.get('timeline.customNodes') || [];
+    var fi = -1, ci = -1;
+    fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
+    custom.forEach(function(n, i) { if (n.id === id) ci = i; });
+    if (fi >= 0) {
+      fixed[fi] = Object.assign({}, fixed[fi], { date: dateStr, weekday: d.getDay() });
+      delete fixed[fi].which; delete fixed[fi].cron;
+      App.store.set('timeline.fixedNodes', fixed);
+    } else if (ci >= 0) {
+      custom[ci] = Object.assign({}, custom[ci], { date: dateStr, weekday: d.getDay() });
+      delete custom[ci].which; delete custom[ci].cron;
+      App.store.set('timeline.customNodes', custom);
+    } else {
+      return;
+    }
+    App.util.toast('已设为绝对日期：' + dateStr, 'ok');
     App.router.resolve();
   }
 
@@ -411,6 +467,7 @@
     onDragLeave: onDragLeave,
     onDrop: onDrop,
     moveNodeWeekday: moveNodeWeekday,
+    moveNodeDate: moveNodeDate,
     shiftWeek: function(dir) {
       if (dir === 0) setAnchor(new Date());
       else { var a = getAnchor(); a.setDate(a.getDate() + dir * 7); setAnchor(a); }
