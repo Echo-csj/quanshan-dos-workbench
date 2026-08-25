@@ -61,6 +61,12 @@
     });
     html += '</tbody></table></div>';
 
+    // --- 教研时间轴同步 ---
+    html += '<div class="card" style="margin-bottom:20px"><div class="card-header"><h3 class="card-title">📚 教研时间轴同步</h3></div>';
+    html += '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">将《校区教研流程与标准》中的教研周节律 / 月节律节点一键同步进「时间轴」板块。不会覆盖你已有的节点，可重复点击。</p>';
+    html += '<button class="btn btn-secondary" onclick="App.views.settings.syncResearchTimeline()">🔄 同步教研时间轴节点</button>';
+    html += '</div>';
+
     // --- 数据管理 ---
     html += '<div class="card" style="margin-bottom:20px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('database', 18) + '数据管理</h3></div>';
     html += '<div style="display:flex;flex-direction:column;gap:12px">';
@@ -188,6 +194,12 @@
       App.store.set('reports', reports);
 
       App.util.toast('已注入 3 个月度示例数据', 'ok');
+      App.router.resolve();
+    },
+
+    syncResearchTimeline: function() {
+      var added = App.store.mergeResearchTimeline();
+      App.util.toast(added > 0 ? ('已同步 ' + added + ' 个教研时间轴节点') : '教研时间轴节点已是最新', 'ok');
       App.router.resolve();
     }
   };

@@ -7,6 +7,7 @@ window.App = window.App || {};
 
 (function() {
   const STORAGE_KEY = 'zyg_workbench_v1';
+  const RESEARCH_TIMELINE_FLAG = 'zyg_research_timeline_v1';
   let _data = null;
   let _listeners = [];
   let _saveTimer = null;
@@ -96,7 +97,20 @@ window.App = window.App || {};
           { id: 'thu-teacher-view', title: '老师查看课表', weekday: 4, time: '', type: 'fixed', reminder: false, note: '锁定后老师查看课表并确认' },
           { id: 'sun-report', title: 'DOS 周报', weekday: 0, time: '', type: 'fixed', reminder: true, note: '周日完成 DOS 周报填写与上报' },
           { id: 'month-prearrange', title: '完成次月预排', weekday: 3, which: 'last', type: 'monthly', reminder: true, note: '当月最后一周周三完成次月预排' },
-          { id: 'month-schedule', title: '排课月度收尾', weekday: null, time: '', type: 'monthly', cron: 'last-week-of-month', reminder: true, note: '每月最后一周完成排课相关收尾与上报' }
+          { id: 'month-schedule', title: '排课月度收尾', weekday: null, time: '', type: 'monthly', cron: 'last-week-of-month', reminder: true, note: '每月最后一周完成排课相关收尾与上报' },
+          // —— 教研时间轴（来自《校区教研流程与标准_可编辑版.xlsx》）——
+          { id: 'jy-meeting', title: '教研会议执行', weekday: 3, time: '', type: 'fixed', reminder: true, note: '全体老师：磨课（说课→导入→讲解→练习→总结，30-40分钟模拟真实课堂）+点评+反思；学员问题讨论；每月最后一次教研讨论方向、制定下月计划' },
+          { id: 'jy-mail', title: '两项邮件反馈', weekday: 3, time: '', type: 'fixed', reminder: true, note: '①磨课人员发磨课反思邮件（发教研负责人，抄送组长/叶栖桐/王静静/DOS/SD）②教研负责人发送教研反馈邮件（发组内所有老师及跨校区教研老师，抄送组长/叶栖桐/王静静/DOS/SD/总部稽核）' },
+          { id: 'jy-submit', title: '提交次周教研资料', weekday: 5, time: '17:00', type: 'fixed', reminder: true, note: '磨课和示范课讲义、其它教研资料（知识点/题目练习等）；形式：企业微信群；教研人员提交' },
+          { id: 'jy-review', title: '负责人审核', weekday: 5, time: '21:00', type: 'fixed', reminder: true, note: '数学：李梦鸽 / 英语：叶栖桐 / 文综：李悦 / 理综：王湛文；当天审核，需修改的给具体建议' },
+          { id: 'jy-remind', title: '发布教研提醒+打印准备', weekday: 0, time: '', type: 'fixed', reminder: true, note: '按统一模板在企业微信群内发教研提醒（回复收到、及时调整）；参与磨课老师把资料打印准备好；数学：李梦鸽 / 英语：叶栖桐 / 文综：李悦 / 理综：王湛文' },
+          { id: 'jy-print', title: '打印讲义与表单', weekday: 0, time: '', type: 'fixed', reminder: true, note: '根据教研人数提前一天打印讲义；磨课老师打印磨课评分表、磨课记录表；教研人员' },
+          { id: 'jy-handout', title: '修改后讲义发群', weekday: 1, time: '20:00', type: 'fixed', reminder: true, note: '修改后讲义发学科组群，组内老师提前学习；讲义制作老师' },
+          { id: 'jy-feedback', title: '校区上周教研反馈汇报', weekday: 3, time: '', type: 'fixed', reminder: true, note: '叶栖桐：汇总各组教研情况、评价完成质量、给改进建议与后期方向；PPT 主管会汇报（PPT 周二 20:00 前发出）' },
+          { id: 'jy-month-plan', title: '月度教研计划', weekday: 5, which: 'last', type: 'monthly', reminder: true, time: '20:00', note: '邮件发下月月度教研计划给组内所有老师，抄送组长/叶栖桐/王静静/DOS/SD/总部稽核；数学：李梦鸽 / 英语：叶栖桐 / 文综：李悦 / 理综：王湛文' },
+          { id: 'jy-month-meet', title: '教研员月度会议', weekday: null, cron: 'last-week-of-month', type: 'monthly', reminder: true, note: '叶栖桐：讨论校区教研问题、优化校区教研；会议记录人邮件发组长/叶栖桐/王静静/DOS/SD' },
+          { id: 'jy-month-dir', title: '方向与月计划制定', weekday: 3, which: 'last', type: 'monthly', reminder: true, note: '每月最后一次教研：讨论后续教研方向、制定下月计划（学生/老师/考试三方面）；邮件抄送组长/叶栖桐/王静静/DOS/SD/总部稽核' },
+          { id: 'jy-month-task', title: '教研员任务发送', weekday: 5, which: 'last', type: 'monthly', reminder: true, time: '20:00', note: '初级：语文李心甜，语文王婧怡；中级：语文李悦，地理徐硕阳，物理王湛文，英语郭岩' }
         ],
         customNodes: []
       },
@@ -132,11 +146,35 @@ window.App = window.App || {};
       } else {
         _data = getDefaultData();
       }
+      // 一次性把《校区教研流程与标准》的教研节点并入时间轴（幂等，不覆盖已有节点）
+      try {
+        if (!localStorage.getItem(RESEARCH_TIMELINE_FLAG)) {
+          var added = mergeResearchTimelineNodes();
+          localStorage.setItem(RESEARCH_TIMELINE_FLAG, '1');
+          if (added > 0) save();
+        }
+      } catch (e2) { /* 忽略合并异常，避免影响正常加载 */ }
     } catch (e) {
       console.warn('Store load failed, using defaults:', e);
       _data = getDefaultData();
     }
     return _data;
+  }
+
+  // 将默认教研时间轴节点（id 以 'jy-' 开头）并入当前 fixedNodes；幂等，已存在则跳过
+  function mergeResearchTimelineNodes() {
+    var jy = (getDefaultData().timeline.fixedNodes || []).filter(function(n) {
+      return n.id && n.id.indexOf('jy-') === 0;
+    });
+    if (!_data.timeline) _data.timeline = {};
+    if (!Array.isArray(_data.timeline.fixedNodes)) _data.timeline.fixedNodes = [];
+    var have = {};
+    _data.timeline.fixedNodes.forEach(function(n) { if (n.id) have[n.id] = true; });
+    var added = 0;
+    jy.forEach(function(n) {
+      if (!have[n.id]) { _data.timeline.fixedNodes.push(JSON.parse(JSON.stringify(n))); added++; }
+    });
+    return added;
   }
 
   // --- Save to localStorage (debounced) ---
@@ -302,7 +340,15 @@ window.App = window.App || {};
     reset: reset,
     uid: uid,
     getData: function() { if (!_data) load(); return _data; },
-    refresh: load
+    refresh: load,
+    // 获取默认数据结构（供同步/迁移等场景读取内置标准节点）
+    getDefaultData: getDefaultData,
+    // 手动把教研时间轴节点合并进当前数据（幂等，供「设置 → 同步教研时间轴」调用）
+    mergeResearchTimeline: function() {
+      var added = mergeResearchTimelineNodes();
+      save();
+      return added;
+    }
   };
 
 })();
