@@ -32,6 +32,7 @@
     html += '</div>';
     html += '<button class="btn btn-primary btn-sm" onclick="App.views.timeline.openNodeModal()">' + App.util.svgIcon('plus', 15) + ' 新建节点</button>';
     html += '</div>';
+    html += '<p style="font-size:12px;color:var(--text-faint);margin:0 0 12px">💡 点击卡片可编辑<b>类型/颜色</b>，<b>拖动卡片</b>到其它星期列即可调整时间位置（实时生效）。</p>';
 
     if (viewMode === 'week') {
       html += renderWeekView(anchor, today, allNodes, weekdayNames);
@@ -65,7 +66,7 @@
       var dateStr = App.util.formatDate(date, 'YYYY-MM-DD');
       var isToday = dateStr === App.util.formatDate(today, 'YYYY-MM-DD');
 
-      html += '<div class="timeline-day' + (isToday ? ' today' : '') + '">';
+      html += '<div class="timeline-day' + (isToday ? ' today' : '') + '" ondragover="App.views.timeline.onDragOver(event)" ondragleave="App.views.timeline.onDragLeave(event)" ondrop="App.views.timeline.onDrop(event, ' + date.getDay() + ')">';
       html += '<div class="timeline-day-header">';
       html += '<span>' + weekdayNames[date.getDay()] + '</span>';
       html += '<span class="mono" style="font-size:11px;color:var(--text-faint)">' + (date.getMonth() + 1) + '/' + date.getDate() + '</span>';
@@ -84,7 +85,10 @@
       });
       dayNodes.forEach(function(node) {
         var nodeClass = node.type === 'fixed' ? 'node-fixed' : (node.type === 'monthly' ? 'node-monthly' : 'node-custom');
-        html += '<div class="timeline-node ' + nodeClass + '" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
+        var colorCls = node.color ? ' nl-' + node.color : '';
+        var colorAttr = node.color ? ' data-color="' + App.util.escapeAttr(node.color) + '"' : '';
+        var draggable = (node.type === 'monthly' && node.weekday == null) ? '' : ' draggable="true" ondragstart="App.views.timeline.onDragStart(event, \'' + node.id + '\')"';
+        html += '<div class="timeline-node ' + nodeClass + colorCls + '"' + colorAttr + draggable + ' title="点击编辑 · 拖动可改星期" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<strong>' + App.util.escapeHtml(node.title) + '</strong>';
         if (node.time) { html += '<span class="mono" style="margin-left:auto;font-size:10px">' + node.time + '</span>'; }
         html += '<span class="node-edit-hint">✎</span>';
@@ -103,7 +107,7 @@
     if (monthlyNodes.length > 0) {
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期节点</h3></div>';
       monthlyNodes.forEach(function(node) {
-        html += '<div class="timeline-node node-monthly" style="margin-bottom:6px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
+        html += '<div class="timeline-node node-monthly' + (node.color ? ' nl-' + node.color : '') + '"' + (node.color ? ' data-color="' + App.util.escapeAttr(node.color) + '"' : '') + ' style="margin-bottom:6px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
         html += '<strong>' + App.util.escapeHtml(node.title) + '</strong>';
         html += '<span style="font-size:11px;color:var(--warn-text);margin-left:8px">' + (node.cron || '') + '</span>';
         html += '<span class="node-edit-hint" style="margin-left:auto">✎</span>';
@@ -163,12 +167,14 @@
         return n.weekday === d.getDay();
       });
 
-      html += '<div style="background:' + (isToday ? 'var(--accent-soft)' : 'var(--bg)') + ';min-height:70px;padding:4px 6px;position:relative">';
+      html += '<div class="tl-month-cell" style="background:' + (isToday ? 'var(--accent-soft)' : 'var(--bg)') + ';min-height:70px;padding:4px 6px;position:relative" ondragover="App.views.timeline.onDragOver(event)" ondragleave="App.views.timeline.onDragLeave(event)" ondrop="App.views.timeline.onDrop(event, ' + d.getDay() + ')">';
       html += '<span style="font-size:12px;font-weight:' + (isToday ? '700;color:var(--accent)' : '500') + '">' + day + '</span>';
 
       if (dayFixedNodes.length > 0) {
         dayFixedNodes.forEach(function(n) {
-          html += '<div style="font-size:9px;background:var(--accent-soft);color:var(--accent-text);padding:1px 4px;border-radius:2px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + App.util.escapeHtml(n.title) + '</div>';
+          var colorCls = n.color ? ' nl-' + n.color : '';
+          var colorAttr = n.color ? ' data-color="' + App.util.escapeAttr(n.color) + '"' : '';
+          html += '<div class="tl-month-chip' + colorCls + '"' + colorAttr + ' draggable="true" ondragstart="App.views.timeline.onDragStart(event, \'' + n.id + '\')" onclick="App.views.timeline.openNodeModal(\'' + n.id + '\')" title="' + App.util.escapeAttr(n.title) + ' · 点击编辑/拖动改星期">' + App.util.escapeHtml(n.title) + '</div>';
         });
       }
 
@@ -182,8 +188,9 @@
     if (monthlyNodes.length > 0) {
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期任务</h3></div>';
       monthlyNodes.forEach(function(node) {
-        html += '<div style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
-        html += '<span class="status-dot warn"></span>';
+        var rowColorCls = node.color ? ' nl-' + node.color : '';
+        html += '<div class="' + rowColorCls.trim() + '"' + (node.color ? ' data-color="' + App.util.escapeAttr(node.color) + '"' : '') + ' style="padding:10px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;cursor:pointer' + (node.color ? ';background:var(--nc-bg)' : '') + '" title="点击编辑" onclick="App.views.timeline.openNodeModal(\'' + node.id + '\')">';
+        html += '<span class="status-dot" style="background:' + (node.color ? 'var(--nc)' : 'var(--warn)') + '"></span>';
         html += '<div><strong style="font-size:13px">' + App.util.escapeHtml(node.title) + '</strong>';
         if (node.note) { html += '<p style="font-size:11px;color:var(--text-muted);margin-top:2px">' + App.util.escapeHtml(node.note) + '</p>'; }
         html += '</div>';
@@ -197,6 +204,11 @@
   }
 
   /* ---------------- 节点编辑 ---------------- */
+  var PALETTE = [
+    { key: 'indigo', name: '靛蓝' }, { key: 'blue', name: '蓝' }, { key: 'green', name: '绿' },
+    { key: 'amber', name: '琥珀' }, { key: 'red', name: '红' }, { key: 'purple', name: '紫' },
+    { key: 'pink', name: '粉' }, { key: 'teal', name: '青' }
+  ];
   function getAllNodes() {
     return (App.store.get('timeline.fixedNodes') || []).concat(App.store.get('timeline.customNodes') || []);
   }
@@ -225,6 +237,13 @@
       html += '<option value="' + i + '"' + (weekdayVal === String(i) ? ' selected' : '') + '>' + n + '</option>';
     });
     html += '</select></div>';
+    // 颜色标记
+    html += '<div class="form-group"><label class="form-label">颜色标记（用于区分事项）</label><div id="node-color-swatches" class="color-swatches">';
+    PALETTE.forEach(function(c) {
+      var sel = (data.color === c.key) ? ' selected' : '';
+      html += '<button type="button" class="color-swatch nl-' + c.key + '" data-c="' + c.key + '"' + sel + ' title="' + c.name + '" onclick="App.views.timeline.pickColor(\'' + c.key + '\')"></button>';
+    });
+    html += '</div><input type="hidden" id="node-color" value="' + App.util.escapeAttr(data.color || '') + '"></div>';
     // 时间 + 提醒
     html += '<div class="form-row">';
     html += '<div class="form-group"><label class="form-label">时间（可选）</label><input class="form-input" id="node-time" type="time" value="' + App.util.escapeAttr(data.time || '') + '"></div>';
@@ -258,6 +277,7 @@
     var time = document.getElementById('node-time').value;
     var reminder = document.getElementById('node-reminder').checked;
     var note = document.getElementById('node-note').value.trim();
+    var color = document.getElementById('node-color').value;
 
     var newNode = {
       title: title,
@@ -267,6 +287,7 @@
       reminder: reminder,
       note: note
     };
+    if (color) newNode.color = color; else newNode.color = null;
     if (isMonthly) {
       if (weekday != null) newNode.which = 'last';
       else newNode.cron = 'last-week-of-month';
@@ -278,8 +299,8 @@
       var fi = -1, ci = -1;
       fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
       custom.forEach(function(n, i) { if (n.id === id) ci = i; });
-      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); App.store.set('timeline.fixedNodes', fixed); }
-      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); App.store.set('timeline.customNodes', custom); }
+      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); if (newNode.color === null) delete fixed[fi].color; App.store.set('timeline.fixedNodes', fixed); }
+      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); if (newNode.color === null) delete custom[ci].color; App.store.set('timeline.customNodes', custom); }
     } else {
       newNode.id = App.store.uid('node');
       App.store.push('timeline.customNodes', newNode);
@@ -309,6 +330,66 @@
     });
   }
 
+  /* ---------------- 颜色选择 ---------------- */
+  function pickColor(c) {
+    var inp = document.getElementById('node-color');
+    if (!inp) return;
+    inp.value = (inp.value === c) ? '' : c; // 再次点击同一色 = 取消（回到类型默认色）
+    var sw = document.querySelectorAll('#node-color-swatches .color-swatch');
+    for (var i = 0; i < sw.length; i++) {
+      sw[i].classList.toggle('selected', sw[i].getAttribute('data-c') === inp.value);
+    }
+  }
+
+  /* ---------------- 拖动改时间节点 ---------------- */
+  function clearDragging() {
+    var els = document.querySelectorAll('.timeline-node.dragging, .tl-month-chip.dragging');
+    for (var i = 0; i < els.length; i++) els[i].classList.remove('dragging');
+  }
+  function onDragStart(e, id) {
+    if (e.dataTransfer) {
+      try { e.dataTransfer.setData('text/plain', id); } catch (err) {}
+      e.dataTransfer.effectAllowed = 'move';
+    }
+    if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.add('dragging');
+  }
+  function onDragOver(e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.add('drop-target');
+  }
+  function onDragLeave(e) {
+    if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.remove('drop-target');
+  }
+  function onDrop(e, weekday) {
+    e.preventDefault();
+    if (e.currentTarget && e.currentTarget.classList) e.currentTarget.classList.remove('drop-target');
+    clearDragging();
+    var id = e.dataTransfer ? e.dataTransfer.getData('text/plain') : null;
+    if (!id) return;
+    moveNodeWeekday(id, weekday);
+  }
+
+  // 把节点移动到新的星期列（校准 time 坐标），不影响其它节点
+  function moveNodeWeekday(id, weekday) {
+    var fixed = App.store.get('timeline.fixedNodes') || [];
+    var custom = App.store.get('timeline.customNodes') || [];
+    var fi = -1, ci = -1;
+    fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
+    custom.forEach(function(n, i) { if (n.id === id) ci = i; });
+    if (fi >= 0) {
+      fixed[fi] = Object.assign({}, fixed[fi], { weekday: weekday });
+      App.store.set('timeline.fixedNodes', fixed);
+    } else if (ci >= 0) {
+      custom[ci] = Object.assign({}, custom[ci], { weekday: weekday });
+      App.store.set('timeline.customNodes', custom);
+    } else {
+      return;
+    }
+    App.util.toast('已更新时间位置', 'ok');
+    App.router.resolve();
+  }
+
   // 当前查看锚点（支持跨周/跨月翻阅；刷新页面后回到本周/本月）
   var _anchor = null;
   function getAnchor() { return _anchor || new Date(); }
@@ -324,6 +405,12 @@
     openNodeModal: openNodeModal,
     saveNode: saveNode,
     deleteNode: deleteNode,
+    pickColor: pickColor,
+    onDragStart: onDragStart,
+    onDragOver: onDragOver,
+    onDragLeave: onDragLeave,
+    onDrop: onDrop,
+    moveNodeWeekday: moveNodeWeekday,
     shiftWeek: function(dir) {
       if (dir === 0) setAnchor(new Date());
       else { var a = getAnchor(); a.setDate(a.getDate() + dir * 7); setAnchor(a); }
