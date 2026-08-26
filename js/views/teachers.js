@@ -26,6 +26,16 @@
 
   var SUBJECT_GROUPS = ['数学', '英语', '文综', '理综'];
 
+  // ---------- 标签体系（可点击编辑；支持自定义）----------
+  var TAG_PALETTE = ['跨学科', '离职', '待离职'];
+  var TAG_COLORS = {
+    '跨学科': '#0EA5E9',
+    '离职':   '#9CA3AF',
+    '待离职': '#F59E0B'
+  };
+  // 标签筛选选项：''=全部, '在职'=无离职/待离职标签
+  var TAG_FILTERS = ['', '在职', '离职', '待离职', '跨学科'];
+
   // 表头别名（容错映射）
   var HEADER_MAP = {
     name:        ['姓名', '教师', '老师', '名称'],
@@ -44,11 +54,18 @@
   // 视图筛选状态
   var filterSubject = '';
   var filterPos = '';
+  var filterTag = '';
   var search = '';
+
+  // 编辑弹窗状态
+  var edId = null;
+  var edTags = [];
 
   function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
 
   function getTeachers() { return App.store.get('teachers') || []; }
+
+  function hasTag(t, tag) { return Array.isArray(t.tags) && t.tags.indexOf(tag) >= 0; }
 
   function posName(code) { return POSITION_CODEBOOK[code] || code || ''; }
 
@@ -88,11 +105,15 @@
     var teachers = getTeachers();
 
     // 统计
-    var stats = { total: teachers.length, bySubject: {}, byPos: {} };
+    var stats = { total: teachers.length, bySubject: {}, byPos: {}, byTag: {} };
     teachers.forEach(function(t) {
       stats.bySubject[t.subjectGroup] = (stats.bySubject[t.subjectGroup] || 0) + 1;
       stats.byPos[t.positionCode] = (stats.byPos[t.positionCode] || 0) + 1;
+      (t.tags || []).forEach(function(tag) { stats.byTag[tag] = (stats.byTag[tag] || 0) + 1; });
     });
+    stats.byTag['在职'] = teachers.filter(function(t) {
+      return !hasTag(t, '离职') && !hasTag(t, '待离职');
+    }).length;
 
     var html = '';
     html += '<div class="page-head"><h1 class="page-title">教师管理</h1>';
@@ -113,6 +134,13 @@
       html += '<option value="' + code + '"' + (filterPos === code ? ' selected' : '') + '>' + code + ' · ' + POSITION_CODEBOOK[code] + ' (' + (stats.byPos[code] || 0) + ')</option>';
     });
     html += '</select>';
+    html += '<select class="form-input form-input-sm" id="tch-filter-tag" onchange="App.views.teachers.onFilterChange()">';
+    html += '<option value="">全部状态</option>';
+    html += '<option value="在职"' + (filterTag === '在职' ? ' selected' : '') + '>在职</option>';
+    html += '<option value="离职"' + (filterTag === '离职' ? ' selected' : '') + '>离职</option>';
+    html += '<option value="待离职"' + (filterTag === '待离职' ? ' selected' : '') + '>待离职</option>';
+    html += '<option value="跨学科"' + (filterTag === '跨学科' ? ' selected' : '') + '>跨学科</option>';
+    html += '</select>';
     html += '<input type="text" class="form-input form-input-sm" id="tch-search" placeholder="搜索姓名/院校/专业/证书…" value="' + esc(search) + '" oninput="App.views.teachers.onSearchChange(this.value)">';
     html += '</div>';
     html += '<div class="teacher-actions">';
@@ -129,15 +157,28 @@
       var c = SUBJECT_COLORS[sg] || '#888';
       html += '<span class="stat-pill"><span class="dot" style="background:' + c + '"></span>' + sg + ' ' + (stats.bySubject[sg] || 0) + '</span>';
     });
+    html += '<span class="stat-pill"><span class="dot" style="background:#10B981"></span>在职 ' + (stats.byTag['在职'] || 0) + '</span>';
+    TAG_PALETTE.forEach(function(tag) {
+      if (stats.byTag[tag]) {
+        html += '<span class="stat-pill"><span class="dot" style="background:' + (TAG_COLORS[tag] || '#888') + '"></span>' + tag + ' ' + stats.byTag[tag] + '</span>';
+      }
+    });
     html += '</div>';
 
     // 表格
     var list = teachers.filter(function(t) {
       if (filterSubject && t.subjectGroup !== filterSubject) return false;
       if (filterPos && t.positionCode !== filterPos) return false;
+      if (filterTag) {
+        if (filterTag === '在职') {
+          if (hasTag(t, '离职') || hasTag(t, '待离职')) return false;
+        } else {
+          if (!hasTag(t, filterTag)) return false;
+        }
+      }
       if (search) {
         var q = search.toLowerCase();
-        var hay = [t.name, t.school, t.major, (t.certificates || []).join(' '), posName(t.positionCode)].join(' ').toLowerCase();
+        var hay = [t.name, t.school, t.major, (t.certificates || []).join(' '), (t.tags || []).join(' '), posName(t.positionCode)].join(' ').toLowerCase();
         if (hay.indexOf(q) < 0) return false;
       }
       return true;
@@ -152,6 +193,7 @@
     html += '<th>姓名</th>';
     html += '<th>学科组</th>';
     html += '<th>岗位</th>';
+    html += '<th>标签</th>';
     html += '<th>入职日期</th>';
     html += '<th>工龄</th>';
     html += '<th>毕业院校</th>';
@@ -159,7 +201,7 @@
     html += '<th>证书</th>';
     html += '</tr></thead><tbody>';
     if (list.length === 0) {
-      html += '<tr><td colspan="9" class="empty-row">无匹配教师</td></tr>';
+      html += '<tr><td colspan="10" class="empty-row">无匹配教师</td></tr>';
     } else {
       list.forEach(function(t, i) {
         var sc = SUBJECT_COLORS[t.subjectGroup] || '#888';
@@ -167,11 +209,18 @@
           return '<span class="cert-chip">' + esc(c) + '</span>';
         }).join('') || '<span class="muted">—</span>';
         var posBadge = '<span class="pos-badge" title="' + esc(posName(t.positionCode)) + '">' + esc(t.positionCode || '—') + '</span>';
-        html += '<tr>';
+        var tagBadges = (t.tags || []).map(function(tag) {
+          var c = TAG_COLORS[tag] || '#7C3AED';
+          return '<span class="tag-badge" style="background:' + c + '1a;color:' + c + ';border:1px solid ' + c + '55">' + esc(tag) + '</span>';
+        }).join('') || '<span class="muted">—</span>';
+        var isLeave = hasTag(t, '离职');
+        var rowCls = isLeave ? ' class="row-leave"' : '';
+        html += '<tr' + rowCls + ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑">';
         html += '<td class="mono muted">' + (i + 1) + '</td>';
         html += '<td><strong>' + esc(t.name) + '</strong></td>';
         html += '<td><span class="dot" style="background:' + sc + ';margin-right:4px"></span>' + esc(t.subjectGroup) + '</td>';
         html += '<td>' + posBadge + '</td>';
+        html += '<td>' + tagBadges + '</td>';
         html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
         html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
         html += '<td>' + esc(t.school || '—') + '</td>';
@@ -190,7 +239,7 @@
       html += '<span class="codebook-item"><b>' + code + '</b> ' + POSITION_CODEBOOK[code] + '</span>';
     });
     html += '</p>';
-    html += '<p class="muted">💡 上传 Excel 可批量更新：系统按「姓名 + 学科组」识别——已存在则更新、不存在则新增；岗位列填中文全称（如"中级教研员"）或编码（如 IIR）均可，自动归一为编码；工龄不入库，按入职日期实时计算。</p>';
+    html += '<p class="muted">💡 点击任意教师行可<b>编辑资料</b>（岗位、入职日期、证书、标签），并可删除；标签支持「跨学科 / 离职 / 待离职」及自定义，标记离职的教师整行置灰；上传 Excel 按「姓名 + 学科组」识别——已存在则更新、不存在则新增（已有标签不受影响）；岗位列填中文全称（如"中级教研员"）或编码（如 IIR）均可，自动归一为编码；工龄不入库，按入职日期实时计算。</p>';
     html += '</div>';
 
     container.innerHTML = html;
@@ -200,6 +249,7 @@
   function onFilterChange() {
     filterSubject = (document.getElementById('tch-filter-subject') || {}).value || '';
     filterPos = (document.getElementById('tch-filter-pos') || {}).value || '';
+    filterTag = (document.getElementById('tch-filter-tag') || {}).value || '';
     render();
   }
   function onSearchChange(v) {
@@ -207,6 +257,143 @@
     // 防抖
     if (window.__tchSearchTimer) clearTimeout(window.__tchSearchTimer);
     window.__tchSearchTimer = setTimeout(render, 200);
+  }
+
+  /* ---------- 点击编辑教师资料 ---------- */
+  function openEdit(id) {
+    var t = getTeachers().find(function(x) { return x.id === id; });
+    if (!t) { App.util.toast('未找到该教师', 'bad'); return; }
+    edId = id;
+    edTags = (t.tags || []).slice();
+
+    var html = '';
+    html += '<div class="ed-form">';
+    html += '<div class="ed-row">';
+    html += '<div class="ed-field"><label>姓名</label><input class="form-input" id="ed-name" value="' + esc(t.name) + '"></div>';
+    html += '<div class="ed-field"><label>学科组</label><select class="form-input" id="ed-subject">';
+    SUBJECT_GROUPS.forEach(function(sg) {
+      html += '<option value="' + sg + '"' + (t.subjectGroup === sg ? ' selected' : '') + '>' + sg + '</option>';
+    });
+    html += '</select></div>';
+    html += '</div>';
+    html += '<div class="ed-row">';
+    html += '<div class="ed-field"><label>岗位</label><select class="form-input" id="ed-pos">';
+    Object.keys(POSITION_CODEBOOK).forEach(function(code) {
+      html += '<option value="' + code + '"' + (t.positionCode === code ? ' selected' : '') + '>' + code + ' · ' + POSITION_CODEBOOK[code] + '</option>';
+    });
+    if (t.positionCode && !POSITION_CODEBOOK[t.positionCode]) {
+      html += '<option value="' + esc(t.positionCode) + '" selected>' + esc(t.positionCode) + '（未知）</option>';
+    }
+    html += '</select></div>';
+    html += '<div class="ed-field"><label>入职日期</label><input class="form-input" type="date" id="ed-entry" value="' + esc(t.entryDate || '') + '"></div>';
+    html += '</div>';
+    html += '<div class="ed-row">';
+    html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(t.school || '') + '"></div>';
+    html += '<div class="ed-field"><label>专业</label><input class="form-input" id="ed-major" value="' + esc(t.major || '') + '"></div>';
+    html += '</div>';
+    html += '<div class="ed-field"><label>证书（用 、或 , 分隔多个）</label><input class="form-input" id="ed-certs" value="' + esc((t.certificates || []).join('、')) + '"></div>';
+    html += '<div class="ed-field"><label>标签（点击添加/移除，可输入自定义标签后回车）</label><div class="ed-tags" id="ed-tags-wrap"></div></div>';
+    html += '</div>';
+
+    App.util.modal({
+      title: '编辑教师 · ' + t.name,
+      content: html,
+      confirmText: '保存',
+      onConfirm: function(close) { saveEdit(close); },
+      onDelete: function(close) { deleteTeacher(close); },
+      deleteText: '删除'
+    });
+
+    renderTagChips();
+  }
+
+  function renderTagChips() {
+    var wrap = document.getElementById('ed-tags-wrap');
+    if (!wrap) return;
+    var h = '';
+    // 已选标签（点击移除）
+    edTags.forEach(function(tag) {
+      var c = TAG_COLORS[tag] || '#7C3AED';
+      h += '<span class="tag-chip sel" style="background:' + c + '1a;color:' + c + ';border:1px solid ' + c + '55" onclick="App.views.teachers.removeTag(\'' + App.util.escapeAttr(tag) + '\')">' + esc(tag) + ' ×</span>';
+    });
+    // 可选标签（点击添加）
+    TAG_PALETTE.forEach(function(tag) {
+      if (edTags.indexOf(tag) < 0) {
+        var c = TAG_COLORS[tag] || '#7C3AED';
+        h += '<span class="tag-chip add" style="color:' + c + ';border:1px dashed ' + c + '66" onclick="App.views.teachers.addTag(\'' + App.util.escapeAttr(tag) + '\')">+ ' + esc(tag) + '</span>';
+      }
+    });
+    h += '<input type="text" class="form-input form-input-sm" id="ed-tag-custom" style="width:110px" placeholder="自定义标签…" onkeydown="App.views.teachers.onTagKey(event)">';
+    wrap.innerHTML = h;
+  }
+
+  // 标签消毒：剥离引号/尖括号/反引号/反斜杠（onclick 单引号拼接安全），压缩空白并限长
+  function sanitizeTag(s) {
+    return String(s || '')
+      .replace(/['"\\<>`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 12);
+  }
+
+  function addTag(tag) {
+    tag = sanitizeTag(tag);
+    if (!tag) return;
+    if (edTags.indexOf(tag) < 0) edTags.push(tag);
+    renderTagChips();
+  }
+  function removeTag(tag) {
+    edTags = edTags.filter(function(x) { return x !== tag; });
+    renderTagChips();
+  }
+  function onTagKey(e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var input = document.getElementById('ed-tag-custom');
+    if (!input) return;
+    addTag(input.value);
+    input.value = '';
+  }
+
+  function saveEdit(close) {
+    var teachers = getTeachers().slice();
+    var idx = teachers.findIndex(function(t) { return t.id === edId; });
+    if (idx < 0) { close(); return; }
+    var name = (document.getElementById('ed-name') || {}).value || '';
+    var subjectGroup = (document.getElementById('ed-subject') || {}).value || '';
+    var positionCode = (document.getElementById('ed-pos') || {}).value || '';
+    var entryDate = (document.getElementById('ed-entry') || {}).value || '';
+    var school = (document.getElementById('ed-school') || {}).value || '';
+    var major = (document.getElementById('ed-major') || {}).value || '';
+    var certsRaw = (document.getElementById('ed-certs') || {}).value || '';
+    if (!name.trim() || !subjectGroup) {
+      App.util.toast('姓名和学科组不能为空', 'bad');
+      return;
+    }
+    teachers[idx] = Object.assign({}, teachers[idx], {
+      name: name.trim(),
+      subjectGroup: subjectGroup,
+      positionCode: positionCode,
+      entryDate: entryDate,
+      school: school.trim(),
+      major: major.trim(),
+      certificates: splitCerts(certsRaw),
+      tags: edTags.slice()
+    });
+    App.store.set('teachers', teachers);
+    close();
+    App.util.toast('已保存', 'ok');
+    render();
+  }
+
+  function deleteTeacher(close) {
+    var t = getTeachers().find(function(x) { return x.id === edId; });
+    if (!t) { close(); return; }
+    if (!window.confirm('确定删除「' + t.name + '（' + t.subjectGroup + '）」？此操作不可撤销。')) return;
+    App.store.set('teachers', getTeachers().filter(function(x) { return x.id !== edId; }));
+    close();
+    App.util.toast('已删除 ' + t.name, 'ok');
+    render();
   }
 
   // ---------- Excel 解析 → 预览 ----------
@@ -354,9 +541,10 @@
       if (a.action === 'update') {
         var old = teachers[a.idx];
         rec.id = old.id; // 保留原 id
-        teachers[a.idx] = Object.assign({}, old, rec);
+        teachers[a.idx] = Object.assign({}, old, rec); // tags 等未提供字段保留原值
       } else {
         rec.id = App.store.uid('tr');
+        rec.tags = []; // Excel 导入默认无标签（在职）
         teachers.push(rec);
       }
     });
@@ -394,7 +582,13 @@
     onFilterChange: onFilterChange,
     onSearchChange: onSearchChange,
     handleFile: handleFile,
-    downloadTemplate: downloadTemplate
+    downloadTemplate: downloadTemplate,
+    openEdit: openEdit,
+    saveEdit: saveEdit,
+    deleteTeacher: deleteTeacher,
+    addTag: addTag,
+    removeTag: removeTag,
+    onTagKey: onTagKey
   };
 
 })();
