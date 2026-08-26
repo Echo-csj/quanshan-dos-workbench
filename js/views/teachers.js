@@ -193,6 +193,7 @@
     html += '<input type="text" class="form-input form-input-sm" id="tch-search" placeholder="搜索姓名/院校/专业/证书/状态…" value="' + esc(search) + '" oninput="App.views.teachers.onSearchChange(this.value)">';
     html += '</div>';
     html += '<div class="teacher-actions">';
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.teachers.addTeacher()">' + App.util.svgIcon('plus', 15) + ' 新建教师</button>';
     html += '<button class="btn btn-secondary btn-sm" onclick="App.views.teachers.downloadTemplate()">' + App.util.svgIcon('download', 15) + ' 下载模板</button>';
     html += '<button class="btn btn-primary btn-sm" onclick="document.getElementById(\'tch-file-input\').click()">' + App.util.svgIcon('upload', 15) + ' 上传 Excel 更新</button>';
     html += '<input type="file" id="tch-file-input" accept=".xlsx,.xls" style="display:none" onchange="App.views.teachers.handleFile(this)">';
@@ -331,62 +332,69 @@
     if (e && e.key === 'Escape') cancelDegreeEdit();
   }
 
-  /* ---------- 点击编辑教师资料 ---------- */
+  /* ---------- 点击编辑教师资料 / 新建教师 ---------- */
   function openEdit(id) {
-    var t = getTeachers().find(function(x) { return x.id === id; });
-    if (!t) { App.util.toast('未找到该教师', 'bad'); return; }
-    edId = id;
-    edTags = (t.tags || []).slice();
+    var isNew = !id;
+    var t = isNew ? null : getTeachers().find(function(x) { return x.id === id; });
+    if (!isNew && !t) { App.util.toast('未找到该教师', 'bad'); return; }
+    edId = isNew ? null : id;
+    edTags = isNew ? [] : (t.tags || []).slice();
+
+    var v = function(field, def) { return isNew ? (def || '') : (t[field] == null ? (def || '') : t[field]); };
+    var sel = function(field, val) { return (!isNew && t[field] === val) ? ' selected' : ''; };
 
     var html = '';
     html += '<div class="ed-form">';
     html += '<div class="ed-row">';
-    html += '<div class="ed-field"><label>姓名</label><input class="form-input" id="ed-name" value="' + esc(t.name) + '"></div>';
-    html += '<div class="ed-field"><label>学科组</label><select class="form-input" id="ed-subject">';
+    html += '<div class="ed-field"><label>姓名 <span class="req">*</span></label><input class="form-input" id="ed-name" value="' + esc(v('name')) + '"></div>';
+    html += '<div class="ed-field"><label>所属部门（学科组） <span class="req">*</span></label><select class="form-input" id="ed-subject">';
     SUBJECT_GROUPS.forEach(function(sg) {
-      html += '<option value="' + sg + '"' + (t.subjectGroup === sg ? ' selected' : '') + '>' + sg + '</option>';
+      html += '<option value="' + sg + '"' + sel('subjectGroup', sg) + '>' + sg + '</option>';
     });
     html += '</select></div>';
     html += '</div>';
     html += '<div class="ed-row">';
     html += '<div class="ed-field"><label>岗位</label><select class="form-input" id="ed-pos">';
     Object.keys(POSITION_CODEBOOK).forEach(function(code) {
-      html += '<option value="' + code + '"' + (t.positionCode === code ? ' selected' : '') + '>' + code + ' · ' + POSITION_CODEBOOK[code] + '</option>';
+      html += '<option value="' + code + '"' + sel('positionCode', code) + '>' + code + ' · ' + POSITION_CODEBOOK[code] + '</option>';
     });
-    if (t.positionCode && !POSITION_CODEBOOK[t.positionCode]) {
+    if (!isNew && t.positionCode && !POSITION_CODEBOOK[t.positionCode]) {
       html += '<option value="' + esc(t.positionCode) + '" selected>' + esc(t.positionCode) + '（未知）</option>';
     }
     html += '</select></div>';
-    html += '<div class="ed-field"><label>入职日期</label><input class="form-input" type="date" id="ed-entry" value="' + esc(t.entryDate || '') + '"></div>';
+    html += '<div class="ed-field"><label>入职日期</label><input class="form-input" type="date" id="ed-entry" value="' + esc(v('entryDate')) + '"></div>';
     html += '</div>';
     html += '<div class="ed-row">';
-    html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(t.school || '') + '"></div>';
+    html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(v('school')) + '"></div>';
     html += '<div class="ed-field"><label>学历</label><select class="form-input" id="ed-degree">';
-    html += '<option value=""' + (!t.degree ? ' selected' : '') + '>未填写</option>';
+    html += '<option value=""' + (isNew || !t.degree ? ' selected' : '') + '>未填写</option>';
     DEGREE_OPTIONS.forEach(function(d) {
-      html += '<option value="' + d + '"' + (t.degree === d ? ' selected' : '') + '>' + d + '</option>';
+      html += '<option value="' + d + '"' + sel('degree', d) + '>' + d + '</option>';
     });
-    if (t.degree && DEGREE_OPTIONS.indexOf(t.degree) < 0) {
+    if (!isNew && t.degree && DEGREE_OPTIONS.indexOf(t.degree) < 0) {
       html += '<option value="' + esc(t.degree) + '" selected>' + esc(t.degree) + '（原值）</option>';
     }
     html += '</select></div>';
-    html += '<div class="ed-field"><label>专业</label><input class="form-input" id="ed-major" value="' + esc(t.major || '') + '"></div>';
+    html += '<div class="ed-field"><label>专业</label><input class="form-input" id="ed-major" value="' + esc(v('major')) + '"></div>';
     html += '</div>';
-    html += '<div class="ed-field"><label>证书（用 、或 , 分隔多个）</label><input class="form-input" id="ed-certs" value="' + esc((t.certificates || []).join('、')) + '"></div>';
+    html += '<div class="ed-field"><label>证书（用 、或 , 分隔多个）</label><input class="form-input" id="ed-certs" value="' + esc((isNew ? [] : (t.certificates || [])).join('、')) + '"></div>';
     html += '<div class="ed-field"><label>标签（点击添加/移除，可输入自定义标签后回车）</label><div class="ed-tags" id="ed-tags-wrap"></div></div>';
     html += '</div>';
 
     App.util.modal({
-      title: '编辑教师 · ' + t.name,
+      title: isNew ? '新建教师' : '编辑教师 · ' + t.name,
       content: html,
-      confirmText: '保存',
+      confirmText: isNew ? '创建' : '保存',
       onConfirm: function(close) { saveEdit(close); },
-      onDelete: function(close) { deleteTeacher(close); },
+      onDelete: isNew ? null : function(close) { deleteTeacher(close); },
       deleteText: '删除'
     });
 
     renderTagChips();
   }
+
+  // 新建教师入口
+  function addTeacher() { openEdit(null); }
 
   function renderTagChips() {
     var wrap = document.getElementById('ed-tags-wrap');
@@ -437,9 +445,6 @@
   }
 
   function saveEdit(close) {
-    var teachers = getTeachers().slice();
-    var idx = teachers.findIndex(function(t) { return t.id === edId; });
-    if (idx < 0) { close(); return; }
     var name = (document.getElementById('ed-name') || {}).value || '';
     var subjectGroup = (document.getElementById('ed-subject') || {}).value || '';
     var positionCode = (document.getElementById('ed-pos') || {}).value || '';
@@ -448,35 +453,101 @@
     var degree = (document.getElementById('ed-degree') || {}).value || '';
     var major = (document.getElementById('ed-major') || {}).value || '';
     var certsRaw = (document.getElementById('ed-certs') || {}).value || '';
+
+    // 校验：姓名 + 所属部门（学科组）为必填项
     if (!name.trim() || !subjectGroup) {
-      App.util.toast('姓名和学科组不能为空', 'bad');
+      App.util.toast('姓名和所属部门（学科组）不能为空', 'bad');
       return;
     }
-    teachers[idx] = Object.assign({}, teachers[idx], {
-      name: name.trim(),
-      subjectGroup: subjectGroup,
-      positionCode: positionCode,
-      entryDate: entryDate,
-      school: school.trim(),
-      degree: degree,
-      major: major.trim(),
-      certificates: splitCerts(certsRaw),
-      tags: edTags.slice()
-    });
-    App.store.set('teachers', teachers);
-    close();
-    App.util.toast('已保存', 'ok');
-    render();
+    var keyOf = function(t) { return (t.name || '').trim() + '||' + (t.subjectGroup || ''); };
+    var newKey = name.trim() + '||' + subjectGroup;
+
+    try {
+      var teachers = getTeachers().slice();
+      if (edId == null) {
+        // 新建：查重（姓名 + 学科组 已存在则阻止，避免产生重复主键）
+        if (teachers.some(function(t) { return keyOf(t) === newKey; })) {
+          App.util.toast('已存在同名同部门的教师，请直接编辑该记录', 'bad');
+          return;
+        }
+        var rec = {
+          id: App.store.uid('tr'),
+          name: name.trim(),
+          subjectGroup: subjectGroup,
+          positionCode: positionCode,
+          entryDate: entryDate,
+          school: school.trim(),
+          degree: degree,
+          major: major.trim(),
+          certificates: splitCerts(certsRaw),
+          tags: edTags.slice()
+        };
+        teachers.push(rec);
+        App.store.set('teachers', teachers);
+        close();
+        App.util.toast('已新建教师：' + name.trim() + '（' + subjectGroup + '）', 'ok');
+        render();
+      } else {
+        var idx = teachers.findIndex(function(t) { return t.id === edId; });
+        if (idx < 0) { close(); return; }
+        // 编辑：查重（排除自身）
+        if (teachers.some(function(t) { return t.id !== edId && keyOf(t) === newKey; })) {
+          App.util.toast('已存在同名同部门的教师，请调整姓名或部门', 'bad');
+          return;
+        }
+        teachers[idx] = Object.assign({}, teachers[idx], {
+          name: name.trim(),
+          subjectGroup: subjectGroup,
+          positionCode: positionCode,
+          entryDate: entryDate,
+          school: school.trim(),
+          degree: degree,
+          major: major.trim(),
+          certificates: splitCerts(certsRaw),
+          tags: edTags.slice()
+        });
+        App.store.set('teachers', teachers);
+        close();
+        App.util.toast('已保存', 'ok');
+        render();
+      }
+    } catch (err) {
+      App.util.toast('保存失败：' + (err && err.message ? err.message : err), 'bad');
+    }
   }
 
   function deleteTeacher(close) {
     var t = getTeachers().find(function(x) { return x.id === edId; });
     if (!t) { close(); return; }
-    if (!window.confirm('确定删除「' + t.name + '（' + t.subjectGroup + '）」？此操作不可撤销。')) return;
-    App.store.set('teachers', getTeachers().filter(function(x) { return x.id !== edId; }));
-    close();
-    App.util.toast('已删除 ' + t.name, 'ok');
-    render();
+    doDelete(t, close);
+  }
+
+  // 按教师 ID（内部 id，形如 tr-03）删除；兼容「姓名｜学科组」作为人类可读标识
+  // 注：本系统以「姓名 + 学科组」为主键（无工号字段，遵循既有约定），删除键即内部教师 ID
+  function deleteTeacherById(idOrKey, done) {
+    if (idOrKey == null) { App.util.toast('请提供教师 ID 或标识', 'bad'); return false; }
+    var teachers = getTeachers();
+    var t = teachers.find(function(x) {
+      if (x.id === idOrKey) return true;
+      return (x.name + '｜' + x.subjectGroup) === idOrKey;
+    });
+    if (!t) { App.util.toast('未找到该教师（ID 或标识无效）', 'bad'); return false; }
+    doDelete(t, done);
+    return true;
+  }
+
+  // 统一的删除执行 + 删除前确认 + 结果反馈（权限控制：破坏性操作须二次确认）
+  function doDelete(t, done) {
+    var ok = window.confirm('确定删除教师「' + t.name + '（' + t.subjectGroup + '）」？\n教师 ID：' + t.id + '\n此操作不可撤销。');
+    if (!ok) return;
+    try {
+      App.store.set('teachers', getTeachers().filter(function(x) { return x.id !== t.id; }));
+      if (typeof done === 'function') done();
+      App.util.toast('已删除教师：' + t.name + '（' + t.subjectGroup + '）', 'ok');
+      render();
+    } catch (err) {
+      App.util.toast('删除失败：' + (err && err.message ? err.message : err), 'bad');
+    }
   }
 
   // ---------- Excel 解析 → 预览 ----------
@@ -669,9 +740,11 @@
     onSearchChange: onSearchChange,
     handleFile: handleFile,
     downloadTemplate: downloadTemplate,
+    addTeacher: addTeacher,
     openEdit: openEdit,
     saveEdit: saveEdit,
     deleteTeacher: deleteTeacher,
+    deleteTeacherById: deleteTeacherById,
     addTag: addTag,
     removeTag: removeTag,
     onTagKey: onTagKey,
