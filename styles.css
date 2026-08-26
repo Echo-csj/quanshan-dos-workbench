@@ -1219,6 +1219,8 @@ a:hover { color: var(--accent-hover); }
 .name-cell { white-space:nowrap; }
 /* 毕业院校列：缩窄后允许换行，完整显示不截断 */
 .teacher-table .school-cell { white-space:normal; overflow-wrap:break-word; }
+/* 专业列：吸收富余空间为唯一 auto 列，换行兜底确保完整展示不截断 */
+.teacher-table .major-cell { white-space:normal; overflow-wrap:break-word; }
 .name-status { display:inline-flex; align-items:center; gap:5px; font-weight:600; }
 .name-status .ns-glyph { font-size:11px; line-height:1; }
 .name-status .ns-name { font-weight:700; }
@@ -1261,4 +1263,4 @@ a:hover { color: var(--accent-hover); }
 .teacher-table .degree-cell { white-space:nowrap; }
 .degree-text { cursor:pointer; }
 .degree-text:hover { color:var(--accent); }
-.degree-select { width:92px; height:26px; padding:2px 6px; font-size:12px; border-radius:5px; }
+.degree-select { width:72px; height:26px; padding:2px 6px; font-size:12px; border-radius:5px; }

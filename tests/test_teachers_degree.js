@@ -75,9 +75,14 @@ function degFragment() {
 
   console.log('== 2. 表格学历列渲染（非编辑态=纯文本）==');
   T.render();
-  assert(view().indexOf('<th>学历</th>') >= 0, '表头含「学历」列');
-  const thOrder = view().indexOf('<th>毕业院校</th>') < view().indexOf('<th>学历</th>')
-    && view().indexOf('<th>学历</th>') < view().indexOf('<th>专业</th>');
+  // 表头可能带 style/class 属性，用正则定位列序（不依赖裸 <th> 字面量）
+  function thPos(html, label) {
+    var m = new RegExp('<th[^>]*>\\s*' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*</th>').exec(html);
+    return m ? m.index : -1;
+  }
+  assert(thPos(view(), '学历') >= 0, '表头含「学历」列');
+  const thOrder = thPos(view(), '毕业院校') < thPos(view(), '学历')
+    && thPos(view(), '学历') < thPos(view(), '专业');
   assert(thOrder, '学历列位于「毕业院校」之后、「专业」之前');
   assert(view().indexOf('degree-cell') >= 0, '学历单元格使用 degree-cell 类');
   assert(view().indexOf('degree-text') >= 0, '非编辑态为 degree-text 纯文本');
