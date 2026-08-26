@@ -1155,3 +1155,49 @@ a:hover { color: var(--accent-hover); }
   .tasks-list-table { min-width: 600px; }
   .tasks-group-body { grid-template-columns: 1fr; padding: 12px; }
 }
+
+/* ================ 教师管理 ================ */
+.teacher-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+.teacher-filters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.teacher-actions { display:flex; align-items:center; gap:8px; }
+.form-input-sm { height:32px; padding:4px 8px; font-size:13px; }
+.teacher-stats { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.teacher-stats .stat-pill { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; background:var(--bg); border:1px solid var(--border); border-radius:999px; font-size:12px; color:var(--text-muted); }
+.teacher-stats .stat-pill b { color:var(--text); }
+.teacher-stats .dot, .teacher-table .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
+
+.table-card { overflow-x:auto; padding:0; }
+.teacher-table { width:100%; border-collapse:collapse; font-size:13px; }
+.teacher-table th, .teacher-table td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
+.teacher-table th { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); background:var(--bg); position:sticky; top:0; }
+.teacher-table tbody tr:hover { background:var(--accent-soft); }
+.teacher-table .empty-row { text-align:center; color:var(--text-faint); padding:24px; }
+.teacher-table .cert-cell { white-space:normal; max-width:240px; }
+.teacher-table .muted { color:var(--text-faint); }
+.mono { font-family:'JetBrains Mono', monospace; }
+
+.pos-badge { display:inline-block; padding:1px 7px; border-radius:5px; font-size:11px; font-weight:600; font-family:'JetBrains Mono', monospace; background:var(--accent-soft); color:var(--accent-text); cursor:help; }
+.cert-chip { display:inline-block; padding:0 6px; margin:1px 2px; border-radius:4px; font-size:11px; background:var(--bg); border:1px solid var(--border); color:var(--text-muted); }
+
+.teacher-help { margin-top:14px; font-size:12px; color:var(--text-muted); }
+.teacher-help p { margin:4px 0; }
+.teacher-help .codebook-item { display:inline-block; margin-right:12px; }
+.teacher-help .codebook-item b { color:var(--accent-text); font-family:'JetBrains Mono', monospace; }
+
+/* 导入预览 */
+.preview-summary { display:flex; gap:10px; margin-bottom:8px; font-size:13px; }
+.preview-summary .ps-add { color:var(--ok-text, #16a34a); } .preview-summary .ps-add b { font-size:16px; }
+.preview-summary .ps-update { color:var(--accent-text); } .preview-summary .ps-update b { font-size:16px; }
+.preview-summary .ps-skip { color:var(--warn-text); } .preview-summary .ps-skip b { font-size:16px; }
+.preview-note { margin-bottom:10px; font-size:12px; }
+.preview-table { width:100%; border-collapse:collapse; font-size:12px; }
+.preview-table th, .preview-table td { padding:5px 8px; border-bottom:1px solid var(--border); text-align:left; }
+.preview-table th { font-size:10px; text-transform:uppercase; color:var(--text-faint); }
+.preview-table .row-add td { background:rgba(22,163,74,.06); }
+.preview-table .row-update td { background:var(--accent-soft); }
+.preview-table .row-skip td { opacity:.55; }
+.action-tag { display:inline-block; padding:1px 7px; border-radius:4px; font-size:11px; font-weight:600; }
+.at-add { background:rgba(22,163,74,.12); color:#16a34a; }
+.at-update { background:var(--accent-soft); color:var(--accent-text); }
+.at-skip { background:var(--bg); color:var(--text-faint); border:1px solid var(--border); }
+.preview-table .warn { color:var(--warn-text); }

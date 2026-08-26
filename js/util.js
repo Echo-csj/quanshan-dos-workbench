@@ -422,6 +422,25 @@ window.App = window.App || {};
   }
   function escapeAttr(s) { return escapeHtml(s); }
 
+  // --- 工龄（动态计算：入职日期 → 今天，返回"X年Y月Z天"）---
+  function workAge(entryDateStr) {
+    if (!entryDateStr) return '—';
+    var s = new Date(entryDateStr + 'T00:00:00');
+    if (isNaN(s.getTime())) return '—';
+    var t = new Date();
+    var y = t.getFullYear() - s.getFullYear();
+    var m = t.getMonth() - s.getMonth();
+    var d = t.getDate() - s.getDate();
+    if (d < 0) {
+      m--;
+      var prev = new Date(t.getFullYear(), t.getMonth(), 0).getDate();
+      d += prev;
+    }
+    if (m < 0) { y--; m += 12; }
+    if (y < 0) return '—';
+    return y + '年' + m + '月' + d + '天';
+  }
+
   // Public API
   App.util = {
     getWeekNumber: getWeekNumber,
@@ -449,7 +468,8 @@ window.App = window.App || {};
     lineChart: lineChart,
     chartFmt: chartFmt,
     escapeHtml: escapeHtml,
-    escapeAttr: escapeAttr
+    escapeAttr: escapeAttr,
+    workAge: workAge
   };
 
 })();

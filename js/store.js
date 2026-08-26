@@ -8,6 +8,7 @@ window.App = window.App || {};
 (function() {
   const STORAGE_KEY = 'zyg_workbench_v1';
   const RESEARCH_TIMELINE_FLAG = 'zyg_research_timeline_v1';
+  const TEACHER_ROSTER_FLAG = 'zyg_teacher_roster_v1';
   let _data = null;
   let _listeners = [];
   let _saveTimer = null;
@@ -130,7 +131,9 @@ window.App = window.App || {};
         baseHeadcount: null,
         // 期初设定日期
         baseDate: null
-      }
+      },
+      // 教师花名册（主键 = name + subjectGroup；positionCode 全英文编码；certificates 为数组；工龄动态算不入库）
+      teachers: defaultTeachers()
     };
   }
 
@@ -154,6 +157,14 @@ window.App = window.App || {};
           if (added > 0) save();
         }
       } catch (e2) { /* 忽略合并异常，避免影响正常加载 */ }
+      // 一次性把默认教师花名册并入 teachers（幂等，按 id 已存在则跳过）
+      try {
+        if (!localStorage.getItem(TEACHER_ROSTER_FLAG)) {
+          var tAdded = mergeTeacherRoster();
+          localStorage.setItem(TEACHER_ROSTER_FLAG, '1');
+          if (tAdded > 0) save();
+        }
+      } catch (e3) { /* 忽略合并异常 */ }
     } catch (e) {
       console.warn('Store load failed, using defaults:', e);
       _data = getDefaultData();
@@ -173,6 +184,52 @@ window.App = window.App || {};
     var added = 0;
     jy.forEach(function(n) {
       if (!have[n.id]) { _data.timeline.fixedNodes.push(JSON.parse(JSON.stringify(n))); added++; }
+    });
+    return added;
+  }
+
+  // 教师花名册默认数据（来自《教师周报模板_备份_20260825b.xlsx》25 条；中文岗位已归一为英文编码：
+  // 中级教研员→IIR、初级教研员→JIR；证书已拆为数组；"无"→空数组；工龄不入库动态计算）
+  function defaultTeachers() {
+    return [
+      { id:'tr-01', name:'王静静', subjectGroup:'数学', positionCode:'DOST', entryDate:'2022-08-16', school:'安徽农业大学', major:'农业工程', certificates:['初中数学','高中生物'] },
+      { id:'tr-02', name:'陈雅文', subjectGroup:'英语', positionCode:'TRS', entryDate:'2022-11-01', school:'宿迁学院', major:'软件工程', certificates:[] },
+      { id:'tr-03', name:'李悦', subjectGroup:'文综', positionCode:'IIR', entryDate:'2023-07-12', school:'高等院校', major:'会计', certificates:['小学语文'] },
+      { id:'tr-04', name:'付静雯', subjectGroup:'数学', positionCode:'TRM', entryDate:'2024-03-19', school:'苏州大学应用技术学院', major:'电子商务', certificates:['高中数学'] },
+      { id:'tr-05', name:'康楠', subjectGroup:'文综', positionCode:'TRMT', entryDate:'2024-02-27', school:'湘南学院', major:'翻译', certificates:['高中语文'] },
+      { id:'tr-06', name:'李心甜', subjectGroup:'文综', positionCode:'JIR', entryDate:'2023-10-02', school:'盐城师范学院', major:'法学', certificates:['初中语文','初中历史'] },
+      { id:'tr-07', name:'王婧怡', subjectGroup:'文综', positionCode:'JIR', entryDate:'2023-07-19', school:'江苏师范大学', major:'广播电视编导', certificates:['初中语文'] },
+      { id:'tr-08', name:'王湛文', subjectGroup:'理综', positionCode:'IIR', entryDate:'2024-07-10', school:'常州工学院', major:'数学与应用数学', certificates:['初中数学','高中物理'] },
+      { id:'tr-09', name:'孙雨婷', subjectGroup:'英语', positionCode:'TRMT', entryDate:'2024-07-01', school:'商丘师范学院', major:'电气工程及其自动化/辅修英语', certificates:['初中英语'] },
+      { id:'tr-10', name:'郭岩', subjectGroup:'英语', positionCode:'IIR', entryDate:'2024-07-17', school:'中国矿业大学徐海学院', major:'英语', certificates:['初中英语','专八'] },
+      { id:'tr-11', name:'朱守智', subjectGroup:'理综', positionCode:'TRM', entryDate:'2024-10-29', school:'中国矿业大学', major:'建筑土木工程', certificates:['初中化学'] },
+      { id:'tr-12', name:'徐硕阳', subjectGroup:'文综', positionCode:'IIR', entryDate:'2024-12-05', school:'南十字星大学', major:'工商管理', certificates:[] },
+      { id:'tr-13', name:'徐家欣', subjectGroup:'文综', positionCode:'GPS2', entryDate:'2025-01-02', school:'湖南大学', major:'建筑学', certificates:['高中语文'] },
+      { id:'tr-14', name:'蒋文宇', subjectGroup:'数学', positionCode:'TRS', entryDate:'2025-01-20', school:'华北科技学院', major:'电子信息', certificates:[] },
+      { id:'tr-15', name:'王筱枫', subjectGroup:'数学', positionCode:'TR', entryDate:'2025-03-18', school:'湖北工业大学工程技术学院', major:'生物工程', certificates:[] },
+      { id:'tr-16', name:'叶栖桐', subjectGroup:'英语', positionCode:'TRS', entryDate:'2025-03-25', school:'湖州师范学院', major:'教师教育学', certificates:['小学数学'] },
+      { id:'tr-17', name:'张可儿', subjectGroup:'文综', positionCode:'TRS', entryDate:'2025-05-01', school:'南京航空航天大学金城学院', major:'播音与主持仪式', certificates:['小学语文'] },
+      { id:'tr-18', name:'张鑫', subjectGroup:'英语', positionCode:'TR', entryDate:'2025-07-09', school:'安徽大学江淮学院', major:'英语', certificates:['专八'] },
+      { id:'tr-19', name:'李梦鸽', subjectGroup:'数学', positionCode:'TRS', entryDate:'2025-11-11', school:'忻州师范学院', major:'管理', certificates:['初中数学','初中地理'] },
+      { id:'tr-20', name:'孙周硕', subjectGroup:'数学', positionCode:'TR', entryDate:'2025-12-31', school:'盐城工学院', major:'电子科学与技术', certificates:[] },
+      { id:'tr-21', name:'房嘉雯', subjectGroup:'英语', positionCode:'TR', entryDate:'2026-03-10', school:'江苏师范大学', major:'学科英语', certificates:['高中英语','专八'] },
+      { id:'tr-22', name:'罗雯静', subjectGroup:'文综', positionCode:'TR', entryDate:'2026-05-03', school:'北方民族大学', major:'历史学', certificates:['初中历史'] },
+      { id:'tr-23', name:'汤倩', subjectGroup:'理综', positionCode:'TR', entryDate:'2026-05-07', school:'安徽师范大学', major:'网络空间安全', certificates:['高中物理'] },
+      { id:'tr-24', name:'赵薇', subjectGroup:'英语', positionCode:'TR', entryDate:'2026-06-24', school:'江苏理工学院', major:'商务英语', certificates:['初中英语','专八'] },
+      { id:'tr-25', name:'黄梦茹', subjectGroup:'数学', positionCode:'TR', entryDate:'2026-07-17', school:'辽东学院', major:'汉语国际教育', certificates:[] }
+    ];
+  }
+
+  // 将默认教师花名册（id 以 'tr-' 开头）并入当前 teachers；幂等，按 id 已存在则跳过
+  function mergeTeacherRoster() {
+    var def = defaultTeachers();
+    if (!_data.teachers) _data.teachers = [];
+    if (!Array.isArray(_data.teachers)) _data.teachers = [];
+    var have = {};
+    _data.teachers.forEach(function(t) { if (t.id) have[t.id] = true; });
+    var added = 0;
+    def.forEach(function(t) {
+      if (!have[t.id]) { _data.teachers.push(JSON.parse(JSON.stringify(t))); added++; }
     });
     return added;
   }
@@ -346,6 +403,12 @@ window.App = window.App || {};
     // 手动把教研时间轴节点合并进当前数据（幂等，供「设置 → 同步教研时间轴」调用）
     mergeResearchTimeline: function() {
       var added = mergeResearchTimelineNodes();
+      save();
+      return added;
+    },
+    // 手动把默认教师花名册合并进当前数据（幂等，供「设置 → 同步教师花名册」调用）
+    mergeTeachers: function() {
+      var added = mergeTeacherRoster();
       save();
       return added;
     }
