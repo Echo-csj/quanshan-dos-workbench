@@ -231,15 +231,15 @@
     html += '<table class="teacher-table">';
     html += '<thead><tr>';
     html += '<th style="width:40px">#</th>';
-    html += '<th>姓名</th>';
+    html += '<th style="width:84px">姓名</th>';
     html += '<th>学科组</th>';
     html += '<th>岗位</th>';
     html += '<th>入职日期</th>';
     html += '<th>工龄</th>';
-    html += '<th>毕业院校</th>';
+    html += '<th style="width:132px">毕业院校</th>';
     html += '<th>学历</th>';
     html += '<th>专业</th>';
-    html += '<th>证书</th>';
+    html += '<th style="width:280px">证书</th>';
     html += '</tr></thead><tbody>';
     if (list.length === 0) {
       html += '<tr><td colspan="10" class="empty-row">无匹配教师</td></tr>';
@@ -261,7 +261,7 @@
         html += '<td>' + posBadge + '</td>';
         html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
         html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
-        html += '<td>' + esc(t.school || '—') + '</td>';
+        html += '<td class="school-cell">' + esc(t.school || '—') + '</td>';
         html += '<td class="degree-cell">' + degreeCellHtml(t) + '</td>';
         html += '<td>' + esc(t.major || '—') + '</td>';
         html += '<td class="cert-cell">' + certHtml + '</td>';
