@@ -1166,8 +1166,8 @@ a:hover { color: var(--accent-hover); }
 .teacher-stats .stat-pill b { color:var(--text); }
 .teacher-stats .dot, .teacher-table .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
 
-.table-card { overflow-x:auto; padding:0; }
-.teacher-table { width:100%; border-collapse:collapse; font-size:13px; }
+.table-card { overflow-x:auto; -webkit-overflow-scrolling:touch; padding:0; }
+.teacher-table { width:100%; min-width:960px; border-collapse:collapse; font-size:13px; }
 .teacher-table th, .teacher-table td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
 .teacher-table th { font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); background:var(--bg); position:sticky; top:0; }
 .teacher-table tbody tr:hover { background:var(--accent-soft); }
@@ -1177,7 +1177,7 @@ a:hover { color: var(--accent-hover); }
 .mono { font-family:'JetBrains Mono', monospace; }
 
 .pos-badge { display:inline-block; padding:1px 7px; border-radius:5px; font-size:11px; font-weight:600; font-family:'JetBrains Mono', monospace; background:var(--accent-soft); color:var(--accent-text); cursor:help; }
-.cert-chip { display:inline-block; padding:0 6px; margin:1px 2px; border-radius:4px; font-size:11px; background:var(--bg); border:1px solid var(--border); color:var(--text-muted); }
+.cert-chip { display:inline-block; padding:1px 7px; border-radius:4px; font-size:11px; line-height:16px; background:var(--bg); border:1px solid var(--border); color:var(--text-muted); white-space:nowrap; }
 
 .teacher-help { margin-top:14px; font-size:12px; color:var(--text-muted); }
 .teacher-help p { margin:4px 0; }
@@ -1203,10 +1203,30 @@ a:hover { color: var(--accent-hover); }
 .preview-table .warn { color:var(--warn-text); }
 
 /* ---- 教师标签体系 ---- */
-.tag-badge { display:inline-block; padding:1px 8px; margin:1px 3px 1px 0; border-radius:999px; font-size:11px; font-weight:600; line-height:17px; white-space:nowrap; }
+.tag-badge { display:inline-block; padding:1px 8px; margin:0; border-radius:999px; font-size:11px; font-weight:600; line-height:17px; white-space:nowrap; }
 .teacher-table .row-leave td { opacity:.5; }
 .teacher-table .row-leave td strong { text-decoration:line-through; text-decoration-thickness:1px; }
 .teacher-table .row-leave:hover td { opacity:.75; }
+
+/* ---- 状态颜色编码（在职/待离职/离职；色弱友好：颜色 + 图标 + 文字三重编码）---- */
+.status-badge { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; line-height:16px; white-space:nowrap; border:1px solid transparent; }
+.status-badge .status-glyph { font-size:10px; line-height:1; }
+.status-active  { background:rgba(22,163,74,.12);  color:#15803D; border-color:rgba(22,163,74,.35); }
+.status-pending { background:rgba(249,115,22,.14); color:#C2410C; border-color:rgba(249,115,22,.40); }
+.status-left    { background:rgba(100,116,139,.14); color:#475569; border-color:rgba(100,116,139,.35); }
+.teacher-stats .stat-active  .dot { background:#16A34A; }
+.teacher-stats .stat-pending .dot { background:#F97316; }
+.teacher-stats .stat-left    .dot { background:#94A3B8; }
+
+/* 行首状态色条（左侧 3px 强调，便于快速扫读分布）*/
+.teacher-table tr.row-active  td:first-child { box-shadow: inset 3px 0 0 #16A34A; }
+.teacher-table tr.row-pending td:first-child { box-shadow: inset 3px 0 0 #F97316; }
+.teacher-table tr.row-leave   td:first-child { box-shadow: inset 3px 0 0 #94A3B8; }
+
+/* 证书 / 标签 容器：弹性换行，完整显示不截断 */
+.teacher-table .certs, .teacher-table .tags { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+.teacher-table .cert-chip { display:inline-block; padding:1px 7px; border-radius:4px; font-size:11px; line-height:16px; background:var(--bg); border:1px solid var(--border); color:var(--text-muted); white-space:nowrap; }
+.teacher-table .cert-cell { white-space:normal; max-width:260px; }
 
 /* ---- 编辑弹窗表单 ---- */
 .ed-form { display:flex; flex-direction:column; gap:12px; }
