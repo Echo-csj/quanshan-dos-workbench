@@ -1211,9 +1211,15 @@ a:hover { color: var(--accent-hover); }
 /* ---- 状态颜色编码（在职/待离职/离职；色弱友好：颜色 + 图标 + 文字三重编码）---- */
 .status-badge { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:999px; font-size:11px; font-weight:700; line-height:16px; white-space:nowrap; border:1px solid transparent; }
 .status-badge .status-glyph { font-size:10px; line-height:1; }
-.status-active  { background:rgba(22,163,74,.12);  color:#15803D; border-color:rgba(22,163,74,.35); }
-.status-pending { background:rgba(249,115,22,.14); color:#C2410C; border-color:rgba(249,115,22,.40); }
-.status-left    { background:rgba(100,116,139,.14); color:#475569; border-color:rgba(100,116,139,.35); }
+.status-active  { color:#15803D; }
+.status-pending { color:#C2410C; }
+.status-left    { color:#475569; }
+
+/* 姓名栏状态标识：颜色 + 图标 + 文字三重编码（色弱友好）*/
+.name-cell { white-space:nowrap; }
+.name-status { display:inline-flex; align-items:center; gap:5px; font-weight:600; }
+.name-status .ns-glyph { font-size:11px; line-height:1; }
+.name-status .ns-name { font-weight:700; }
 .teacher-stats .stat-active  .dot { background:#16A34A; }
 .teacher-stats .stat-pending .dot { background:#F97316; }
 .teacher-stats .stat-left    .dot { background:#94A3B8; }

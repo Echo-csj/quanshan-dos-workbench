@@ -78,11 +78,11 @@
     if (hasTag(t, '待离职')) return 'pending';
     return 'active';
   }
-  // 颜色 + 图标 + 文字三重编码（色觉障碍友好）
+  // 颜色 + 图标 + 文字三重编码（色觉障碍友好），标注于姓名栏
   var STATUS_META = {
     active:  { label: '在职',   glyph: '●', cls: 'status-active' },
     pending: { label: '待离职', glyph: '▲', cls: 'status-pending' },
-    left:    { label: '离职',   glyph: '—', cls: 'status-left' }
+    left:    { label: '离职',   glyph: '■', cls: 'status-left' }
   };
 
   // 把任意岗位值归一为英文编码
@@ -144,6 +144,16 @@
     }
     // 非编辑态：普通文本（与现有列样式一致）
     return '<span class="degree-text" onclick="App.views.teachers.startDegreeEdit(\'' + App.util.escapeAttr(t.id) + '\', event)" title="点击选择学历">' + esc(t.degree || '—') + '</span>';
+  }
+
+  // ---------- 姓名栏：颜色 + 图标 + 文字 状态标识（色弱友好）----------
+  function nameCellHtml(t, sm) {
+    var left = sm.cls === 'status-left';
+    var h = '<span class="name-status ' + sm.cls + '" title="' + esc(sm.label) + '">';
+    h += '<span class="ns-glyph">' + sm.glyph + '</span>';
+    h += '<strong class="ns-name"' + (left ? ' style="text-decoration:line-through"' : '') + '>' + esc(t.name) + '</strong>';
+    h += '</span>';
+    return h;
   }
 
   // ---------- 渲染 ----------
@@ -221,10 +231,8 @@
     html += '<thead><tr>';
     html += '<th style="width:40px">#</th>';
     html += '<th>姓名</th>';
-    html += '<th>状态</th>';
     html += '<th>学科组</th>';
     html += '<th>岗位</th>';
-    html += '<th>标签</th>';
     html += '<th>入职日期</th>';
     html += '<th>工龄</th>';
     html += '<th>毕业院校</th>';
@@ -233,7 +241,7 @@
     html += '<th>证书</th>';
     html += '</tr></thead><tbody>';
     if (list.length === 0) {
-      html += '<tr><td colspan="12" class="empty-row">无匹配教师</td></tr>';
+      html += '<tr><td colspan="10" class="empty-row">无匹配教师</td></tr>';
     } else {
       list.forEach(function(t, i) {
         var sc = SUBJECT_COLORS[t.subjectGroup] || '#888';
@@ -244,20 +252,12 @@
         }).join('');
         var certHtml = certs ? '<span class="certs">' + certs + '</span>' : '<span class="muted">—</span>';
         var posBadge = '<span class="pos-badge" title="' + esc(posName(t.positionCode)) + '">' + esc(t.positionCode || '—') + '</span>';
-        var tagBadges = (t.tags || []).map(function(tag) {
-          var c = TAG_COLORS[tag] || '#7C3AED';
-          return '<span class="tag-badge" style="background:' + c + '1a;color:' + c + ';border:1px solid ' + c + '55">' + esc(tag) + '</span>';
-        }).join('');
-        var tagHtml = tagBadges ? '<span class="tags">' + tagBadges + '</span>' : '<span class="muted">—</span>';
-        var statusBadge = '<span class="status-badge ' + sm.cls + '"><span class="status-glyph">' + sm.glyph + '</span>' + sm.label + '</span>';
         var rowCls = st === 'left' ? ' class="row-leave"' : (st === 'pending' ? ' class="row-pending"' : ' class="row-active"');
         html += '<tr' + rowCls + ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑">';
         html += '<td class="mono muted">' + (i + 1) + '</td>';
-        html += '<td><strong>' + esc(t.name) + '</strong></td>';
-        html += '<td>' + statusBadge + '</td>';
+        html += '<td class="name-cell">' + nameCellHtml(t, sm) + '</td>';
         html += '<td><span class="dot" style="background:' + sc + ';margin-right:4px"></span>' + esc(t.subjectGroup) + '</td>';
         html += '<td>' + posBadge + '</td>';
-        html += '<td>' + tagHtml + '</td>';
         html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
         html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
         html += '<td>' + esc(t.school || '—') + '</td>';
@@ -277,7 +277,7 @@
       html += '<span class="codebook-item"><b>' + code + '</b> ' + POSITION_CODEBOOK[code] + '</span>';
     });
     html += '</p>';
-    html += '<p class="muted">💡 教师<b>状态以颜色标识</b>：在职（绿 ●）/ 待离职（橙 ▲）/ 离职（灰 —），并附文字与图标，色觉障碍也可辨识，顶部统计条直接显示三类人数分布；点击任意教师行可<b>编辑资料</b>（岗位、学历、入职日期、证书、标签），并可删除；点击「学历」单元格可直接行内下拉选择（仅 本科 / 硕士，Esc 或点其他处取消）；标签支持「跨学科 / 离职 / 待离职」及自定义；上传 Excel 按「姓名 + 学科组」识别——已存在则更新、不存在则新增（已有标签不受影响，Excel 无学历列时不改动已有学历）；岗位列填中文全称（如"中级教研员"）或编码（如 IIR）均可，自动归一为编码；工龄不入库，按入职日期实时计算。</p>';
+    html += '<p class="muted">💡 教师<b>状态标注在姓名栏</b>：在职（绿 ●）/ 待离职（橙 ▲）/ 离职（灰 ■，姓名划线），颜色 + 图标 + 文字三重标识，色觉障碍也可辨识；顶部统计条直接显示三类人数分布；点击任意教师行可<b>编辑资料</b>（岗位、学历、入职日期、证书、标签），并可删除；点击「学历」单元格可直接行内下拉选择（仅 本科 / 硕士，Esc 或点其他处取消）；标签支持「跨学科 / 离职 / 待离职」及自定义；上传 Excel 按「姓名 + 学科组」识别——已存在则更新、不存在则新增（已有标签不受影响，Excel 无学历列时不改动已有学历）；岗位列填中文全称（如"中级教研员"）或编码（如 IIR）均可，自动归一为编码；工龄不入库，按入职日期实时计算。</p>';
     html += '</div>';
 
     container.innerHTML = html;
