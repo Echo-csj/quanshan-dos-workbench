@@ -43,9 +43,13 @@
     positionCode:['岗位', '职位', '职务'],
     entryDate:   ['入职日期', '入职', '入职时间', '入职年月'],
     school:      ['毕业院校', '院校', '学校'],
+    degree:      ['学历'],
     major:       ['专业'],
     certificates:['证书', '资格证书', '资格']
   };
+
+  // 学历可选项（行内下拉编辑仅此两项，不允许手动输入）
+  var DEGREE_OPTIONS = ['本科', '硕士'];
 
   var SUBJECT_COLORS = {
     '数学': '#4F46E5', '英语': '#0EA5E9', '文综': '#F59E0B', '理综': '#10B981'
@@ -60,6 +64,9 @@
   // 编辑弹窗状态
   var edId = null;
   var edTags = [];
+
+  // 学历行内编辑状态（当前正在编辑的教师 id；null=非编辑态）
+  var degEditId = null;
 
   function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
 
@@ -80,6 +87,13 @@
     return s; // 未知 → 原样返回（预览会标黄）
   }
 
+  // 学历归一：空→''；本科/硕士原样；其他值原样保留（显示可见，编辑下拉中作为原值兜底项）
+  function normDegree(val) {
+    if (val == null) return '';
+    var s = String(val).trim();
+    return s;
+  }
+
   function splitCerts(val) {
     if (val == null) return [];
     var s = String(val).trim();
@@ -97,6 +111,31 @@
   }
 
   function esc(s) { return App.util.escapeHtml(s == null ? '' : s); }
+
+  // ---------- 学历单元格（非编辑态=纯文本；编辑态=下拉，仅本科/硕士）----------
+  function degreeCellHtml(t) {
+    if (degEditId === t.id) {
+      // 编辑态：下拉选择，选中即保存；blur / Esc 取消（数据不动）
+      var cur = t.degree || '';
+      var h = '<select id="deg-select" class="form-input form-input-sm degree-select" '
+        + 'onchange="App.views.teachers.commitDegreeEdit(\'' + App.util.escapeAttr(t.id) + '\', this.value)" '
+        + 'onblur="App.views.teachers.cancelDegreeEdit()" '
+        + 'onkeydown="App.views.teachers.degreeKeydown(event)">';
+      if (!cur) {
+        h += '<option value="" disabled selected>选择学历…</option>';
+      } else if (DEGREE_OPTIONS.indexOf(cur) < 0) {
+        // Excel 导入的非标准原值：保留展示，仍只能选本科/硕士替换
+        h += '<option value="' + esc(cur) + '" selected>' + esc(cur) + '（原值）</option>';
+      }
+      DEGREE_OPTIONS.forEach(function(d) {
+        h += '<option value="' + d + '"' + (cur === d ? ' selected' : '') + '>' + d + '</option>';
+      });
+      h += '</select>';
+      return h;
+    }
+    // 非编辑态：普通文本（与现有列样式一致）
+    return '<span class="degree-text" onclick="App.views.teachers.startDegreeEdit(\'' + App.util.escapeAttr(t.id) + '\', event)" title="点击选择学历">' + esc(t.degree || '—') + '</span>';
+  }
 
   // ---------- 渲染 ----------
   function render() {
@@ -178,7 +217,7 @@
       }
       if (search) {
         var q = search.toLowerCase();
-        var hay = [t.name, t.school, t.major, (t.certificates || []).join(' '), (t.tags || []).join(' '), posName(t.positionCode)].join(' ').toLowerCase();
+        var hay = [t.name, t.school, t.major, t.degree, (t.certificates || []).join(' '), (t.tags || []).join(' '), posName(t.positionCode)].join(' ').toLowerCase();
         if (hay.indexOf(q) < 0) return false;
       }
       return true;
@@ -197,11 +236,12 @@
     html += '<th>入职日期</th>';
     html += '<th>工龄</th>';
     html += '<th>毕业院校</th>';
+    html += '<th>学历</th>';
     html += '<th>专业</th>';
     html += '<th>证书</th>';
     html += '</tr></thead><tbody>';
     if (list.length === 0) {
-      html += '<tr><td colspan="10" class="empty-row">无匹配教师</td></tr>';
+      html += '<tr><td colspan="11" class="empty-row">无匹配教师</td></tr>';
     } else {
       list.forEach(function(t, i) {
         var sc = SUBJECT_COLORS[t.subjectGroup] || '#888';
@@ -224,6 +264,7 @@
         html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
         html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
         html += '<td>' + esc(t.school || '—') + '</td>';
+        html += '<td class="degree-cell">' + degreeCellHtml(t) + '</td>';
         html += '<td>' + esc(t.major || '—') + '</td>';
         html += '<td class="cert-cell">' + certs + '</td>';
         html += '</tr>';
@@ -239,7 +280,7 @@
       html += '<span class="codebook-item"><b>' + code + '</b> ' + POSITION_CODEBOOK[code] + '</span>';
     });
     html += '</p>';
-    html += '<p class="muted">💡 点击任意教师行可<b>编辑资料</b>（岗位、入职日期、证书、标签），并可删除；标签支持「跨学科 / 离职 / 待离职」及自定义，标记离职的教师整行置灰；上传 Excel 按「姓名 + 学科组」识别——已存在则更新、不存在则新增（已有标签不受影响）；岗位列填中文全称（如"中级教研员"）或编码（如 IIR）均可，自动归一为编码；工龄不入库，按入职日期实时计算。</p>';
+    html += '<p class="muted">💡 点击任意教师行可<b>编辑资料</b>（岗位、学历、入职日期、证书、标签），并可删除；点击「学历」单元格可直接行内下拉选择（仅 本科 / 硕士，Esc 或点其他处取消）；标签支持「跨学科 / 离职 / 待离职」及自定义，标记离职的教师整行置灰；上传 Excel 按「姓名 + 学科组」识别——已存在则更新、不存在则新增（已有标签不受影响，Excel 无学历列时不改动已有学历）；岗位列填中文全称（如"中级教研员"）或编码（如 IIR）均可，自动归一为编码；工龄不入库，按入职日期实时计算。</p>';
     html += '</div>';
 
     container.innerHTML = html;
@@ -257,6 +298,41 @@
     // 防抖
     if (window.__tchSearchTimer) clearTimeout(window.__tchSearchTimer);
     window.__tchSearchTimer = setTimeout(render, 200);
+  }
+
+  /* ---------- 学历行内编辑 ---------- */
+  function startDegreeEdit(id, ev) {
+    if (ev && ev.stopPropagation) ev.stopPropagation(); // 阻止冒泡触发行编辑弹窗
+    if (degEditId === id) return; // 已在该单元格编辑中
+    degEditId = id;
+    render();
+    var sel = document.getElementById('deg-select');
+    if (sel && sel.focus) { try { sel.focus(); } catch (e) {} }
+  }
+
+  function commitDegreeEdit(id, val) {
+    if (degEditId !== id) return;
+    degEditId = null;
+    val = normDegree(val);
+    var teachers = getTeachers().slice();
+    var idx = teachers.findIndex(function(t) { return t.id === id; });
+    if (idx < 0) { render(); return; }
+    var old = teachers[idx].degree || '';
+    if (old === val) { render(); return; } // 未变化，仅退出编辑态
+    teachers[idx] = Object.assign({}, teachers[idx], { degree: val });
+    App.store.set('teachers', teachers);
+    App.util.toast('学历已保存：' + (val || '（空）'), 'ok');
+    render();
+  }
+
+  function cancelDegreeEdit() {
+    if (degEditId == null) return;
+    degEditId = null;
+    render(); // 数据未改动，重绘即恢复原文本
+  }
+
+  function degreeKeydown(e) {
+    if (e && e.key === 'Escape') cancelDegreeEdit();
   }
 
   /* ---------- 点击编辑教师资料 ---------- */
@@ -289,6 +365,15 @@
     html += '</div>';
     html += '<div class="ed-row">';
     html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(t.school || '') + '"></div>';
+    html += '<div class="ed-field"><label>学历</label><select class="form-input" id="ed-degree">';
+    html += '<option value=""' + (!t.degree ? ' selected' : '') + '>未填写</option>';
+    DEGREE_OPTIONS.forEach(function(d) {
+      html += '<option value="' + d + '"' + (t.degree === d ? ' selected' : '') + '>' + d + '</option>';
+    });
+    if (t.degree && DEGREE_OPTIONS.indexOf(t.degree) < 0) {
+      html += '<option value="' + esc(t.degree) + '" selected>' + esc(t.degree) + '（原值）</option>';
+    }
+    html += '</select></div>';
     html += '<div class="ed-field"><label>专业</label><input class="form-input" id="ed-major" value="' + esc(t.major || '') + '"></div>';
     html += '</div>';
     html += '<div class="ed-field"><label>证书（用 、或 , 分隔多个）</label><input class="form-input" id="ed-certs" value="' + esc((t.certificates || []).join('、')) + '"></div>';
@@ -364,6 +449,7 @@
     var positionCode = (document.getElementById('ed-pos') || {}).value || '';
     var entryDate = (document.getElementById('ed-entry') || {}).value || '';
     var school = (document.getElementById('ed-school') || {}).value || '';
+    var degree = (document.getElementById('ed-degree') || {}).value || '';
     var major = (document.getElementById('ed-major') || {}).value || '';
     var certsRaw = (document.getElementById('ed-certs') || {}).value || '';
     if (!name.trim() || !subjectGroup) {
@@ -376,6 +462,7 @@
       positionCode: positionCode,
       entryDate: entryDate,
       school: school.trim(),
+      degree: degree,
       major: major.trim(),
       certificates: splitCerts(certsRaw),
       tags: edTags.slice()
@@ -425,6 +512,7 @@
             positionCode: normPos(cellVal(row, colIdx.positionCode)),
             entryDate: parseEntryDate(cellVal(row, colIdx.entryDate)),
             school: (cellVal(row, colIdx.school) || '').toString().trim(),
+            degree: colIdx.degree == null ? undefined : normDegree(cellVal(row, colIdx.degree)), // 无学历列→undefined（不覆盖已有值）
             major: (cellVal(row, colIdx.major) || '').toString().trim(),
             certificates: splitCerts(cellVal(row, colIdx.certificates)),
             row: ri + 1
@@ -443,7 +531,7 @@
 
   // 表头别名 → 字段列下标
   function resolveColumns(headerRow) {
-    var map = { name: null, subjectGroup: null, positionCode: null, entryDate: null, school: null, major: null, certificates: null };
+    var map = { name: null, subjectGroup: null, positionCode: null, entryDate: null, school: null, degree: null, major: null, certificates: null };
     Object.keys(HEADER_MAP).forEach(function(field) {
       for (var i = 0; i < headerRow.length; i++) {
         var h = headerRow[i];
@@ -538,6 +626,8 @@
         major: p.major,
         certificates: p.certificates
       };
+      // 学历：仅当 Excel 提供了学历列才写入（undefined 时不覆盖/不新增键）
+      if (p.degree !== undefined) rec.degree = p.degree;
       if (a.action === 'update') {
         var old = teachers[a.idx];
         rec.id = old.id; // 保留原 id
@@ -554,11 +644,11 @@
   // ---------- 下载标准模板 ----------
   function downloadTemplate() {
     var wb = XLSX.utils.book_new();
-    var header = ['姓名', '学科组', '岗位', '入职日期', '毕业院校', '专业', '证书'];
-    var sample = ['王静静', '数学', 'DOST', '2022-08-16', '安徽农业大学', '农业工程', '初中数学、高中生物'];
-    var aoa = [header, sample, ['', '', '', '', '', '', ''], ['', '（岗位可填编码或中文全称，见"岗位编码"表）', '', '', '', '', '']];
+    var header = ['姓名', '学科组', '岗位', '入职日期', '毕业院校', '学历', '专业', '证书'];
+    var sample = ['王静静', '数学', 'DOST', '2022-08-16', '安徽农业大学', '硕士', '农业工程', '初中数学、高中生物'];
+    var aoa = [header, sample, ['', '', '', '', '', '', '', ''], ['', '（岗位可填编码或中文全称，见"岗位编码"表；学历仅填 本科 / 硕士）', '', '', '', '', '', '']];
     var ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 26 }, { wch: 18 }, { wch: 30 }];
+    ws['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 14 }, { wch: 26 }, { wch: 8 }, { wch: 18 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, ws, '教师信息');
 
     // 岗位编码对照表
@@ -588,7 +678,11 @@
     deleteTeacher: deleteTeacher,
     addTag: addTag,
     removeTag: removeTag,
-    onTagKey: onTagKey
+    onTagKey: onTagKey,
+    startDegreeEdit: startDegreeEdit,
+    commitDegreeEdit: commitDegreeEdit,
+    cancelDegreeEdit: cancelDegreeEdit,
+    degreeKeydown: degreeKeydown
   };
 
 })();

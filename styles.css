@@ -1227,3 +1227,9 @@ a:hover { color: var(--accent-hover); }
   .ed-row { flex-direction:column; gap:10px; }
   .ed-row .ed-field { min-width:0; }
 }
+
+/* ---- 学历列（行内下拉编辑）---- */
+.teacher-table .degree-cell { white-space:nowrap; }
+.degree-text { cursor:pointer; }
+.degree-text:hover { color:var(--accent); }
+.degree-select { width:92px; height:26px; padding:2px 6px; font-size:12px; border-radius:5px; }
