@@ -32,9 +32,10 @@
     campusTotal: 'campusTotal',
   };
 
-  // 仅用于「基准值对标 / 趋势」对标当月数据的口径：排除周度字段，避免把周率混入月度对标。
-  // （campus 快照通常只有 weekly 记录，其 values 同时携带「周字段」与「月累计字段」，故需剔除周字段）
+  // 「周/月」两套周期性字段：有月度数据时用月字段、剔除周字段；仅有周度数据时用周字段、剔除月字段。
+  // 其余字段（学员数、教师数、现金、续费/退费/结课各率等）为非周期共享口径，两种情况都保留。
   var WEEK_ONLY_CAMPUS_KEYS = { v1WeekRate: 1, weekSaturation: 1, v1WeekUnitAvg: 1 };
+  var MONTH_ONLY_CAMPUS_KEYS = { v1MonthRate: 1, monthSaturation: 1, v1MonthUnitAvg: 1 };
 
   // 顶部「核心指标」大卡：取自与本看板基准值对标一致的口径（src=campus键, label/unit=展示）
   var FEATURES = [
@@ -240,13 +241,14 @@
     return snap;
   }
 
-  // 选择权威数据源：优先月度数据流，否则周报最新一周（其内部已含月度累计指标）
+  // 选择权威数据源：优先月度数据流，否则回退到周报最新一周。
+  // 返回 { rec, kind }：kind='monthly' 表示已上传月度数据（用「月」口径字段）；kind='weekly' 表示仅有周度数据（用「周」口径字段兜底）。
   function pickSource(snap) {
     var lbs = snap.latestByStream || {};
     var monthly = lbs['monthly'];
-    if (monthly && monthly.values && monthly.year && monthly.month) return monthly;
+    if (monthly && monthly.values && monthly.year && monthly.month) return { rec: monthly, kind: 'monthly' };
     var weekly = lbs['weekly'];
-    if (weekly && weekly.values && weekly.year && weekly.month) return weekly;
+    if (weekly && weekly.values && weekly.year && weekly.month) return { rec: weekly, kind: 'weekly' };
     return null;
   }
 
@@ -255,9 +257,10 @@
     if (!snap || !snap.latestByStream) return;
     var src = pickSource(snap);
     if (!src) return;
-    var values = src.values || {};
+    var isWeekly = (src.kind === 'weekly');
+    var values = src.rec.values || {};
     if (!values || typeof values !== 'object') return;
-    var monthKey = src.year + '-' + String(src.month).padStart(2, '0');
+    var monthKey = src.rec.year + '-' + String(src.rec.month).padStart(2, '0');
 
     // —— 写入 reports.monthly（供基准值对标 / 趋势） ——
     var reports = App.store.get('reports') || { monthly: {}, imports: [] };
@@ -268,15 +271,19 @@
     });
     var metrics = {};
     Object.keys(CAMPUS_TO_DOS).forEach(function (campusKey) {
-      if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return; // 仅对标当月数据，剔除周度字段
+      // 无月度数据时（weekly 兜底）剔除「月」字段、保留「周」字段；有月度数据时反之。
+      // 非周期共享字段两种情况都保留。
+      if (isWeekly) { if (MONTH_ONLY_CAMPUS_KEYS[campusKey]) return; }
+      else { if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return; }
       if (values[campusKey] != null && values[campusKey] !== '') metrics[CAMPUS_TO_DOS[campusKey]] = values[campusKey];
     });
     reports.monthly[monthKey] = {
       month: monthKey,
-      label: src.year + '年' + src.month + '月',
+      label: src.rec.year + '年' + src.rec.month + '月',
       metrics: metrics,
       yoy: null,
       campus: true,
+      source: isWeekly ? 'weekly' : 'monthly',
       importedAt: snap.generatedAt || new Date().toISOString()
     };
     App.store.set('reports', reports);
@@ -286,6 +293,7 @@
     if (!hr.weekly) hr.weekly = {};
     hr.linked = {
       month: monthKey,
+      source: isWeekly ? 'weekly' : 'monthly',
       teacherCount: values.teacherCount != null ? values.teacherCount : null,
       coreTeacherCount: values.coreTeacherCount != null ? values.coreTeacherCount : null,
       doubleThreeCount: values.doubleThreeCount != null ? values.doubleThreeCount : null,
@@ -295,7 +303,7 @@
       entryMonth: values.entryMonth != null ? values.entryMonth : null,
       quitWeek: values.quitWeek != null ? values.quitWeek : null,
       quitMonth: values.quitMonth != null ? values.quitMonth : null,
-  quitWeekRate: values.quitWeekRate != null ? values.quitWeekRate : null,
+      quitWeekRate: values.quitWeekRate != null ? values.quitWeekRate : null,
       quitMonthRate: values.quitMonthRate != null ? values.quitMonthRate : null,
       generatedAt: snap.generatedAt || new Date().toISOString()
     };

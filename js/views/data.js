@@ -73,6 +73,7 @@
     }
 
     var sel = months[months.length - 1];
+    var selSnap = reports.monthly[sel] || {};
     html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">';
     html += '<label class="form-label" style="margin:0">对标月份</label>';
     html += '<select id="baseline-month" class="form-input" style="width:  auto;min-width:160px">';
@@ -81,6 +82,9 @@
     });
     html += '</select>';
     html += '<span style="font-size:12px;color:var(--text-faint)">数据自动取自联动快照 · 字段与本看板口径对齐</span>';
+    html += '<span id="baseline-source" style="font-size:12px;font-weight:600;padding:2px 8px;border-radius:6px;' +
+      (selSnap.source === 'weekly' ? 'background:#FFF7E6;color:#B45309' : 'background:#ECFDF5;color:#047857') + '">' +
+      (selSnap.source === 'weekly' ? '周度数据（月度待上传）' : '月度数据') + '</span>';
     html += '</div>';
 
     html += '<div id="baseline-body"></div>';
@@ -93,6 +97,13 @@
     if (!snap) return '<div class="empty-state">无数据</div>';
     var metrics = snap.metrics || {};
 
+    // 周度兜底提示：无月度数据时，展示的是最新周报的「周」口径字段
+    var body = '';
+    if (snap.source === 'weekly') {
+      body += '<div style="font-size:12px;color:#B45309;background:#FFF7E6;border-radius:8px;padding:8px 12px;margin-bottom:14px">' +
+        '当前尚无月度数据，暂以最新周报的「周」口径字段对标。待校区上传月度报表后，将自动切换为月度数据。</div>';
+    }
+
     // 收集有基准值的指标
     var items = [];
     App.importer.trendMetricIds().forEach(function(id) {
@@ -101,8 +112,6 @@
       if (metrics[id] == null) return;
       items.push({ id: id, meta: meta, value: metrics[id] });
     });
-
-    var body = '';
 
     // 汇总
     body += '<div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">';
@@ -356,12 +365,27 @@
   /* ---------------- 交互绑定 ---------------- */
   function bindBaseline() {
     var sel = document.getElementById('baseline-month');
+    var updateSourceBadge = function (mk) {
+      var badge = document.getElementById('baseline-source');
+      if (!badge) return;
+      var reports = App.store.get('reports') || { monthly: {} };
+      var s = (reports.monthly || {})[mk] || {};
+      if (s.source === 'weekly') {
+        badge.textContent = '周度数据（月度待上传）';
+        badge.style.background = '#FFF7E6'; badge.style.color = '#B45309';
+      } else {
+        badge.textContent = '月度数据';
+        badge.style.background = '#ECFDF5'; badge.style.color = '#047857';
+      }
+    };
     if (sel) sel.addEventListener('change', function() {
       var body = document.getElementById('baseline-body');
       if (body) body.innerHTML = renderBaselineBody(sel.value);
+      updateSourceBadge(sel.value);
     });
     var body = document.getElementById('baseline-body');
     if (body) body.innerHTML = renderBaselineBody(sel ? sel.value : null);
+    if (sel) updateSourceBadge(sel.value);
   }
 
   function bindTrend() {
