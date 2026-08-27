@@ -241,15 +241,25 @@
     return snap;
   }
 
-  // 选择权威数据源：优先月度数据流，否则回退到周报最新一周。
-  // 返回 { rec, kind }：kind='monthly' 表示已上传月度数据（用「月」口径字段）；kind='weekly' 表示仅有周度数据（用「周」口径字段兜底）。
+  // 选择权威数据源：按「最新月份」对齐。
+  //   - 最新月份已有月度数据 → 用月度（定稿值）；
+  //   - 最新月份还没有月度、但已有周报 → 用周度兜底（周口径字段）；
+  //   - 同月同时有周/月 → 月度优先（定稿）。
+  // 返回 { rec, kind }：kind='monthly' 用「月」口径字段；kind='weekly' 用「周」口径字段兜底。
   function pickSource(snap) {
     var lbs = snap.latestByStream || {};
     var monthly = lbs['monthly'];
-    if (monthly && monthly.values && monthly.year && monthly.month) return { rec: monthly, kind: 'monthly' };
     var weekly = lbs['weekly'];
-    if (weekly && weekly.values && weekly.year && weekly.month) return { rec: weekly, kind: 'weekly' };
-    return null;
+    var mOk = monthly && monthly.values && monthly.year && monthly.month;
+    var wOk = weekly && weekly.values && weekly.year && weekly.month;
+    if (!mOk && !wOk) return null;
+    if (mOk && !wOk) return { rec: monthly, kind: 'monthly' };
+    if (!mOk && wOk) return { rec: weekly, kind: 'weekly' };
+    // 两者都有：比较月份（year*12+month）
+    var mKey = monthly.year * 12 + monthly.month;
+    var wKey = weekly.year * 12 + weekly.month;
+    if (wKey > mKey) return { rec: weekly, kind: 'weekly' }; // 最新月份尚无月度 → 周度兜底
+    return { rec: monthly, kind: 'monthly' };                 // 月度更新（或同月定稿）
   }
 
   // 把快照写入 App.store，使「基准值对标 / 环比·同比趋势 / 人事数据」无需手动导入即可填充
