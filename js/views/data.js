@@ -343,15 +343,6 @@
     html += hrCard('🔁 周离职人数率', fmtHRpct(L.quitWeekRate), '', hrTone(L.quitWeekRate, 0.03, 'lte'));
     html += '</div>';
 
-    // 请假 / 停课
-    html += '<div class="hr-summary-grid" style="margin-top:16px">';
-    html += hrCard('📝 学员请假次数', fmtHRNum(L.leaveStudent), '次', '');
-    html += hrCard('👤 老师请假次数', fmtHRNum(L.leaveTeacher), '次', '');
-    html += hrCard('🌧️ 1V1请假率', fmtHRpct(L.leaveRate), '', '');
-    html += hrCard('🚫 1V1停课人数', fmtHRNum(L.tkNum), '人', '');
-    html += hrCard('🚫 1V1停课人数率', fmtHRpct(L.tkNumRate), '', '');
-    html += '</div>';
-
     // 说明
     html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">说明</h3></div>';
     html += '<p style="font-size:13px;color:var(--text-muted);line-height:1.7">' +

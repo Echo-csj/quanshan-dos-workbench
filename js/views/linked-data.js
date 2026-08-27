@@ -288,11 +288,6 @@
       quitMonth: values.quitMonth != null ? values.quitMonth : null,
   quitWeekRate: values.quitWeekRate != null ? values.quitWeekRate : null,
       quitMonthRate: values.quitMonthRate != null ? values.quitMonthRate : null,
-      leaveTeacher: values.leaveTeacher != null ? values.leaveTeacher : null,
-      leaveStudent: values.leaveStudent != null ? values.leaveStudent : null,
-      leaveRate: values.leaveRate != null ? values.leaveRate : null,
-      tkNum: values.tkNum != null ? values.tkNum : null,
-      tkNumRate: values.tkNumRate != null ? values.tkNumRate : null,
       generatedAt: snap.generatedAt || new Date().toISOString()
     };
     App.store.set('hr', hr);
