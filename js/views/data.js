@@ -286,6 +286,50 @@
     return App.store.get('hr') || { weekly: {}, baseHeadcount: null, baseDate: null, linked: null };
   }
 
+  /**
+   * 期间离职率汇总（年度 / 季度 / 月度）
+   * 采用「期间总离职 ÷（期间末在职 + 期间总离职）」口径（= 期间总离职 ÷（期初在职 + 期间入职）），
+   * 纠正旧口径「各月离职率相加」导致的失真。
+   * 数据来源：hr.weekly（按 ISO 周键，含 monthKey / hireCount / leaveCount）+ hr.baseHeadcount（期初在职）。
+   * @param {string} period 'year' | 'quarter' | 'month'
+   * @returns {{totalLeave:number,totalHire:number,endHeadcount:number,rate:number}}
+   */
+  function calcPeriodSummary(period) {
+    period = period || 'year';
+    var hr = getHRData();
+    var weekly = hr.weekly || {};
+    var base = (typeof hr.baseHeadcount === 'number' && !isNaN(hr.baseHeadcount)) ? hr.baseHeadcount : 0;
+
+    var now = new Date();
+    var curYear = now.getFullYear();
+    var curMonth = now.getMonth() + 1;              // 1-12
+    var curQuarter = Math.floor((curMonth - 1) / 3) + 1;
+
+    function inWindow(monthKey) {
+      var m = /^(\d{4})-(\d{2})$/.exec(monthKey || '');
+      if (!m) return false;
+      var y = parseInt(m[1], 10), mo = parseInt(m[2], 10);
+      if (y !== curYear) return false;
+      if (period === 'year') return true;
+      if (period === 'quarter') return Math.floor((mo - 1) / 3) + 1 === curQuarter;
+      if (period === 'month') return mo === curMonth;
+      return false;
+    }
+
+    var totalLeave = 0, totalHire = 0;
+    Object.keys(weekly).forEach(function (wk) {
+      var w = weekly[wk] || {};
+      if (!inWindow(w.monthKey)) return;
+      totalLeave += (typeof w.leaveCount === 'number') ? w.leaveCount : 0;
+      totalHire += (typeof w.hireCount === 'number') ? w.hireCount : 0;
+    });
+
+    var endHeadcount = base + totalHire - totalLeave;
+    var denom = endHeadcount + totalLeave;          // = base + totalHire
+    var rate = (totalLeave > 0 && denom > 0) ? totalLeave / denom : 0;
+    return { totalLeave: totalLeave, totalHire: totalHire, endHeadcount: endHeadcount, rate: rate };
+  }
+
   function fmtHRNum(v) {
     if (v == null) return '-';
     if (Math.abs(v - Math.round(v)) < 1e-6) return String(Math.round(v));
@@ -352,6 +396,20 @@
     html += hrCard('🔁 周离职人数率', fmtHRpct(L.quitWeekRate), '', hrTone(L.quitWeekRate, 0.03, 'lte'));
     html += '</div>';
 
+    // 期间离职率汇总（年度/季度/月度，采用「期间总离职 ÷（期末在职+期间总离职）」口径）
+    var psYear = calcPeriodSummary('year'), psQuarter = calcPeriodSummary('quarter'), psMonth = calcPeriodSummary('month');
+    var hasPS = psYear.totalLeave > 0 || psQuarter.totalLeave > 0 || psMonth.totalLeave > 0;
+    html += '<div class="hr-summary-grid" style="margin-top:16px">';
+    if (hasPS) {
+      html += hrCard('📊 年度离职率', fmtHRpct(psYear.rate), '', hrTone(psYear.rate, 0.1, 'lte'));
+      html += hrCard('📊 季度离职率', fmtHRpct(psQuarter.rate), '', hrTone(psQuarter.rate, 0.1, 'lte'));
+      html += hrCard('📊 月度离职率', fmtHRpct(psMonth.rate), '', hrTone(psMonth.rate, 0.1, 'lte'));
+    } else {
+      html += '<div class="hr-summary-card" style="grid-column:1/-1"><div class="hr-summary-title">期间离职率汇总（年度 / 季度 / 月度）</div>' +
+        '<div class="hr-summary-body"><div style="font-size:12px;color:var(--text-faint)">暂无期间累计数据 — 周度入离职记录将随联动同步累积到 hr.weekly 后自动计算。</div></div></div>';
+    }
+    html += '</div>';
+
     // 说明
     html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">说明</h3></div>';
     html += '<p style="font-size:13px;color:var(--text-muted);line-height:1.7">' +
@@ -413,7 +471,9 @@
   }
 
   App.views = App.views || {};
-  App.views.data = {};
+  App.views.data = {
+    calcPeriodSummary: calcPeriodSummary
+  };
 
   // 联动快照回填后，若当前正停留在数据看板的某个标签，自动刷新以显示最新数据
   window.addEventListener('dos:linked-store-updated', function () {
