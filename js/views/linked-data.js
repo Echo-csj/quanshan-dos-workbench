@@ -304,6 +304,7 @@
       source: isWeekly ? 'weekly' : 'monthly',
       teacherCount: values.teacherCount != null ? values.teacherCount : null,
       coreTeacherCount: values.coreTeacherCount != null ? values.coreTeacherCount : null,
+      coreTeacherRatio: values.coreTeacherRatio != null ? values.coreTeacherRatio : null,
       doubleThreeCount: values.doubleThreeCount != null ? values.doubleThreeCount : null,
       doubleThreeRatio: values.doubleThreeRatio != null ? values.doubleThreeRatio : null,
       campusTotal: values.campusTotal != null ? values.campusTotal : null,
@@ -345,7 +346,7 @@
     html += '<div class="linked-cats" data-dyn data-min="330" data-gap="16">';
     GROUPS.forEach(function (g) {
       html += '<div class="linked-cat"><div class="linked-cat-title">' + g.title + '</div>';
-      html += '<div class="linked-grid" data-dyn data-min="118" data-gap="10">';
+      html += '<div class="linked-grid">';
       g.items.forEach(function (it) {
         html += chip(it, weekly[it.k]);
       });

@@ -380,10 +380,11 @@
     // 人力结构
     html += '<div class="hr-summary-grid">';
     html += hrCard('👥 教师数', fmtHRNum(L.teacherCount), '人', '');
+    html += hrCard('🏫 校区总人数', fmtHRNum(L.campusTotal), '人', '');
     html += hrCard('⭐ 骨干教师数', fmtHRNum(L.coreTeacherCount), '人', '');
     html += hrCard('🔷 双三老师人数', fmtHRNum(L.doubleThreeCount), '人', '');
+    html += hrCard('📐 骨干教师占比', fmtHRpct(L.coreTeacherRatio), '', hrTone(L.coreTeacherRatio, 0.5, 'gte'));
     html += hrCard('📐 双三老师占比', fmtHRpct(L.doubleThreeRatio), '', hrTone(L.doubleThreeRatio, 0.5, 'gte'));
-    html += hrCard('🏫 校区总人数', fmtHRNum(L.campusTotal), '人', '');
     html += '</div>';
 
     // 入离职
