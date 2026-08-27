@@ -32,6 +32,10 @@
     campusTotal: 'campusTotal',
   };
 
+  // 仅用于「基准值对标 / 趋势」对标当月数据的口径：排除周度字段，避免把周率混入月度对标。
+  // （campus 快照通常只有 weekly 记录，其 values 同时携带「周字段」与「月累计字段」，故需剔除周字段）
+  var WEEK_ONLY_CAMPUS_KEYS = { v1WeekRate: 1, weekSaturation: 1, v1WeekUnitAvg: 1 };
+
   // 顶部「核心指标」大卡：取自与本看板基准值对标一致的口径（src=campus键, label/unit=展示）
   var FEATURES = [
     { src: 'v1MonthRate', label: '1V1月生产完成率', unit: '%' },
@@ -260,6 +264,7 @@
     if (!reports.monthly) reports.monthly = {};
     var metrics = {};
     Object.keys(CAMPUS_TO_DOS).forEach(function (campusKey) {
+      if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return; // 仅对标当月数据，剔除周度字段
       if (values[campusKey] != null && values[campusKey] !== '') metrics[CAMPUS_TO_DOS[campusKey]] = values[campusKey];
     });
     reports.monthly[monthKey] = {
