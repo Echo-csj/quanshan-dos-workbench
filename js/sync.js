@@ -59,6 +59,8 @@
     subscribeStore();
     await applyRemote();
     subscribeRealtime();
+    // 通知联动数据模块（若已挂载）刷新
+    try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {}
   }
   async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
 

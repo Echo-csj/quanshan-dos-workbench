@@ -32,11 +32,11 @@
     var container = document.getElementById('view-container');
     if (!container) return;
     var tab = (params && params.tab) || 'import';
-    if (['import', 'baseline', 'trend', 'hr'].indexOf(tab) < 0) tab = 'import';
+    if (['import', 'baseline', 'trend', 'hr', 'linked'].indexOf(tab) < 0) tab = 'import';
 
     var html = '';
     html += '<div class="page-head"><h1 class="page-title">数据看板</h1>';
-    html += '<p class="page-sub">报表一键导入 · 基准值对标红绿灯 · 环比/同比趋势 · 人事数据</p></div>';
+    html += '<p class="page-sub">报表一键导入 · 基准值对标红绿灯 · 环比/同比趋势 · 人事数据 · 联动数据分析台</p></div>';
 
     // Tabs
     html += '<div class="tabs" style="margin-bottom:18px">';
@@ -44,11 +44,13 @@
     html += tabBtn('baseline', '🎯 基准值对标', tab);
     html += tabBtn('trend', '📈 环比 · 同比趋势', tab);
     html += tabBtn('hr', '👥 人事数据', tab);
+    html += tabBtn('linked', '🔗 联动数据', tab);
     html += '</div>';
 
-    if (tab === 'import') html += renderImport();
+    if (  tab === 'import') html += renderImport();
     else if (tab === 'baseline') html += renderBaseline();
     else if (tab === 'trend') html += renderTrend();
+    else if (tab === 'linked') html += '<div id="linked-root"></div>';
     else html += renderHR();
 
     container.innerHTML = html;
@@ -56,6 +58,7 @@
     if (tab === 'baseline') bindBaseline();
     if (tab === 'trend') bindTrend();
     if (tab === 'hr') bindHR();
+    if (tab === 'linked' && App.views.linkedData) App.views.linkedData.render(document.getElementById('linked-root'));
   });
 
   function tabBtn(id, label, active) {
