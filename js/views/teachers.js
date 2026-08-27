@@ -210,6 +210,8 @@
     html += '<span class="stat-pill stat-active"><span class="dot" style="background:#16A34A"></span>在职 ' + statusCount.active + '</span>';
     html += '<span class="stat-pill stat-pending"><span class="dot" style="background:#F97316"></span>待离职 ' + statusCount.pending + '</span>';
     html += '<span class="stat-pill stat-left"><span class="dot" style="background:#94A3B8"></span>离职 ' + statusCount.left + '</span>';
+    var msPending = (App.views.teacherMilestones && App.views.teacherMilestones.pendingCount) ? App.views.teacherMilestones.pendingCount() : 0;
+    if (msPending > 0) html += '<span class="stat-pill stat-ms"><span class="dot" style="background:#4F46E5"></span>发展提醒 ' + msPending + '</span>';
     html += '</div>';
 
     // 表格
@@ -270,6 +272,11 @@
     }
     html += '</tbody></table>';
     html += '</div>';
+
+    // 教师职业发展关键节点提醒面板
+    if (App.views.teacherMilestones && App.views.teacherMilestones.panelHtml) {
+      html += App.views.teacherMilestones.panelHtml();
+    }
 
     // 说明
     html += '<div class="teacher-help">';
