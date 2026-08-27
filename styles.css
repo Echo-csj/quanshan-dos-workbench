@@ -1320,7 +1320,7 @@ a:hover { color: var(--accent-hover); }
 .linked-feature .lf-sub{font-size:11px;color:var(--text-faint, #a1a1aa)}
 
 /* 分类卡片：外层动态多列，内层芯片动态列 */
-.linked-cats{display:grid;gap:16px;align-items:start}
+.linked-cats{display:flex;flex-direction:column;gap:16px;align-items:stretch}
 .linked-cat{background:var(--bg, #fff);border:1px solid var(--border, #e4e4e7);border-radius:var(--radius-sm, 6px);padding:14px 16px}
 .linked-cat-title{font-size:13px;font-weight:600;color:var(--text-secondary, #3f3f46);margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .linked-cat-title::before{content:'';width:3px;height:14px;background:var(--accent, #4F46E5);border-radius:2px;flex:0 0 auto}

@@ -342,8 +342,8 @@
     });
     html += '</div>';
 
-    // 分类卡片（外层动态多列）
-    html += '<div class="linked-cats" data-dyn data-min="330" data-gap="16">';
+    // 分类卡片（一列多行：每个板块占满整行、垂直排列）
+    html += '<div class="linked-cats">';
     GROUPS.forEach(function (g) {
       html += '<div class="linked-cat"><div class="linked-cat-title">' + g.title + '</div>';
       html += '<div class="linked-grid">';
