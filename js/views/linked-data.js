@@ -262,6 +262,10 @@
     // —— 写入 reports.monthly（供基准值对标 / 趋势） ——
     var reports = App.store.get('reports') || { monthly: {}, imports: [] };
     if (!reports.monthly) reports.monthly = {};
+    // 清除旧的「联动派生」月份，避免残留幽灵月份导致「选 8 月却显示 7 月」等串月问题
+    Object.keys(reports.monthly).forEach(function (k) {
+      if (reports.monthly[k] && reports.monthly[k].campus) delete reports.monthly[k];
+    });
     var metrics = {};
     Object.keys(CAMPUS_TO_DOS).forEach(function (campusKey) {
       if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return; // 仅对标当月数据，剔除周度字段
