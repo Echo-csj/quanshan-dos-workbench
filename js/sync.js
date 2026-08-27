@@ -49,12 +49,16 @@
     } catch (e) { console.warn('[sync]', e); }
     return false;
   }
-  async function signIn(email) {
+  async function signIn(email, password) {
     var c = ensureClient(); if (!c) return;
     setStatus('signingin');
-    var r = await c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (r.error) { setStatus('error', r.error.message); return; }
-    setStatus('checkemail', '已发送登录链接，请到邮箱点击完成登录');
+    var r = await c.auth.signInWithPassword({ email: email, password: password });
+    if (r.error) { setStatus('error', r.error.message || '登录失败'); return; }
+    session = r.data.session;
+    setStatus('ok');
+    subscribeStore();
+    await applyRemote();
+    subscribeRealtime();
   }
   async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
 
@@ -161,14 +165,15 @@
     }
     if (status === 'signedout' || status === 'signingin') {
       w.innerHTML = '<div class="sw-box"><span class="sw-dot grey"></span>' +
-        '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱登录以同步" class="sw-input"/>' +
+        '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱" class="sw-input"/>' +
+        '<input id="sync-pass" type="password" placeholder="密码" class="sw-input"/>' +
         '<button id="sync-login" class="sw-btn">登录</button></div>' +
         '<div class="sw-tip">开启后数据可在多设备同步（本机仍保留备份）</div></div>';
-      el('sync-login').onclick = function () { var e = el('sync-email').value.trim(); if (e) signIn(e); };
-      return;
-    }
-    if (status === 'checkemail') {
-      w.innerHTML = '<div class="sw-box"><span class="sw-dot blue"></span>已发登录链接，请查收邮箱并点击</div>';
+      el('sync-login').onclick = function () {
+        var e = el('sync-email').value.trim();
+        var p = el('sync-pass').value;
+        if (e && p) signIn(e, p);
+      };
       return;
     }
     if (status === 'error') {
