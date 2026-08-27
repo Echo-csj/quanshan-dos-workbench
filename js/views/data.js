@@ -84,7 +84,7 @@
     html += '<span style="font-size:12px;color:var(--text-faint)">数据自动取自联动快照 · 字段与本看板口径对齐</span>';
     html += '<span id="baseline-source" style="font-size:12px;font-weight:600;padding:2px 8px;border-radius:6px;' +
       (selSnap.source === 'weekly' ? 'background:#FFF7E6;color:#B45309' : 'background:#ECFDF5;color:#047857') + '">' +
-      (selSnap.source === 'weekly' ? '周度数据（月度待上传）' : '月度数据') + '</span>';
+      (selSnap.source === 'weekly' ? '周报·月累计（月度未定稿）' : '月度数据') + '</span>';
     html += '</div>';
 
     html += '<div id="baseline-body"></div>';
@@ -97,11 +97,11 @@
     if (!snap) return '<div class="empty-state">无数据</div>';
     var metrics = snap.metrics || {};
 
-    // 周度兜底提示：无月度数据时，展示的是最新周报的「周」口径字段
+    // 周报月累计提示：月度未定稿时，展示的是最新周报里的「月累计」字段，用于把控月度节奏
     var body = '';
     if (snap.source === 'weekly') {
       body += '<div style="font-size:12px;color:#B45309;background:#FFF7E6;border-radius:8px;padding:8px 12px;margin-bottom:14px">' +
-        '当前尚无月度数据，暂以最新周报的「周」口径字段对标。待校区上传月度报表后，将自动切换为月度数据。</div>';
+        '当前为最新周报的「月累计」数据（月度尚未定稿），用于把控本月完成节奏。待校区上传月度报表后，将自动切换为月度定稿数据。</div>';
     }
 
     // 收集有基准值的指标
@@ -429,7 +429,7 @@
       var reports = App.store.get('reports') || { monthly: {} };
       var s = (reports.monthly || {})[mk] || {};
       if (s.source === 'weekly') {
-        badge.textContent = '周度数据（月度待上传）';
+        badge.textContent = '周报·月累计（月度未定稿）';
         badge.style.background = '#FFF7E6'; badge.style.color = '#B45309';
       } else {
         badge.textContent = '月度数据';

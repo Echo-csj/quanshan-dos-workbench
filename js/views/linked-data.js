@@ -32,10 +32,9 @@
     campusTotal: 'campusTotal',
   };
 
-  // 「周/月」两套周期性字段：有月度数据时用月字段、剔除周字段；仅有周度数据时用周字段、剔除月字段。
-  // 其余字段（学员数、教师数、现金、续费/退费/结课各率等）为非周期共享口径，两种情况都保留。
+  // 周口径字段：不进入「基准值对标 / 趋势」——对标统一用「月」口径（周报取月累计值，把控月度节奏）。
+  // 其余字段（学员数、教师数、现金、续费/退费/结课各率等）为非周期共享口径，一律保留。
   var WEEK_ONLY_CAMPUS_KEYS = { v1WeekRate: 1, weekSaturation: 1, v1WeekUnitAvg: 1 };
-  var MONTH_ONLY_CAMPUS_KEYS = { v1MonthRate: 1, monthSaturation: 1, v1MonthUnitAvg: 1 };
 
   // 顶部「核心指标」大卡：取自与本看板基准值对标一致的口径（src=campus键, label/unit=展示）
   var FEATURES = [
@@ -281,10 +280,9 @@
     });
     var metrics = {};
     Object.keys(CAMPUS_TO_DOS).forEach(function (campusKey) {
-      // 无月度数据时（weekly 兜底）剔除「月」字段、保留「周」字段；有月度数据时反之。
-      // 非周期共享字段两种情况都保留。
-      if (isWeekly) { if (MONTH_ONLY_CAMPUS_KEYS[campusKey]) return; }
-      else { if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return; }
+      // 统一提取「月」口径字段：月度流 = 定稿月值；周报流 = 该周报的「月累计」值。
+      // 目的：通过周报的月累计数据把控月度完成节奏；周字段（周生产完成率/周饱和度等）不进入对标。
+      if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return;
       if (values[campusKey] != null && values[campusKey] !== '') metrics[CAMPUS_TO_DOS[campusKey]] = values[campusKey];
     });
     reports.monthly[monthKey] = {
