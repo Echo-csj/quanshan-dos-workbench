@@ -264,39 +264,58 @@
   // 把快照写入 App.store，使「基准值对标 / 环比·同比趋势 / 人事数据」无需手动导入即可填充
   function applySnapshotToStore(snap) {
     if (!snap || !snap.latestByStream) return;
+    var lbs = snap.latestByStream;
+    var monthly = lbs['monthly'];
+    var weekly = lbs['weekly'];
+    var mOk = monthly && monthly.values && monthly.year && monthly.month;
+    var wOk = weekly && weekly.values && weekly.year && weekly.month;
+    if (!mOk && !wOk) return;
+
+    var reports = App.store.get('reports') || { monthly: {}, imports: [] };
+    if (!reports.monthly) reports.monthly = {};
+
+    // 提取「月」口径字段（月度流=定稿月值；周报流=该周报的月累计值），剔除周字段
+    function extractMetrics(rec) {
+      var v = rec.values || {};
+      var m = {};
+      Object.keys(CAMPUS_TO_DOS).forEach(function (ck) {
+        if (WEEK_ONLY_CAMPUS_KEYS[ck]) return;
+        if (v[ck] != null && v[ck] !== '') m[CAMPUS_TO_DOS[ck]] = v[ck];
+      });
+      return m;
+    }
+    function monthKeyOf(rec) { return rec.year + '-' + String(rec.month).padStart(2, '0'); }
+    // 累积写入（不清除历史月份，供环比/同比计算）；同月覆盖
+    function writeMonth(rec, kind) {
+      var mk = monthKeyOf(rec);
+      reports.monthly[mk] = {
+        month: mk,
+        label: rec.year + '年' + rec.month + '月',
+        metrics: extractMetrics(rec),
+        yoy: null,
+        campus: true,
+        source: kind,
+        importedAt: snap.generatedAt || new Date().toISOString()
+      };
+    }
+
+    // 1) 月度流：定稿月
+    if (mOk) writeMonth(monthly, 'monthly');
+    // 2) 周报流：月累计兜底（仅当该月尚无月度定稿）
+    if (wOk) {
+      var sameMonth = mOk && (monthly.year === weekly.year && monthly.month === weekly.month);
+      var wkKey = monthKeyOf(weekly);
+      var hasFinal = reports.monthly[wkKey] && reports.monthly[wkKey].source === 'monthly';
+      if (!sameMonth && !hasFinal) writeMonth(weekly, 'weekly');
+    }
+    App.store.set('reports', reports);
+
+    // —— 写入 hr.linked（取最新月份数据：月度优先、否则周报月累计） ——
     var src = pickSource(snap);
     if (!src) return;
     var isWeekly = (src.kind === 'weekly');
     var values = src.rec.values || {};
-    if (!values || typeof values !== 'object') return;
-    var monthKey = src.rec.year + '-' + String(src.rec.month).padStart(2, '0');
-
-    // —— 写入 reports.monthly（供基准值对标 / 趋势） ——
-    var reports = App.store.get('reports') || { monthly: {}, imports: [] };
-    if (!reports.monthly) reports.monthly = {};
-    // 清除旧的「联动派生」月份，避免残留幽灵月份导致「选 8 月却显示 7 月」等串月问题
-    Object.keys(reports.monthly).forEach(function (k) {
-      if (reports.monthly[k] && reports.monthly[k].campus) delete reports.monthly[k];
-    });
-    var metrics = {};
-    Object.keys(CAMPUS_TO_DOS).forEach(function (campusKey) {
-      // 统一提取「月」口径字段：月度流 = 定稿月值；周报流 = 该周报的「月累计」值。
-      // 目的：通过周报的月累计数据把控月度完成节奏；周字段（周生产完成率/周饱和度等）不进入对标。
-      if (WEEK_ONLY_CAMPUS_KEYS[campusKey]) return;
-      if (values[campusKey] != null && values[campusKey] !== '') metrics[CAMPUS_TO_DOS[campusKey]] = values[campusKey];
-    });
-    reports.monthly[monthKey] = {
-      month: monthKey,
-      label: src.rec.year + '年' + src.rec.month + '月',
-      metrics: metrics,
-      yoy: null,
-      campus: true,
-      source: isWeekly ? 'weekly' : 'monthly',
-      importedAt: snap.generatedAt || new Date().toISOString()
-    };
-    App.store.set('reports', reports);
-
-    // —— 写入 hr.linked（供人事数据展示） ——
+    var monthKey = monthKeyOf(src.rec);
     var hr = App.store.get('hr') || { weekly: {}, baseHeadcount: null, baseDate: null, linked: null };
     if (!hr.weekly) hr.weekly = {};
     hr.linked = {
