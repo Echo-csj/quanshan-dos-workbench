@@ -226,6 +226,78 @@
       '<div class="v">' + info.disp + '</div></div></div>';
   }
 
+  /* ---------- 联动快照回写数据看板（自动填充） ---------- */
+  // 从 shared_link 行中取出 analytics_snapshot 快照对象
+  function extractSnapshot(rows) {
+    var snap = null;
+    (rows || []).forEach(function (r) {
+      if (r && r.kind === 'analytics_snapshot' && r.payload) snap = r.payload;
+    });
+    return snap;
+  }
+
+  // 选择权威数据源：优先月度数据流，否则周报最新一周（其内部已含月度累计指标）
+  function pickSource(snap) {
+    var lbs = snap.latestByStream || {};
+    var monthly = lbs['monthly'];
+    if (monthly && monthly.values && monthly.year && monthly.month) return monthly;
+    var weekly = lbs['weekly'];
+    if (weekly && weekly.values && weekly.year && weekly.month) return weekly;
+    return null;
+  }
+
+  // 把快照写入 App.store，使「基准值对标 / 环比·同比趋势 / 人事数据」无需手动导入即可填充
+  function applySnapshotToStore(snap) {
+    if (!snap || !snap.latestByStream) return;
+    var src = pickSource(snap);
+    if (!src) return;
+    var values = src.values || {};
+    if (!values || typeof values !== 'object') return;
+    var monthKey = src.year + '-' + String(src.month).padStart(2, '0');
+
+    // —— 写入 reports.monthly（供基准值对标 / 趋势） ——
+    var reports = App.store.get('reports') || { monthly: {}, imports: [] };
+    if (!reports.monthly) reports.monthly = {};
+    var metrics = {};
+    Object.keys(CAMPUS_TO_DOS).forEach(function (campusKey) {
+      if (values[campusKey] != null && values[campusKey] !== '') metrics[CAMPUS_TO_DOS[campusKey]] = values[campusKey];
+    });
+    reports.monthly[monthKey] = {
+      month: monthKey,
+      label: src.year + '年' + src.month + '月',
+      metrics: metrics,
+      yoy: null,
+      campus: true,
+      importedAt: snap.generatedAt || new Date().toISOString()
+    };
+    App.store.set('reports', reports);
+
+    // —— 写入 hr.linked（供人事数据展示） ——
+    var hr = App.store.get('hr') || { weekly: {}, baseHeadcount: null, baseDate: null, linked: null };
+    if (!hr.weekly) hr.weekly = {};
+    hr.linked = {
+      month: monthKey,
+      teacherCount: values.teacherCount != null ? values.teacherCount : null,
+      coreTeacherCount: values.coreTeacherCount != null ? values.coreTeacherCount : null,
+      doubleThreeCount: values.doubleThreeCount != null ? values.doubleThreeCount : null,
+      doubleThreeRatio: values.doubleThreeRatio != null ? values.doubleThreeRatio : null,
+      campusTotal: values.campusTotal != null ? values.campusTotal : null,
+      entryWeek: values.entryWeek != null ? values.entryWeek : null,
+      entryMonth: values.entryMonth != null ? values.entryMonth : null,
+      quitWeek: values.quitWeek != null ? values.quitWeek : null,
+      quitMonth: values.quitMonth != null ? values.quitMonth : null,
+  quitWeekRate: values.quitWeekRate != null ? values.quitWeekRate : null,
+      quitMonthRate: values.quitMonthRate != null ? values.quitMonthRate : null,
+      leaveTeacher: values.leaveTeacher != null ? values.leaveTeacher : null,
+      leaveStudent: values.leaveStudent != null ? values.leaveStudent : null,
+      leaveRate: values.leaveRate != null ? values.leaveRate : null,
+      tkNum: values.tkNum != null ? values.tkNum : null,
+      tkNumRate: values.tkNumRate != null ? values.tkNumRate : null,
+      generatedAt: snap.generatedAt || new Date().toISOString()
+    };
+    App.store.set('hr', hr);
+  }
+
   function buildHTML(snap, weekly) {
     var html = '';
     // 头部
@@ -273,11 +345,10 @@
       return;
     }
     App.sync.readShared().then(function (rows) {
-      var snap = null;
-      (rows || []).forEach(function (r) {
-        if (r && r.kind === 'analytics_snapshot' && r.payload) snap = r.payload;
-      });
+      var snap = extractSnapshot(rows);
       if (!snap) { container.innerHTML = emptyState(); return; }
+      // 回填数据看板（基准值对标 / 趋势 / 人事），即使停留在其它标签也能自动填充
+      applySnapshotToStore(snap);
       var weekly = (snap.latestByStream && snap.latestByStream['weekly'] && snap.latestByStream['weekly'].values) || null;
       if (!weekly) {
         container.innerHTML = '<div class="empty-state" style="padding:40px">' +
@@ -293,10 +364,19 @@
     });
   }
 
-  // 登录成功后自动刷新（若当前挂在页面上）
+  // 登录成功 / 云端更新时：无论是否在联动页，都把快照回写数据看板，并广播「已更新」
   window.addEventListener('dos:linked-update', function () {
+    if (window.App.sync && App.sync.readShared) {
+      App.sync.readShared().then(function (rows) {
+        var snap = extractSnapshot(rows);
+        if (snap) {
+          applySnapshotToStore(snap);
+          try { window.dispatchEvent(new Event('dos:linked-store-updated')); } catch (e) {}
+        }
+      }).catch(function () { });
+    }
     if (_mounted) render(_mounted);
   });
 
-  App.views.linkedData = { render: render };
+  App.views.linkedData = { render: render, applySnapshotToStore: applySnapshotToStore, extractSnapshot: extractSnapshot };
 })();

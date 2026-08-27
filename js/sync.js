@@ -151,7 +151,7 @@
   async function start() {
     if (disabled) { setStatus('disabled'); renderWidget(); return; }
     var ok = await handleRedirect();
-    if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); subscribeRealtime(); }
+    if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); subscribeRealtime(); try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {} }
     else { setStatus('signedout'); }
     renderWidget();
   }
