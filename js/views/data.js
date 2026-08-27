@@ -596,7 +596,7 @@
         html += '<td class="mono" style="font-size:12px;color:var(--text-muted)">' + g.count + ' 周</td></tr>';
       });
       html += '</tbody></table>';
-      html += '<p style="font-size:11px;color:var(--text-faint);margin-top:10px">月度离职率 = 当月离职总人数 ÷ （月底在职人数 + 当月离职总人数）。季度/年度离职率为各月度离职率之和。</p>';
+      html += '<p style="font-size:11px;color:var(--text-faint);margin-top:10px">月度离职率 = 当月离职总人数 ÷（月底在职人数 + 当月离职总人数）；季度/年度离职率 = 期间总离职 ÷（期间末在职 + 期间总离职）。</p>';
       html += '</div>';
     }
 
@@ -646,17 +646,12 @@
       var curMonthKey = year + '-' + String(month).padStart(2, '0');
       totalRate = calcMonthlyRate(curMonthKey, totalLeave);
     } else {
-      // 季度/年度：累加各月离职率
-      var monthGroups = groupByMonth(hr.weekly);
-      var targetMonths = [];
-      if (period === 'quarter') {
-        for (var m = (quarter - 1) * 3 + 1; m <= quarter * 3; m++) targetMonths.push(year + '-' + String(m).padStart(2, '0'));
-      } else {
-        for (var ym = 1; ym <= 12; ym++) targetMonths.push(year + '-' + String(ym).padStart(2, '0'));
-      }
-      targetMonths.forEach(function(mk) {
-        if (monthGroups[mk]) totalRate += (calcMonthlyRate(mk, monthGroups[mk].totalLeave) || 0);
-      });
+      // 季度/年度离职率：不采用「各月离职率相加」（百分比相加会严重失真），
+      // 改为「期间总离职 ÷（期间末在职人数 + 期间总离职）」，与月度口径保持一致
+      var periodEndMonth = (period === 'quarter') ? quarter * 3 : 12;
+      var endKey = year + '-' + String(periodEndMonth).padStart(2, '0');
+      var ending = calcEndingHeadcount(endKey);
+      totalRate = (ending != null && (ending + totalLeave) > 0) ? (totalLeave / (ending + totalLeave)) : null;
     }
 
     return { totalHire: totalHire, totalLeave: totalLeave, rate: totalRate };
@@ -809,7 +804,8 @@
     manualSubmit: manualSubmit,
     submitHRWeek: submitHRWeek,
     saveBaseHeadcount: saveBaseHeadcount,
-    deleteHRWeek: deleteHRWeek
+    deleteHRWeek: deleteHRWeek,
+    calcPeriodSummary: calcPeriodSummary
   };
 
 })();

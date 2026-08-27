@@ -395,6 +395,13 @@ window.App = window.App || {};
     exportJSON: exportJSON,
     importJSON: importJSON,
     reset: reset,
+    // —— 云端同步：用远端整份数据覆盖本地（深度合并默认值），不触发二次上传 ——
+    applyRemote: function (data) {
+      if (!data) return;
+      _data = deepMerge(getDefaultData(), data);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(_data));
+      notifyListeners();
+    },
     uid: uid,
     getData: function() { if (!_data) load(); return _data; },
     refresh: load,
