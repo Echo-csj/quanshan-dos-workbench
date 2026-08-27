@@ -299,9 +299,13 @@
       };
     }
 
-    // 1) 月度流：定稿月
+    // 1) 历史月度（monthlyHistory：全部定稿月，供环比/同比）
+    (snap.monthlyHistory || []).forEach(function (rec) {
+      if (rec && rec.year && rec.month) writeMonth(rec, 'monthly');
+    });
+    // 2) 最新月度（latestByStream.monthly，可能已含在历史里，覆盖写）
     if (mOk) writeMonth(monthly, 'monthly');
-    // 2) 周报流：月累计兜底（仅当该月尚无月度定稿）
+    // 3) 周报流：月累计兜底（仅当该月尚无月度定稿）
     if (wOk) {
       var sameMonth = mOk && (monthly.year === weekly.year && monthly.month === weekly.month);
       var wkKey = monthKeyOf(weekly);
