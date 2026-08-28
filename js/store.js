@@ -165,6 +165,10 @@ window.App = window.App || {};
           if (tAdded > 0) save();
         }
       } catch (e3) { /* 忽略合并异常 */ }
+      // 老数据任务 scope 回填（幂等）
+      try {
+        if (migrateTasksScope(_data.tasks)) save();
+      } catch (e4) { /* 忽略迁移异常 */ }
     } catch (e) {
       console.warn('Store load failed, using defaults:', e);
       _data = getDefaultData();
@@ -232,6 +236,16 @@ window.App = window.App || {};
       if (!have[t.id]) { _data.teachers.push(JSON.parse(JSON.stringify(t))); added++; }
     });
     return added;
+  }
+
+  // 任务 scope 迁移：为无 scope 字段的老任务幂等回填 'personal'
+  function migrateTasksScope(tasks) {
+    if (!Array.isArray(tasks)) return false;
+    var changed = false;
+    tasks.forEach(function (t) {
+      if (t && t.scope !== 'personal' && t.scope !== 'team') { t.scope = 'personal'; changed = true; }
+    });
+    return changed;
   }
 
   // --- Save to localStorage (debounced) ---
@@ -345,6 +359,7 @@ window.App = window.App || {};
       try {
         var imported = JSON.parse(e.target.result);
         _data = deepMerge(getDefaultData(), imported);
+        migrateTasksScope(_data.tasks);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(_data));
         notifyListeners();
         if (callback) callback(null, _data);
@@ -399,6 +414,7 @@ window.App = window.App || {};
     applyRemote: function (data) {
       if (!data) return;
       _data = deepMerge(getDefaultData(), data);
+      migrateTasksScope(_data.tasks);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(_data));
       notifyListeners();
     },

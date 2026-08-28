@@ -47,6 +47,8 @@ vm.createContext(sandbox);
 for (const f of ['js/baseline.js', 'js/util.js', 'js/store.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), sandbox, { filename: f });
 }
+// lunar-javascript：UMD 在 vm 内无 module/define，走 root[i]=o[i] 挂到 sandbox 全局（Solar/Lunar）
+vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/lib/lunar.js'), 'utf8'), sandbox, { filename: 'js/lib/lunar.js' });
 let routeHandler = null;
 sandbox.App.router = { register: (path, fn) => { if (path === '/today') routeHandler = fn; }, navigate: () => {}, resolve: () => {} };
 sandbox.App.util.svgIcon = () => '';
@@ -101,6 +103,10 @@ assert(Array.isArray(alm0.yi) && alm0.yi.length > 0, '「宜」非空数组');
 assert(Array.isArray(alm0.ji) && alm0.ji.length > 0, '「忌」非空数组');
 assert(Array.isArray(alm0.tips) && alm0.tips.length > 0, '「今日提示」非空数组');
 assert(alm0.dateLabel && alm0.weekLabel, '含日期与周次标签');
+assert(alm0.lunar != null, 'lunar 对象非空（lunar 库已加载）');
+assert(alm0.lunar && alm0.lunar.yearGanZhi && alm0.lunar.yearGanZhi.length >= 2, '干支年非空');
+assert(alm0.lunar && alm0.lunar.shengXiao, '生肖非空');
+assert(alm0.lunar && alm0.lunar.lunarDate, '农历日期非空');
 
 // 注入逾期 + 今日到期 + 里程碑，验证动态提示
 store.set('tasks', [
@@ -128,7 +134,8 @@ assert(pend[0].id === 'ms_1', '返回的是 pending 那条');
 
 console.log('\n[5] /today 路由渲染冒烟（验证手动任务真实出现在 HTML）');
 store.set('tasks', [
-  { id: 't_manual', title: '手动新建任务', status: 'todo', priority: 'normal', assignee: '张老师', dueDate: '', source: 'manual' }
+  { id: 't_manual', title: '手动新建任务', status: 'todo', priority: 'normal', assignee: '张老师', dueDate: '', source: 'manual' },
+  { id: 't_team', title: '团队协作任务', status: 'todo', priority: 'normal', dueDate: '', scope: 'team' }
 ]);
 store.set('teacherMilestones', [
   { id: 'ms_smoke', teacherName: '李四', label: '转正提醒', status: 'pending', dueDate: todayStr }
@@ -141,8 +148,11 @@ assert(html.indexOf('重要提示') >= 0, '渲染含「重要提示」筛选 tab
 assert(html.indexOf('今日黄历') >= 0, '渲染含「今日黄历」卡片');
 assert(html.indexOf('>宜<') >= 0 || html.indexOf('almanac-tag-yi') >= 0, '黄历含「宜」');
 assert(html.indexOf('>忌<') >= 0 || html.indexOf('almanac-tag-ji') >= 0, '黄历含「忌」');
+assert(html.indexOf('almanac-lunar') >= 0, '玄学黄历头（农历/干支）已渲染');
 assert(html.indexOf('手动新建任务') >= 0, '手动新建任务出现在今日指挥台 HTML');
 assert(html.indexOf('李四') >= 0, '教师里程碑提醒出现在今日指挥台 HTML');
+assert(html.indexOf('tw-badge-team') >= 0, '团队任务在今日指挥台带「团队」徽标');
+assert(html.indexOf('团队协作任务') >= 0, '团队任务标题出现在今日指挥台 HTML');
 
 console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

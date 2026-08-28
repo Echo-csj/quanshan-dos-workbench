@@ -151,6 +151,7 @@
           assignee: m.owner,
           dueDate: m.dueDate,
           source: SOURCE,
+          scope: 'personal',
           milestoneId: id,
           teacherId: t.id,
           teacherName: t.name,
@@ -194,7 +195,7 @@
 
       // 链接缺失 → 重建（防手动删除导致失联）
       if (ti == null) {
-        tasks.push({ id: m.taskId, title: m.title, note: m.note, status: m.status === 'done' ? 'done' : 'todo', priority: m.priority, assignee: m.owner, dueDate: m.dueDate, source: SOURCE, milestoneId: m.id, teacherId: m.teacherId, teacherName: m.teacherName, createdAt: m.createdAt, updatedAt: new Date().toISOString() });
+        tasks.push({ id: m.taskId, title: m.title, note: m.note, status: m.status === 'done' ? 'done' : 'todo', priority: m.priority, assignee: m.owner, dueDate: m.dueDate, source: SOURCE, scope: 'personal', milestoneId: m.id, teacherId: m.teacherId, teacherName: m.teacherName, createdAt: m.createdAt, updatedAt: new Date().toISOString() });
         changed = true;
       }
       if (ni == null) {

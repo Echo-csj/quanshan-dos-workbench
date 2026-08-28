@@ -37,11 +37,12 @@
   function getTasks() { return App.store.get('tasks') || []; }
 
   /* ---------------- 视图设置（持久化）---------------- */
-  var VIEW_DEFAULT = { mode:'kanban', density:'standard', filters:{status:[],priority:[],source:[]}, sortBy:'dueDate', sortDir:'asc', search:'', expanded:{}, columnLimit:10 };
+  var VIEW_DEFAULT = { mode:'kanban', density:'standard', filters:{status:[],priority:[],source:[],scope:[]}, sortBy:'dueDate', sortDir:'asc', search:'', expanded:{}, columnLimit:10 };
   function getViewSettings() {
     var s = App.store.get('settings.tasksView');
     if (!s) return JSON.parse(JSON.stringify(VIEW_DEFAULT));
     if (!s.filters) s.filters = { status:[], priority:[], source:[] };
+    if (!s.filters.scope) s.filters.scope = [];
     if (!s.expanded) s.expanded = {};
     if (!s.columnLimit) s.columnLimit = 10;
     return s;
@@ -57,7 +58,7 @@
   function applyFilters(tasks, view) {
     var q = (view.search || '').trim().toLowerCase();
     var fs = view.filters || {};
-    var st = fs.status || [], pr = fs.priority || [], sr = fs.source || [];
+    var st = fs.status || [], pr = fs.priority || [], sr = fs.source || [], sc = fs.scope || [];
     return tasks.filter(function(t) {
       if (st.length && st.indexOf(t.status) === -1) return false;
       if (pr.length && pr.indexOf(t.priority || 'normal') === -1) return false;
@@ -65,6 +66,7 @@
         var src = t.source || 'manual';
         if (sr.indexOf(src) === -1) return false;
       }
+      if (sc.length && sc.indexOf(t.scope || 'personal') === -1) return false;
       if (q) {
         var hay = ((t.title||'') + ' ' + (t.assignee||'') + ' ' + (t.note||'') + ' ' + (t.priority||'') + ' ' + (t.status||'')).toLowerCase();
         if (hay.indexOf(q) === -1) return false;
@@ -121,7 +123,7 @@
     App.router.resolve();
   }
   function clearFilters() {
-    updateView({ filters: { status:[], priority:[], source:[] }, search: '' });
+    updateView({ filters: { status:[], priority:[], source:[], scope:[] }, search: '' });
     App.router.resolve();
   }
   function setSort(by) {
@@ -231,12 +233,18 @@
       html += '<button class="chip chip-prio-' + p + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'priority\',\'' + p + '\')">' + prMap[p] + '</button>';
     });
     html += '<span class="filter-sep"></span>';
-    var srMap = { manual: '手动', timeline: '⏱时间轴', paste: '📋粘贴' };
-    ['manual', 'timeline', 'paste'].forEach(function(s) {
+    var srMap = { manual: '手动', timeline: '⏱时间轴', paste: '📋粘贴', 'teacher-milestone': '🎯里程碑' };
+    ['manual', 'timeline', 'paste', 'teacher-milestone'].forEach(function(s) {
       var on = (f.source || []).indexOf(s) >= 0;
       html += '<button class="chip' + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'source\',\'' + s + '\')">' + srMap[s] + '</button>';
     });
-    var anyFilter = (f.status && f.status.length) || (f.priority && f.priority.length) || (f.source && f.source.length) || view.search;
+    html += '<span class="filter-sep"></span>';
+    var scopeMap = { personal: '个人', team: '团队' };
+    ['personal', 'team'].forEach(function(s) {
+      var on = (f.scope || []).indexOf(s) >= 0;
+      html += '<button class="chip' + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'scope\',\'' + s + '\')">' + scopeMap[s] + '</button>';
+    });
+    var anyFilter = (f.status && f.status.length) || (f.priority && f.priority.length) || (f.source && f.source.length) || (f.scope && f.scope.length) || view.search;
     if (anyFilter) html += '<button class="chip chip-clear" onclick="App.views.tasks.clearFilters()">清空</button>';
     html += '</div>';
 
@@ -360,9 +368,10 @@
 
   function renderListRow(t) {
     var overdue = t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate);
-    var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : '手动');
+    var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : (t.source === 'teacher-milestone' ? '🎯 里程碑' : '手动'));
     var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
     html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.escapeHtml(t.title || '未命名任务');
+    if (t.scope === 'team') html += '<span class="scope-tag">团队</span>';
     if (t.note) html += '<div class="list-note">' + App.util.escapeHtml(t.note) + '</div>';
     html += '</td>';
     html += '<td><span class="tag status-' + t.status + '">' + App.util.statusLabel(t.status) + '</span></td>';
@@ -483,6 +492,7 @@
     html += '<div class="kanban-card-title">' + App.util.escapeHtml(t.title || '未命名任务') + '</div>';
     html += '<div class="kanban-card-meta">';
     html += '<span class="tag priority-' + prio + '">' + App.util.priorityLabel(prio) + '</span>';
+    if (t.scope === 'team') html += '<span class="tag scope-team">团队</span>';
     if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
     if (t.dueDate) html += '<span style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">📅 ' + App.util.escapeHtml(t.dueDate) + '</span>';
     html += '</div>';
@@ -541,7 +551,7 @@
   function openTaskModal(id) {
     var isEdit = !!id;
     var t = isEdit ? getTasks().filter(function(x) { return x.id === id; })[0] : null;
-    var data = t || { title: '', priority: 'normal', status: 'todo', assignee: '', dueDate: '', note: '' };
+    var data = t || { title: '', priority: 'normal', status: 'todo', assignee: '', dueDate: '', note: '', scope: 'personal' };
 
     var html = '<div style="display:flex;flex-direction:column;gap:14px">';
     html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="task-title" value="' + App.util.escapeAttr(data.title) + '" placeholder="如：完成次月预排课表"></div>';
@@ -549,6 +559,11 @@
     html += '<div class="form-group"><label class="form-label">优先级</label><select class="form-input" id="task-priority">' + priorityOptions(data.priority) + '</select></div>';
     html += '<div class="form-group"><label class="form-label">所属状态</label><select class="form-input" id="task-status">' + statusOptions(data.status) + '</select></div>';
     html += '</div>';
+    html += '<div class="form-group"><label class="form-label">归属</label>';
+    html += '<div style="display:flex;gap:16px">';
+    html += '<label class="chk-inline"><input type="radio" id="task-scope-personal" name="task-scope" value="personal"' + (data.scope !== 'team' ? ' checked' : '') + '> 个人</label>';
+    html += '<label class="chk-inline"><input type="radio" id="task-scope-team" name="task-scope" value="team"' + (data.scope === 'team' ? ' checked' : '') + '> 团队</label>';
+    html += '</div></div>';
     html += '<div class="form-row">';
     html += '<div class="form-group"><label class="form-label">负责人</label><input class="form-input" id="task-assignee" value="' + App.util.escapeAttr(data.assignee) + '" placeholder="如：张老师"></div>';
     html += '<div class="form-group"><label class="form-label">截止日期</label><input class="form-input" id="task-due" type="date" value="' + App.util.escapeAttr(data.dueDate) + '"></div>';
@@ -574,16 +589,18 @@
     var assignee = document.getElementById('task-assignee').value.trim();
     var dueDate = document.getElementById('task-due').value;
     var note = document.getElementById('task-note').value.trim();
+    var scopeTeamEl = document.getElementById('task-scope-team');
+    var scope = (scopeTeamEl && scopeTeamEl.checked) ? 'team' : 'personal';
 
     var tasks = getTasks();
     if (id) {
       var t = tasks.filter(function(x) { return x.id === id; })[0];
-      if (t) Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, updatedAt: new Date().toISOString() });
+      if (t) Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, updatedAt: new Date().toISOString() });
     } else {
       tasks.push({
         id: App.store.uid('task'),
         title: title, priority: priority, status: status,
-        assignee: assignee, dueDate: dueDate, note: note,
+        assignee: assignee, dueDate: dueDate, note: note, scope: scope,
         source: 'manual', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
       });
     }
@@ -761,6 +778,7 @@
         dueDate: due ? App.util.formatDate(due, 'YYYY-MM-DD') : '',
         status: 'todo',
         source: 'timeline',
+        scope: 'personal',
         timelineNodeId: node.id,
         note: node.note || '',
         createdAt: new Date().toISOString(),
@@ -999,6 +1017,7 @@
         dueDate: due || '',
         note: timeVal ? ('时间 ' + timeVal) : '',
         source: 'paste',
+        scope: 'personal',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

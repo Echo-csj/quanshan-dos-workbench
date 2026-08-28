@@ -271,6 +271,7 @@
     var dueCls = overdue ? ' tw-due-overdue' : (dueToday ? ' tw-due-today' : '');
     var html = '<div class="tw-item" onclick="App.views.tasks.editTask(\'' + U.escapeAttr(t.id) + '\')">';
     html += '<span class="tw-badge ' + b[0] + '">' + b[1] + '</span>';
+    if (t.scope === 'team') html += '<span class="tw-badge tw-badge-team">团队</span>';
     html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + U.priorityLabel(t.priority) + '</span>';
     html += '<span class="tw-title">' + U.escapeHtml(t.title || '未命名任务') + '</span>';
     if (t.assignee) html += '<span class="tw-assignee">' + U.escapeHtml(t.assignee) + '</span>';
@@ -392,11 +393,30 @@
     6: { yi: ['整理讲义与表单', '复盘本周待办'], ji: ['安排正式会议', '积压未结事项'] }
   };
 
+  function computeLunar(now) {
+    try {
+      if (typeof Solar === 'undefined') return null;
+      var l = Solar.fromDate(now).getLunar();
+      return {
+        lunarDate: l.getMonthInChinese() + '月' + l.getDayInChinese(),
+        yearGanZhi: l.getYearInGanZhi(),
+        shengXiao: l.getYearShengXiao(),
+        monthGanZhi: l.getMonthInGanZhi(),
+        dayGanZhi: l.getDayInGanZhi(),
+        jieQi: l.getJieQi() || '',
+        yi: l.getDayYi() || [],
+        ji: l.getDayJi() || [],
+        festivals: l.getFestivals() || []
+      };
+    } catch (e) { return null; }
+  }
+
   function almanac() {
     var U = App.util;
     var now = new Date();
     var wd = now.getDay();
     var base = ALMANAC_BY_WEEKDAY[wd] || ALMANAC_BY_WEEKDAY[1];
+    var lunar = computeLunar(now);
     var todayStr = U.formatDate(now, 'YYYY-MM-DD');
     var soon = new Date(now); soon.setDate(soon.getDate() + 3);
     var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
@@ -415,6 +435,7 @@
     });
 
     var tips = [];
+    if (lunar) tips.push('工作节奏：宜 ' + base.yi.join('、') + '；忌 ' + base.ji.join('、'));
     if (overdue.length) tips.push(overdue.length + ' 条任务已逾期，建议优先处理');
     if (dueToday.length) tips.push(dueToday.length + ' 条任务今日到期，注意按时收口');
     if (dueSoon.length) tips.push('未来 3 天还有 ' + dueSoon.length + ' 条任务截止');
@@ -425,8 +446,11 @@
     return {
       dateLabel: U.formatDate(now, 'YYYY年MM月DD日') + ' ' + U.getWeekdayName(now),
       weekLabel: '第 ' + U.getWeekNumber(now) + ' 周',
-      yi: base.yi,
-      ji: base.ji,
+      yi: (lunar && lunar.yi.length) ? lunar.yi : base.yi,
+      ji: (lunar && lunar.ji.length) ? lunar.ji : base.ji,
+      lunar: lunar,
+      businessYi: base.yi,
+      businessJi: base.ji,
       tips: tips,
       overdue: overdue.length,
       dueToday: dueToday.length,
@@ -441,6 +465,14 @@
     var html = '<div class="card almanac" style="margin-bottom:20px">';
     html += '<div class="card-header"><h3 class="card-title">' + U.svgIcon('book-open', 18) + '今日黄历</h3>';
     html += '<span class="almanac-date">' + U.escapeHtml(a.dateLabel) + ' · ' + U.escapeHtml(a.weekLabel) + '</span></div>';
+    if (a.lunar) {
+      html += '<div class="almanac-lunar">';
+      html += '<span class="almanac-lunar-main">' + U.escapeHtml(a.lunar.yearGanZhi) + '年 · 生肖' + U.escapeHtml(a.lunar.shengXiao) + '</span>';
+      html += '<span class="almanac-lunar-sub">农历 ' + U.escapeHtml(a.lunar.lunarDate) + ' · ' + U.escapeHtml(a.lunar.dayGanZhi) + '日</span>';
+      if (a.lunar.jieQi) html += '<span class="almanac-lunar-jq">节气：' + U.escapeHtml(a.lunar.jieQi) + '</span>';
+      if (a.lunar.festivals && a.lunar.festivals.length) html += '<span class="almanac-lunar-jq">' + U.escapeHtml(a.lunar.festivals.join('、')) + '</span>';
+      html += '</div>';
+    }
     html += '<div class="almanac-grid">';
     html += '<div class="almanac-col almanac-yi"><div class="almanac-head"><span class="almanac-tag almanac-tag-yi">宜</span></div>';
     html += '<ul class="almanac-list">' + a.yi.map(function (s) { return '<li>' + U.escapeHtml(s) + '</li>'; }).join('') + '</ul></div>';
