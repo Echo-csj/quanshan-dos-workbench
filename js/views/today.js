@@ -5,6 +5,8 @@
 
 (function() {
 
+  var todayFilter = 'all'; // 辨别筛选：all | core | alert
+
   App.router.register('/today', function() {
     var container = document.getElementById('view-container');
     if (!container) return;
@@ -18,7 +20,6 @@
 
     var data = App.store.getData();
     var fixedNodes = (data.timeline && data.timeline.fixedNodes) || [];
-    var tasks = App.store.get('tasks') || [];
 
     // 今日固定节点
     var todayNodes = fixedNodes.filter(function(n) {
@@ -35,12 +36,6 @@
     // 本周节点（今天 → 周日）
     var weekNodes = getWeekNodes(fixedNodes, now);
 
-    // 待办统计
-    var todoTasks = tasks.filter(function(t) { return t.status === 'todo'; });
-    var doingTasks = tasks.filter(function(t) { return t.status === 'doing'; });
-    var reviewTasks = tasks.filter(function(t) { return t.status === 'review'; });
-    var overdueTasks = tasks.filter(function(t) { return t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate); });
-
     var html = '';
 
     // 数据备份提醒 banner
@@ -54,30 +49,11 @@
     html += metricCard('距周报截止', daysToSun === 0 ? '今天！' : daysToSun + ' 天', 'alert-circle', '周日 DOS 周报', cdClass);
     html += '</div>';
 
-    // 我的待办
-    html += '<div class="card" style="margin-bottom:20px"><div class="card-header"><h3 class="card-title">' + U.svgIcon('clipboard', 18) + '我的待办</h3>';
-    html += '<button class="btn btn-ghost btn-sm" onclick="App.router.navigate(\'/tasks\')">查看看板 →</button></div>';
-    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">';
-    html += statChip('待办', todoTasks.length, 'var(--text-muted)');
-    html += statChip('进行中', doingTasks.length, 'var(--accent)');
-    html += statChip('审阅中', reviewTasks.length, 'var(--warn)');
-    html += statChip('逾期', overdueTasks.length, overdueTasks.length ? 'var(--bad)' : 'var(--ok)');
-    html += '</div>';
-    if (overdueTasks.length) {
-      html += '<div style="display:flex;flex-direction:column;gap:6px">';
-      overdueTasks.slice(0, 5).forEach(function(t) {
-        html += '<div style="display:flex;align-items:center;gap:8px;font-size:13px;padding:6px 8px;background:var(--bad-soft);border-radius:var(--radius-sm)">';
-        html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + U.priorityLabel(t.priority) + '</span>';
-        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + U.escapeHtml(t.title || '未命名任务') + '</span>';
-        html += '<span class="mono" style="color:var(--bad);font-size:11px">' + U.escapeHtml(t.dueDate) + '</span>';
-        html += '</div>';
-      });
-      if (overdueTasks.length > 5) html += '<div style="font-size:11px;color:var(--text-faint)">…还有 ' + (overdueTasks.length - 5) + ' 条逾期任务</div>';
-      html += '</div>';
-    } else {
-      html += '<p style="font-size:13px;color:var(--text-muted)">暂无逾期任务，保持得不错。</p>';
-    }
-    html += '</div>';
+    // 今日工作（辨别筛选：核心工作 / 重要提示）
+    html += buildTodayWorkHtml(now, todayNodes);
+
+    // 今日黄历（宜 / 忌 / 今日提示）
+    html += almanacHtml();
 
     // 今天该做什么
     html += '<div class="card" style="margin-bottom:20px"><div class="card-header"><h3 class="card-title">' + U.svgIcon('sun', 18) + '今天该做什么</h3>';
@@ -265,6 +241,223 @@
       + '</div>';
   }
 
+  /* ---------------- 今日工作：辨别筛选（核心工作 / 重要提示） ---------------- */
+
+  // 分类单个任务：'core'(核心工作) | 'alert'(重要提示) | 'other'(未来远期待办) | null(已完成/归档)
+  function classifyTask(t, todayStr, soonStr) {
+    if (!t || t.status === 'done' || t.archived) return null;
+    var due = t.dueDate;
+    if (due && App.util.isOverdue(due)) return 'alert';                // 已逾期
+    if (due === todayStr) return 'core';                               // 今日到期
+    if (due && soonStr && due > todayStr && due <= soonStr) return 'alert'; // 临近截止(未来 1~3 天)
+    if (t.status === 'doing' || t.status === 'review') return 'core';  // 进行中 / 审阅中
+    if (t.priority === 'urgent' || t.priority === 'high') return 'core'; // 紧急 / 高优
+    if (!due) return 'core';                                           // 无截止日期待办（含手动新建）→ 待推进
+    return 'other';                                                    // 未来 >3 天普通待办
+  }
+
+  // 读待处理教师发展里程碑（直接读 store，避免对 teacher-milestones 加载顺序依赖）
+  function getPendingMilestones() {
+    var ms = App.store.get('teacherMilestones') || [];
+    return ms.filter(function (m) { return m.status !== 'done'; });
+  }
+
+  function taskItemHtml(t, kind) {
+    var U = App.util;
+    var overdue = t.status !== 'done' && t.dueDate && U.isOverdue(t.dueDate);
+    var dueToday = t.dueDate && !overdue && t.dueDate === U.formatDate(new Date(), 'YYYY-MM-DD');
+    var badgeMap = { core: ['tw-badge-core', '核心'], alert: ['tw-badge-alert', '提示'], other: ['tw-badge-other', '待办'] };
+    var b = badgeMap[kind] || badgeMap.other;
+    var dueCls = overdue ? ' tw-due-overdue' : (dueToday ? ' tw-due-today' : '');
+    var html = '<div class="tw-item" onclick="App.views.tasks.editTask(\'' + U.escapeAttr(t.id) + '\')">';
+    html += '<span class="tw-badge ' + b[0] + '">' + b[1] + '</span>';
+    html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + U.priorityLabel(t.priority) + '</span>';
+    html += '<span class="tw-title">' + U.escapeHtml(t.title || '未命名任务') + '</span>';
+    if (t.assignee) html += '<span class="tw-assignee">' + U.escapeHtml(t.assignee) + '</span>';
+    html += '<span class="tw-right">';
+    if (t.dueDate) html += '<span class="mono tw-due' + dueCls + '">' + U.escapeHtml(t.dueDate) + '</span>';
+    html += '<span class="tag ' + (overdue ? 'tag-bad' : 'tag-neutral') + '">' + U.statusLabel(t.status) + '</span>';
+    html += '</span></div>';
+    return html;
+  }
+
+  function nodeTipItemHtml(node) {
+    var U = App.util;
+    var html = '<div class="tw-item tw-node-item">';
+    html += '<span class="tw-badge tw-badge-node">节律</span>';
+    html += '<span class="tw-title">' + U.escapeHtml(node.title) + '</span>';
+    if (node.time) html += '<span class="tag tag-accent mono">' + U.escapeHtml(node.time) + '</span>';
+    html += '<span class="tw-right"><span class="tag tag-accent">今日安排</span></span>';
+    html += '</div>';
+    return html;
+  }
+
+  function milestoneTipItemHtml(m) {
+    var U = App.util;
+    var overdue = U.isOverdue(m.dueDate);
+    var html = '<div class="tw-item tw-ms-item">';
+    html += '<span class="tw-badge tw-badge-ms">发展</span>';
+    html += '<span class="tw-title">' + U.escapeHtml(m.teacherName) + ' · ' + U.escapeHtml(m.label) + '</span>';
+    html += '<span class="tw-right"><span class="mono tw-due' + (overdue ? ' tw-due-overdue' : '') + '">' + U.escapeHtml(m.dueDate) + '</span>';
+    html += '<span class="tag ' + (overdue ? 'tag-bad' : 'tag-warn') + '">待处理</span></span>';
+    html += '</div>';
+    return html;
+  }
+
+  function buildTodayWorkHtml(now, todayNodes) {
+    var U = App.util;
+    var todayStr = U.formatDate(now, 'YYYY-MM-DD');
+    var soon = new Date(now); soon.setDate(soon.getDate() + 3);
+    var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
+
+    var tasks = (App.store.get('tasks') || []).filter(function (t) { return !t.archived; });
+    var milestones = getPendingMilestones();
+
+    var core = [], alert = [], other = [];
+    tasks.forEach(function (t) {
+      var k = classifyTask(t, todayStr, soonStr);
+      if (k === 'core') core.push(t);
+      else if (k === 'alert') alert.push(t);
+      else if (k === 'other') other.push(t);
+    });
+    function sortByDue(a, b) {
+      var pa = a.priority === 'urgent' ? 0 : (a.priority === 'high' ? 1 : (a.priority === 'normal' ? 2 : 3));
+      var pb = b.priority === 'urgent' ? 0 : (b.priority === 'high' ? 1 : (b.priority === 'normal' ? 2 : 3));
+      if (pa !== pb) return pa - pb;
+      return (a.dueDate || '9999-99-99').localeCompare(b.dueDate || '9999-99-99');
+    }
+    core.sort(sortByDue); alert.sort(sortByDue); other.sort(sortByDue);
+
+    var overdueCount = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate && U.isOverdue(t.dueDate); }).length;
+    var alertCount = alert.length + todayNodes.length + milestones.length;
+
+    var html = '<div class="card tw-card" style="margin-bottom:20px">';
+    html += '<div class="card-header"><h3 class="card-title">' + U.svgIcon('target', 18) + '今日工作</h3>';
+    html += '<div style="display:flex;gap:8px">';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.openTaskModal()">' + U.svgIcon('plus', 14) + '新建任务</button>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.router.navigate(\'/tasks\')">查看看板 →</button>';
+    html += '</div></div>';
+
+    // 辨别筛选 tab
+    html += '<div class="tw-tabs">';
+    [['all', '全部', core.length + alert.length + other.length + milestones.length],
+     ['core', '核心工作', core.length],
+     ['alert', '重要提示', alertCount]].forEach(function (p) {
+      html += '<button class="tw-tab' + (todayFilter === p[0] ? ' active' : '') + '" onclick="App.views.today.setTodayFilter(\'' + p[0] + '\')">' + p[1] + ' <span class="tw-tab-count">' + p[2] + '</span></button>';
+    });
+    html += '</div>';
+
+    // 统计 chips
+    html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0">';
+    html += statChip('核心工作', core.length, 'var(--accent)');
+    html += statChip('重要提示', alertCount, 'var(--warn)');
+    html += statChip('逾期', overdueCount, overdueCount ? 'var(--bad)' : 'var(--ok)');
+    html += '</div>';
+
+    // 列表
+    var items = [];
+    if (todayFilter === 'core') {
+      core.forEach(function (t) { items.push(taskItemHtml(t, 'core')); });
+    } else if (todayFilter === 'alert') {
+      todayNodes.forEach(function (n) { items.push(nodeTipItemHtml(n)); });
+      milestones.forEach(function (m) { items.push(milestoneTipItemHtml(m)); });
+      alert.forEach(function (t) { items.push(taskItemHtml(t, 'alert')); });
+    } else {
+      core.forEach(function (t) { items.push(taskItemHtml(t, 'core')); });
+      alert.forEach(function (t) { items.push(taskItemHtml(t, 'alert')); });
+      other.forEach(function (t) { items.push(taskItemHtml(t, 'other')); });
+      milestones.forEach(function (m) { items.push(milestoneTipItemHtml(m)); });
+    }
+
+    if (items.length === 0) {
+      var emptyText = todayFilter === 'core' ? '暂无核心工作，可点右上角「新建任务」添加。'
+        : (todayFilter === 'alert' ? '暂无重要提示，节奏平稳。' : '今日暂无待办，可点「新建任务」添加。');
+      html += '<p class="tw-empty">' + emptyText + '</p>';
+    } else {
+      html += '<div class="tw-list">' + items.join('') + '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  /* ---------------- 今日黄历（宜 / 忌 / 今日提示） ---------------- */
+  var ALMANAC_BY_WEEKDAY = {
+    0: { yi: ['完成 DOS 周报并上报', '复盘本周数据与下周安排'], ji: ['拖延周报上报', '临时安排新会议'] },
+    1: { yi: ['对齐集团会议精神', '规划本周工作重点'], ji: ['排满全天课程', '跳过会议要点记录'] },
+    2: { yi: ['拆解并下发事项', '召开主管会 / 教务会', '检查当周课表'], ji: ['跳过课表检查', '漏对接客服部'] },
+    3: { yi: ['磨课教研与反思', '推进次月预排'], ji: ['忽略教研反馈', '拖延预排课表'] },
+    4: { yi: ['锁定课表', '提醒老师确认课表'], ji: ['临时改动已锁课表', '漏看老师确认反馈'] },
+    5: { yi: ['提交教研资料', '负责人审核教研资料'], ji: ['拖延周末周报准备', '漏发教研提醒'] },
+    6: { yi: ['整理讲义与表单', '复盘本周待办'], ji: ['安排正式会议', '积压未结事项'] }
+  };
+
+  function almanac() {
+    var U = App.util;
+    var now = new Date();
+    var wd = now.getDay();
+    var base = ALMANAC_BY_WEEKDAY[wd] || ALMANAC_BY_WEEKDAY[1];
+    var todayStr = U.formatDate(now, 'YYYY-MM-DD');
+    var soon = new Date(now); soon.setDate(soon.getDate() + 3);
+    var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
+
+    var tasks = (App.store.get('tasks') || []).filter(function (t) { return !t.archived; });
+    var overdue = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate && U.isOverdue(t.dueDate); });
+    var dueToday = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate === todayStr; });
+    var dueSoon = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate && t.dueDate > todayStr && t.dueDate <= soonStr; });
+    var msPending = getPendingMilestones();
+
+    var data = App.store.getData();
+    var fixedNodes = (data.timeline && data.timeline.fixedNodes) || [];
+    var todayNodes = fixedNodes.filter(function (n) {
+      if (n.type === 'monthly') return false;
+      return n.weekday === wd;
+    });
+
+    var tips = [];
+    if (overdue.length) tips.push(overdue.length + ' 条任务已逾期，建议优先处理');
+    if (dueToday.length) tips.push(dueToday.length + ' 条任务今日到期，注意按时收口');
+    if (dueSoon.length) tips.push('未来 3 天还有 ' + dueSoon.length + ' 条任务截止');
+    if (msPending.length) tips.push(msPending.length + ' 条教师发展提醒待处理');
+    if (todayNodes.length) tips.push('今日固定安排：' + todayNodes.map(function (n) { return n.title; }).join('、'));
+    if (!tips.length) tips.push('今日无特别提醒，可按计划稳步推进');
+
+    return {
+      dateLabel: U.formatDate(now, 'YYYY年MM月DD日') + ' ' + U.getWeekdayName(now),
+      weekLabel: '第 ' + U.getWeekNumber(now) + ' 周',
+      yi: base.yi,
+      ji: base.ji,
+      tips: tips,
+      overdue: overdue.length,
+      dueToday: dueToday.length,
+      dueSoon: dueSoon.length,
+      msPending: msPending.length
+    };
+  }
+
+  function almanacHtml() {
+    var U = App.util;
+    var a = almanac();
+    var html = '<div class="card almanac" style="margin-bottom:20px">';
+    html += '<div class="card-header"><h3 class="card-title">' + U.svgIcon('book-open', 18) + '今日黄历</h3>';
+    html += '<span class="almanac-date">' + U.escapeHtml(a.dateLabel) + ' · ' + U.escapeHtml(a.weekLabel) + '</span></div>';
+    html += '<div class="almanac-grid">';
+    html += '<div class="almanac-col almanac-yi"><div class="almanac-head"><span class="almanac-tag almanac-tag-yi">宜</span></div>';
+    html += '<ul class="almanac-list">' + a.yi.map(function (s) { return '<li>' + U.escapeHtml(s) + '</li>'; }).join('') + '</ul></div>';
+    html += '<div class="almanac-col almanac-ji"><div class="almanac-head"><span class="almanac-tag almanac-tag-ji">忌</span></div>';
+    html += '<ul class="almanac-list">' + a.ji.map(function (s) { return '<li>' + U.escapeHtml(s) + '</li>'; }).join('') + '</ul></div>';
+    html += '</div>';
+    html += '<div class="almanac-tips"><span class="almanac-tips-label">今日提示</span>';
+    html += '<ul class="almanac-tips-list">' + a.tips.map(function (s) { return '<li>' + U.escapeHtml(s) + '</li>'; }).join('') + '</ul></div>';
+    html += '</div>';
+    return html;
+  }
+
+  function setTodayFilter(f) {
+    todayFilter = f;
+    App.router.resolve();
+  }
+
   /* ---------------- 工具 ---------------- */
   function getWeekNodes(nodes, now) {
     var result = [];
@@ -303,7 +496,11 @@
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.today = {
-    generateWeeklyReport: generateWeeklyReport
+    generateWeeklyReport: generateWeeklyReport,
+    classifyTask: classifyTask,
+    almanac: almanac,
+    setTodayFilter: setTodayFilter,
+    getPendingMilestones: getPendingMilestones
   };
 
 })();

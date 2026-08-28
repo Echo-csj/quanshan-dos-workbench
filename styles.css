@@ -1332,3 +1332,64 @@ a:hover { color: var(--accent-hover); }
 .linked-chip .k{font-size:12px;color:var(--text-muted, #71717a);line-height:1.2}
 .linked-chip .v{font-family:'JetBrains Mono','SFMono-Regular',Consolas,monospace;font-size:17px;font-weight:700;color:var(--text, #18181b)}
 .linked-chip .status-dot{flex:0 0 auto}
+
+/* ===== 今日指挥台：今日工作 + 黄历 ===== */
+
+/* 辨别筛选 tab */
+.tw-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.tw-tab{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;border:1px solid var(--border);background:var(--bg);color:var(--text-muted);font-size:13px;font-weight:500;cursor:pointer;transition:all var(--fast)}
+.tw-tab:hover{border-color:var(--border-strong);color:var(--text-secondary)}
+.tw-tab.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.tw-tab-count{font-family:'JetBrains Mono','SFMono-Regular',Consolas,monospace;font-size:11px;font-weight:600;opacity:.8}
+.tw-tab.active .tw-tab-count{color:var(--accent)}
+
+/* 任务 / 提示列表 */
+.tw-list{display:flex;flex-direction:column;gap:8px}
+.tw-item{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--surface-2);border-radius:var(--radius-sm);cursor:pointer;transition:all var(--fast);border-left:3px solid transparent}
+.tw-item:hover{background:var(--surface-3);transform:translateY(-1px)}
+.tw-title{flex:1;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.tw-assignee{font-size:11px;color:var(--text-muted);background:var(--bg);padding:2px 8px;border-radius:20px;flex-shrink:0}
+.tw-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tw-due{font-size:11px;color:var(--text-muted)}
+.tw-due-today{color:var(--accent);font-weight:600}
+.tw-due-overdue{color:var(--bad);font-weight:600}
+
+/* 分类徽标 */
+.tw-badge{flex-shrink:0;font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;letter-spacing:.02em}
+.tw-badge-core{background:var(--accent-soft);color:var(--accent-text)}
+.tw-badge-alert{background:var(--warn-soft);color:var(--warn-text)}
+.tw-badge-other{background:var(--surface-3);color:var(--text-muted)}
+.tw-badge-node{background:var(--accent-soft);color:var(--accent-text)}
+.tw-badge-ms{background:#F5F3FF;color:#6D28D9}
+
+/* 节律节点 / 里程碑提示项左侧强调条 */
+.tw-node-item{border-left-color:var(--accent)}
+.tw-ms-item{border-left-color:#8B5CF6}
+
+.tw-empty{padding:18px;text-align:center;font-size:13px;color:var(--text-muted);background:var(--surface-2);border-radius:var(--radius-sm)}
+
+/* ===== 今日黄历 ===== */
+.almanac{background:linear-gradient(180deg,var(--bg) 0%,var(--surface) 100%)}
+.almanac-date{font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono','SFMono-Regular',Consolas,monospace}
+.almanac-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.almanac-col{border-radius:var(--radius-sm);padding:12px 14px;border:1px solid var(--border)}
+.almanac-yi{background:var(--ok-soft);border-color:#BBF7D0}
+.almanac-ji{background:var(--bad-soft);border-color:#FECACA}
+.almanac-head{margin-bottom:6px}
+.almanac-tag{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;font-size:12px;font-weight:700}
+.almanac-tag-yi{background:var(--ok);color:#fff}
+.almanac-tag-ji{background:var(--bad);color:#fff}
+.almanac-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.almanac-list li{font-size:12.5px;color:var(--text-secondary);line-height:1.4}
+.almanac-yi .almanac-list li{color:var(--ok-text)}
+.almanac-ji .almanac-list li{color:var(--bad-text)}
+.almanac-tips{background:var(--accent-soft);border:1px solid #C7D2FE;border-radius:var(--radius-sm);padding:12px 14px}
+.almanac-tips-label{font-size:12px;font-weight:600;color:var(--accent-text);display:block;margin-bottom:6px}
+.almanac-tips-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.almanac-tips-list li{font-size:12.5px;color:var(--accent-text);line-height:1.5;padding-left:14px;position:relative}
+.almanac-tips-list li::before{content:'·';position:absolute;left:2px;font-weight:700}
+
+@media (max-width:768px){
+  .almanac-grid{grid-template-columns:1fr}
+  .tw-right{flex-wrap:wrap;justify-content:flex-end}
+}
