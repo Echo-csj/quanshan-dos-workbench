@@ -238,12 +238,16 @@ window.App = window.App || {};
     return added;
   }
 
-  // 任务 scope 迁移：为无 scope 字段的老任务幂等回填 'personal'
+  // 任务 scope 迁移：按负责人（assignee）重新推导 scope，覆盖旧值
+  // assignee='DOS' → 'personal'；其它非空 → 'team'；空 → ''（未分配）
   function migrateTasksScope(tasks) {
     if (!Array.isArray(tasks)) return false;
     var changed = false;
     tasks.forEach(function (t) {
-      if (t && t.scope !== 'personal' && t.scope !== 'team') { t.scope = 'personal'; changed = true; }
+      if (!t) return;
+      var a = (t.assignee || '').trim();
+      var s = a ? (a === 'DOS' ? 'personal' : 'team') : '';
+      if (t.scope !== s) { t.scope = s; changed = true; }
     });
     return changed;
   }

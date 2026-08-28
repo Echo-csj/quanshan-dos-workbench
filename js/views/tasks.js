@@ -66,7 +66,7 @@
         var src = t.source || 'manual';
         if (sr.indexOf(src) === -1) return false;
       }
-      if (sc.length && sc.indexOf(t.scope || 'personal') === -1) return false;
+      if (sc.length && sc.indexOf(t.scope || 'unassigned') === -1) return false;
       if (q) {
         var hay = ((t.title||'') + ' ' + (t.assignee||'') + ' ' + (t.note||'') + ' ' + (t.priority||'') + ' ' + (t.status||'')).toLowerCase();
         if (hay.indexOf(q) === -1) return false;
@@ -239,8 +239,8 @@
       html += '<button class="chip' + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'source\',\'' + s + '\')">' + srMap[s] + '</button>';
     });
     html += '<span class="filter-sep"></span>';
-    var scopeMap = { personal: '个人', team: '团队' };
-    ['personal', 'team'].forEach(function(s) {
+    var scopeMap = { personal: '个人', team: '团队', unassigned: '未分配' };
+    ['personal', 'team', 'unassigned'].forEach(function(s) {
       var on = (f.scope || []).indexOf(s) >= 0;
       html += '<button class="chip' + (on ? ' on' : '') + '" onclick="App.views.tasks.toggleFilter(\'scope\',\'' + s + '\')">' + scopeMap[s] + '</button>';
     });
@@ -372,6 +372,7 @@
     var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
     html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.escapeHtml(t.title || '未命名任务');
     if (t.scope === 'team') html += '<span class="scope-tag">团队</span>';
+    else if (!t.scope) html += '<span class="scope-tag scope-tag-unassigned">未分配</span>';
     if (t.note) html += '<div class="list-note">' + App.util.escapeHtml(t.note) + '</div>';
     html += '</td>';
     html += '<td><span class="tag status-' + t.status + '">' + App.util.statusLabel(t.status) + '</span></td>';
@@ -493,6 +494,7 @@
     html += '<div class="kanban-card-meta">';
     html += '<span class="tag priority-' + prio + '">' + App.util.priorityLabel(prio) + '</span>';
     if (t.scope === 'team') html += '<span class="tag scope-team">团队</span>';
+    else if (!t.scope) html += '<span class="tag scope-unassigned">未分配</span>';
     if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
     if (t.dueDate) html += '<span style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">📅 ' + App.util.escapeHtml(t.dueDate) + '</span>';
     html += '</div>';
@@ -551,7 +553,7 @@
   function openTaskModal(id) {
     var isEdit = !!id;
     var t = isEdit ? getTasks().filter(function(x) { return x.id === id; })[0] : null;
-    var data = t || { title: '', priority: 'normal', status: 'todo', assignee: '', dueDate: '', note: '', scope: 'personal' };
+    var data = t || { title: '', priority: 'normal', status: 'todo', assignee: '', dueDate: '', note: '' };
 
     var html = '<div style="display:flex;flex-direction:column;gap:14px">';
     html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="task-title" value="' + App.util.escapeAttr(data.title) + '" placeholder="如：完成次月预排课表"></div>';
@@ -559,13 +561,8 @@
     html += '<div class="form-group"><label class="form-label">优先级</label><select class="form-input" id="task-priority">' + priorityOptions(data.priority) + '</select></div>';
     html += '<div class="form-group"><label class="form-label">所属状态</label><select class="form-input" id="task-status">' + statusOptions(data.status) + '</select></div>';
     html += '</div>';
-    html += '<div class="form-group"><label class="form-label">归属</label>';
-    html += '<div style="display:flex;gap:16px">';
-    html += '<label class="chk-inline"><input type="radio" id="task-scope-personal" name="task-scope" value="personal"' + (data.scope !== 'team' ? ' checked' : '') + '> 个人</label>';
-    html += '<label class="chk-inline"><input type="radio" id="task-scope-team" name="task-scope" value="team"' + (data.scope === 'team' ? ' checked' : '') + '> 团队</label>';
-    html += '</div></div>';
     html += '<div class="form-row">';
-    html += '<div class="form-group"><label class="form-label">负责人</label><input class="form-input" id="task-assignee" value="' + App.util.escapeAttr(data.assignee) + '" placeholder="如：张老师"></div>';
+    html += '<div class="form-group"><label class="form-label">负责人</label><input class="form-input" id="task-assignee" value="' + App.util.escapeAttr(data.assignee) + '" placeholder="DOS＝个人任务；填成员名＝团队任务"></div>';
     html += '<div class="form-group"><label class="form-label">截止日期</label><input class="form-input" id="task-due" type="date" value="' + App.util.escapeAttr(data.dueDate) + '"></div>';
     html += '</div>';
     html += '<div class="form-group"><label class="form-label">备注</label><textarea class="form-input" id="task-note" placeholder="补充说明（可选）">' + App.util.escapeHtml(data.note || '') + '</textarea></div>';
@@ -589,8 +586,7 @@
     var assignee = document.getElementById('task-assignee').value.trim();
     var dueDate = document.getElementById('task-due').value;
     var note = document.getElementById('task-note').value.trim();
-    var scopeTeamEl = document.getElementById('task-scope-team');
-    var scope = (scopeTeamEl && scopeTeamEl.checked) ? 'team' : 'personal';
+    var scope = App.util.deriveScope(assignee);
 
     var tasks = getTasks();
     if (id) {
@@ -774,7 +770,7 @@
         id: App.store.uid('task'),
         title: node.title,
         priority: defaultPriority(node),
-        assignee: '',
+        assignee: 'DOS',
         dueDate: due ? App.util.formatDate(due, 'YYYY-MM-DD') : '',
         status: 'todo',
         source: 'timeline',
@@ -1017,7 +1013,7 @@
         dueDate: due || '',
         note: timeVal ? ('时间 ' + timeVal) : '',
         source: 'paste',
-        scope: 'personal',
+        scope: App.util.deriveScope(assignee),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

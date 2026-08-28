@@ -134,8 +134,9 @@ assert(pend[0].id === 'ms_1', '返回的是 pending 那条');
 
 console.log('\n[5] /today 路由渲染冒烟（验证手动任务真实出现在 HTML）');
 store.set('tasks', [
-  { id: 't_manual', title: '手动新建任务', status: 'todo', priority: 'normal', assignee: '张老师', dueDate: '', source: 'manual' },
-  { id: 't_team', title: '团队协作任务', status: 'todo', priority: 'normal', dueDate: '', scope: 'team' }
+  { id: 't_manual', title: '手动新建任务', status: 'todo', priority: 'normal', assignee: 'DOS', dueDate: '', source: 'manual', scope: 'personal' },
+  { id: 't_team', title: '团队协作任务', status: 'todo', priority: 'normal', assignee: '张老师', dueDate: '', scope: 'team' },
+  { id: 't_unassigned', title: '未分配任务', status: 'todo', priority: 'normal', assignee: '', dueDate: '', scope: '' }
 ]);
 store.set('teacherMilestones', [
   { id: 'ms_smoke', teacherName: '李四', label: '转正提醒', status: 'pending', dueDate: todayStr }
@@ -153,6 +154,7 @@ assert(html.indexOf('手动新建任务') >= 0, '手动新建任务出现在今�
 assert(html.indexOf('李四') >= 0, '教师里程碑提醒出现在今日指挥台 HTML');
 assert(html.indexOf('tw-badge-team') >= 0, '团队任务在今日指挥台带「团队」徽标');
 assert(html.indexOf('团队协作任务') >= 0, '团队任务标题出现在今日指挥台 HTML');
+assert(html.indexOf('tw-badge-unassigned') >= 0, '未分配任务在今日指挥台带「未分配」徽标');
 
 console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

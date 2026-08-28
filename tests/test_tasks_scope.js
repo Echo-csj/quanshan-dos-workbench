@@ -1,9 +1,9 @@
-/* Node 桩测试：任务「个人/团队」scope 字段
+/* Node 桩测试：任务「个人/团队」识别 = 负责人（assignee）
    运行：node test_tasks_scope.js
    覆盖：
-   1. store 迁移：老任务（无 scope）经 load/refresh 后自动回填 scope='personal'
-   2. /tasks 看板渲染：团队任务带「团队」徽标；工具栏含「个人/团队」筛选 chips；
-      source chips 补齐「里程碑」 */
+   1. store 迁移：按负责人重新推导 scope（DOS→personal、他人→team、空→''未分配）
+   2. /tasks 看板渲染：团队/未分配徽标 + 个人/团队/未分配筛选 chips
+   3. saveTask 按负责人自动推导 scope */
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -53,6 +53,7 @@ sandbox.App.views = sandbox.App.views || {};
 vm.runInContext(fs.readFileSync(path.join(ROOT, 'js/views/tasks.js'), 'utf8'), sandbox, { filename: 'js/views/tasks.js' });
 
 const store = sandbox.App.store;
+const U = sandbox.App.util;
 const tasksApi = sandbox.App.views.tasks;
 
 let pass = 0, fail = 0;
@@ -61,48 +62,56 @@ function assert(cond, label) {
   else { fail++; console.log('  ✗ ' + label); }
 }
 
-console.log('\n[1] store scope 迁移');
-// 预置「老数据」：tasks 无 scope 字段
+console.log('\n[1] 负责人推导 scope（识别规则）');
+assert(U.deriveScope('DOS') === 'personal', 'assignee=DOS → personal（个人）');
+assert(U.deriveScope('张老师') === 'team', 'assignee=张老师 → team（团队）');
+assert(U.deriveScope('') === '', 'assignee 空 → 未分配');
+assert(U.deriveScope('  DOS  ') === 'personal', '带空格的 DOS → personal');
+
+console.log('\n[2] store scope 迁移（按负责人重新推导）');
 store_map['zyg_workbench_v1'] = JSON.stringify({
   tasks: [
-    { id: 'old1', title: '老任务A', status: 'todo', dueDate: '' },
-    { id: 'old2', title: '老任务B', status: 'doing', scope: 'team' }
+    { id: 'old1', title: '无负责人', status: 'todo', dueDate: '', scope: 'personal' },
+    { id: 'old2', title: 'DOS任务', status: 'doing', assignee: 'DOS' },
+    { id: 'old3', title: '张老师任务', status: 'todo', assignee: '张老师', scope: 'personal' }
   ]
 });
-store.refresh(); // 触发 load() → deepMerge → migrateTasksScope
+store.refresh();
 const migrated = store.get('tasks') || [];
-assert(migrated.length === 2, '迁移后任务数不变');
-const a = migrated.find((t) => t.id === 'old1');
-const b = migrated.find((t) => t.id === 'old2');
-assert(a && a.scope === 'personal', '无 scope 老任务 → 回填 personal');
-assert(b && b.scope === 'team', '已有 team 的任务不被覆盖');
+const f = (id) => migrated.find((t) => t.id === id);
+assert(f('old1') && f('old1').scope === '', '无负责人 → scope 被纠正为「未分配」');
+assert(f('old2') && f('old2').scope === 'personal', 'assignee=DOS → scope=personal');
+assert(f('old3') && f('old3').scope === 'team', 'assignee=张老师 → scope=team（覆盖旧 personal）');
 
-console.log('\n[2] /tasks 看板渲染（团队徽标 + scope 筛选 chips）');
+console.log('\n[3] /tasks 看板渲染（团队/未分配徽标 + scope chips）');
 store.set('tasks', [
-  { id: 't_p', title: '个人任务', status: 'todo', priority: 'normal', dueDate: '', scope: 'personal' },
-  { id: 't_t', title: '团队任务', status: 'todo', priority: 'normal', dueDate: '', scope: 'team' },
-  { id: 't_ms', title: '转正提醒-李四', status: 'todo', priority: 'high', dueDate: '', source: 'teacher-milestone', scope: 'personal' }
+  { id: 't_p', title: '个人任务', status: 'todo', priority: 'normal', assignee: 'DOS', scope: 'personal' },
+  { id: 't_t', title: '团队任务', status: 'todo', priority: 'normal', assignee: '张老师', scope: 'team' },
+  { id: 't_u', title: '未分配任务', status: 'todo', priority: 'normal', assignee: '', scope: '' }
 ]);
-routeHandler(); // 执行 /tasks 路由，写入 view-container.innerHTML
+routeHandler();
 const html = (elems['view-container'] && elems['view-container'].innerHTML) || '';
 assert(html.indexOf('scope-team') >= 0, '看板卡片渲染「团队」徽标');
-assert(html.indexOf('toggleFilter(\'scope\',\'personal\')') >= 0, '工具栏含「个人」筛选 chip');
-assert(html.indexOf('toggleFilter(\'scope\',\'team\')') >= 0, '工具栏含「团队」筛选 chip');
-assert(html.indexOf('toggleFilter(\'source\',\'teacher-milestone\')') >= 0, 'source 筛选补齐「里程碑」chip');
+assert(html.indexOf('scope-unassigned') >= 0, '看板卡片渲染「未分配」徽标');
+assert(html.indexOf('toggleFilter(\'scope\',\'personal\')') >= 0, '含「个人」筛选 chip');
+assert(html.indexOf('toggleFilter(\'scope\',\'team\')') >= 0, '含「团队」筛选 chip');
+assert(html.indexOf('toggleFilter(\'scope\',\'unassigned\')') >= 0, '含「未分配」筛选 chip');
 
-console.log('\n[3] saveTask 读取 scope radio（桩 getElementById）');
-// 模拟弹窗：团队 radio 被勾选
-elems['task-title'] = { value: '新团队任务', trim() { return '新团队任务'; } };
-elems['task-priority'] = { value: 'normal' };
-elems['task-status'] = { value: 'todo' };
-elems['task-assignee'] = { value: '张老师', trim() { return '张老师'; } };
-elems['task-due'] = { value: '' };
-elems['task-note'] = { value: '', trim() { return ''; } };
-elems['task-scope-team'] = { checked: true };
-tasksApi.saveTask(null, null);
-const newTasks = store.get('tasks') || [];
-const nt = newTasks.find((t) => t.title === '新团队任务');
-assert(nt && nt.scope === 'team', 'saveTask 勾选团队 → 写入 scope=team');
+console.log('\n[4] saveTask 按负责人自动推导 scope');
+function fillAndSave(assignee) {
+  elems['task-title'] = { value: '任务X', trim() { return '任务X'; } };
+  elems['task-priority'] = { value: 'normal' };
+  elems['task-status'] = { value: 'todo' };
+  elems['task-assignee'] = { value: assignee, trim() { return assignee; } };
+  elems['task-due'] = { value: '' };
+  elems['task-note'] = { value: '', trim() { return ''; } };
+  tasksApi.saveTask(null, null);
+  const arr = store.get('tasks') || [];
+  return arr[arr.length - 1];
+}
+assert(fillAndSave('DOS').scope === 'personal', '负责人=DOS → 写入 scope=personal');
+assert(fillAndSave('李老师').scope === 'team', '负责人=李老师 → 写入 scope=team');
+assert(fillAndSave('').scope === '', '负责人空 → 写入 scope=未分配');
 
 console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败');
 process.exit(fail ? 1 : 0);

@@ -272,6 +272,7 @@
     var html = '<div class="tw-item" onclick="App.views.tasks.editTask(\'' + U.escapeAttr(t.id) + '\')">';
     html += '<span class="tw-badge ' + b[0] + '">' + b[1] + '</span>';
     if (t.scope === 'team') html += '<span class="tw-badge tw-badge-team">团队</span>';
+    else if (!t.scope) html += '<span class="tw-badge tw-badge-unassigned">未分配</span>';
     html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + U.priorityLabel(t.priority) + '</span>';
     html += '<span class="tw-title">' + U.escapeHtml(t.title || '未命名任务') + '</span>';
     if (t.assignee) html += '<span class="tw-assignee">' + U.escapeHtml(t.assignee) + '</span>';

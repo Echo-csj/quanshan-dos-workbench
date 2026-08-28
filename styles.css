@@ -1395,10 +1395,13 @@ a:hover { color: var(--accent-hover); }
 .almanac-lunar-sub{font-size:12.5px;color:var(--text-muted)}
 .almanac-lunar-jq{font-size:12px;color:var(--accent-text);background:var(--accent-soft);padding:1px 8px;border-radius:999px}
 
-/* scope 团队标记（紫色） */
+/* scope 团队标记（紫色）/ 未分配标记（灰） */
 .tag.scope-team{background:#F5F3FF;color:#6D28D9;font-weight:600}
+.tag.scope-unassigned{background:var(--surface-2);color:var(--text-muted);font-weight:500}
 .scope-tag{display:inline-block;margin-left:6px;padding:0 7px;border-radius:999px;font-size:10px;font-weight:600;line-height:17px;background:#F5F3FF;color:#6D28D9;vertical-align:middle}
+.scope-tag-unassigned{background:var(--surface-2);color:var(--text-muted)}
 .tw-badge-team{background:#F5F3FF;color:#6D28D9}
+.tw-badge-unassigned{background:var(--surface-3);color:var(--text-muted)}
 .chk-inline{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text-secondary);cursor:pointer}
 
 @media (max-width:768px){

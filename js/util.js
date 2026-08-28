@@ -441,6 +441,14 @@ window.App = window.App || {};
     return y + '年' + m + '月' + d + '天';
   }
 
+  // --- 任务归属（个人/团队）由负责人推导 ---
+  // assignee === 'DOS' → 'personal'（个人）；其它非空 → 'team'（团队）；空 → ''（未分配，需补填）
+  function deriveScope(assignee) {
+    var a = (assignee || '').trim();
+    if (!a) return '';
+    return a === 'DOS' ? 'personal' : 'team';
+  }
+
   // Public API
   App.util = {
     getWeekNumber: getWeekNumber,
@@ -469,7 +477,8 @@ window.App = window.App || {};
     chartFmt: chartFmt,
     escapeHtml: escapeHtml,
     escapeAttr: escapeAttr,
-    workAge: workAge
+    workAge: workAge,
+    deriveScope: deriveScope
   };
 
 })();
