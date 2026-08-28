@@ -186,8 +186,10 @@
     var user = session && session.user && session.user.email ? session.user.email : '已同步';
     w.innerHTML = '<div class="sw-box"><span class="sw-dot green"></span>' +
       '<span class="sw-user">' + user + ' · 已同步</span>' +
+      '<button id="sync-tasks" class="sw-btn small">任务协作<span id="ts-badge" class="sw-badge" style="display:none"></span></button>' +
       '<button id="sync-link" class="sw-btn small">查看联动数据</button>' +
       '<button id="sync-out" class="sw-link">退出</button></div>';
+    el('sync-tasks').onclick = function () { if (App.taskShare && App.taskShare.openInbox) App.taskShare.openInbox(); };
     el('sync-link').onclick = openSharedModal;
     el('sync-out').onclick = signOut;
   }
@@ -197,7 +199,11 @@
     readShared: readShared, openSharedModal: openSharedModal,
     onStatus: function (f) { statusListeners.push(f); },
     getStatus: function () { return status; },
-    applyRemote: applyRemote
+    applyRemote: applyRemote,
+    // 供 task-share.js 复用同一 Supabase 客户端与会话
+    getClient: function () { return ensureClient(); },
+    getSession: function () { return session; },
+    getEmail: function () { return session && session.user && session.user.email ? session.user.email : null; }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);

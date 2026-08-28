@@ -382,6 +382,7 @@
     html += '<td><span style="font-size:11px;color:var(--text-muted)">' + srcLabel + '</span></td>';
     html += '<td class="list-actions">';
     html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
+    html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
     if (t.status === 'done') html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
     html += '<button class="btn-icon btn-icon-danger" title="删除" onclick="App.views.tasks.deleteTask(\'' + t.id + '\')">' + App.util.svgIcon('trash-2', 14) + '</button>';
     html += '</td>';
@@ -482,6 +483,7 @@
     // 操作按钮
     html += '<div class="kanban-card-actions">';
     html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
+    html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
     if (t.status === 'done') {
       html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
     }
@@ -546,7 +548,15 @@
     }
     App.store.set('tasks', tasks);
     App.util.toast('「' + App.util.escapeHtml(t.title) + '」→ ' + App.util.statusLabel(status), 'ok');
+    maybeSyncDone(t, status);
     App.router.resolve();
+  }
+
+  // 若任务来自同事发送（shareId），完成时回写状态给发送方
+  function maybeSyncDone(t, status) {
+    if (status === 'done' && t && t.shareId && App.taskShare && App.taskShare.markDone) {
+      try { App.taskShare.markDone(t.shareId); } catch (e) {}
+    }
   }
 
   /* ---------------- 新建 / 编辑 ---------------- */
@@ -591,7 +601,7 @@
     var tasks = getTasks();
     if (id) {
       var t = tasks.filter(function(x) { return x.id === id; })[0];
-      if (t) Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, updatedAt: new Date().toISOString() });
+      if (t) { Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, updatedAt: new Date().toISOString() }); maybeSyncDone(t, status); }
     } else {
       tasks.push({
         id: App.store.uid('task'),
@@ -604,6 +614,35 @@
     if (close) close();
     App.util.toast(id ? '已保存修改' : '已创建任务', 'ok');
     App.router.resolve();
+  }
+
+  /* ---------------- 发送任务给同事 ---------------- */
+  function sendTask(id) {
+    var t = getTasks().filter(function (x) { return x.id === id; })[0];
+    if (!t) return;
+    if (!App.taskShare) { App.util.toast('协作模块未加载', 'warn'); return; }
+    var contacts = App.taskShare.getContacts() || [];
+    var dl = contacts.length ? '<datalist id="ts-contacts">' + contacts.map(function (c) {
+      return '<option value="' + App.util.escapeAttr(c.email) + '">' + App.util.escapeHtml(c.name || c.email) + '</option>';
+    }).join('') + '</datalist>' : '';
+    var html = '<div style="display:flex;flex-direction:column;gap:12px">' +
+      '<div class="form-group"><label class="form-label">收件人邮箱</label>' +
+      '<input class="form-input" id="ts-to" type="email" list="ts-contacts" placeholder="同事登录工作台的邮箱"></div>' +
+      '<div class="form-group"><label class="form-label">任务内容</label>' +
+      '<div class="ts-send-preview">' + App.util.escapeHtml(t.title || '（无标题）') +
+      (t.dueDate ? '　·　截止 ' + App.util.escapeHtml(t.dueDate) : '') +
+      (t.note ? '　·　' + App.util.escapeHtml(t.note) : '') + '</div></div>' +
+      dl + '</div>';
+    App.util.modal({
+      title: '发送任务给同事',
+      content: html,
+      confirmText: '发送',
+      onConfirm: function (close) {
+        var to = document.getElementById('ts-to').value.trim();
+        if (!to || to.indexOf('@') === -1) { App.util.toast('请填写正确的邮箱', 'warn'); return; }
+        App.taskShare.send(t, to).then(function (r) { if (r && r.ok) close(); });
+      }
+    });
   }
 
   function deleteTask(id) {
@@ -1960,6 +1999,7 @@
     editTask: openTaskModal,
     deleteTask: deleteTask,
     saveTask: saveTask,
+    sendTask: sendTask,
     generateFromTimeline: generateFromTimeline,
     openPasteModal: openPasteModal,
     onPasteRuleChange: onPasteRuleChange,

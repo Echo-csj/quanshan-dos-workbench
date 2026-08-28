@@ -1408,3 +1408,23 @@ a:hover { color: var(--accent-hover); }
   .almanac-grid{grid-template-columns:1fr}
   .tw-right{flex-wrap:wrap;justify-content:flex-end}
 }
+
+/* ===== 任务协作（task-share） ===== */
+.sw-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;margin-left:5px;border-radius:999px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;line-height:1}
+.ts-tabs{display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border)}
+.ts-tab{border:0;background:none;padding:8px 14px;font-size:14px;color:var(--text-muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0}
+.ts-tab:hover{color:var(--text)}
+.ts-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.ts-list{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto}
+.ts-loading,.ts-empty{color:var(--text-muted);font-size:13px;text-align:center;padding:24px 0}
+.ts-item{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:var(--surface)}
+.ts-item-title{font-size:14px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ts-item-meta{font-size:12px;color:var(--text-muted);margin-top:3px}
+.ts-item-note{font-size:12px;color:var(--text-secondary);margin-top:5px;padding:6px 8px;background:var(--surface-2);border-radius:var(--radius-sm)}
+.ts-item-actions{display:flex;gap:6px;margin-top:8px}
+.ts-badge{display:inline-block;padding:0 7px;border-radius:999px;font-size:11px;font-weight:600;line-height:18px}
+.ts-badge-grey{background:var(--surface-2);color:var(--text-muted)}
+.ts-badge-blue{background:var(--accent-soft);color:var(--accent-text)}
+.ts-badge-green{background:var(--ok-soft);color:var(--ok-text)}
+.ts-badge-red{background:var(--bad-soft);color:var(--bad-text)}
+.ts-send-preview{font-size:13px;color:var(--text);padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);line-height:1.6}
