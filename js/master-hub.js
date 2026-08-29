@@ -355,6 +355,63 @@
     return r.data || [];
   }
 
+  /* ---------------- 团队汇总：读取/操作子工作台整档数据 ---------------- */
+  // 读某个子工作台的整档数据（依赖 schema.sql 7.10 的 RLS 授权）
+  async function fetchMemberData(userId) {
+    var c = client(); if (!c || !uid()) return null;
+    var r = await c.from('dos_workbench').select('data,updated_at').eq('user_id', userId).maybeSingle();
+    if (r.error) { console.warn('[masterHub] fetchMemberData', r.error); return null; }
+    return (r.data && r.data.data) || {};
+  }
+
+  // 拉取所有子工作台的整档数据（含成员名 / userId / data）
+  async function fetchAllMembersData() {
+    var subs = await listSubs();
+    var out = [];
+    for (var i = 0; i < subs.length; i++) {
+      var s = subs[i];
+      if (s.status && s.status !== 'active') continue;
+      var data = await fetchMemberData(s.user_id);
+      out.push({ userId: s.user_id, name: s.name || '未命名', data: data || {} });
+    }
+    return out;
+  }
+
+  // 总台标记完成某子工作台的一条教师里程碑（转正/工龄提醒），三方联动写回子台
+  async function markMemberMilestoneDone(userId, milestoneId) {
+    var c = client(); if (!c || !uid()) { App.util.toast('请先登录云端同步', 'warn'); return { ok: false }; }
+    var row = await c.from('dos_workbench').select('data').eq('user_id', userId).maybeSingle();
+    if (row.error || !row.data) { App.util.toast('读不到该子工作台的数据（子台可能尚未登录云端同步）', 'warn'); return { ok: false }; }
+    var data = row.data.data || {};
+
+    var ms = data.teacherMilestones || [];
+    var m = null;
+    ms.forEach(function (x) { if (String(x.id) === String(milestoneId)) m = x; });
+    if (!m) { App.util.toast('该提醒已不存在（可能子台已处理）', 'warn'); return { ok: false }; }
+    m.status = 'done';
+    m.doneAt = new Date().toISOString();
+
+    var tasks = data.tasks || [];
+    tasks.forEach(function (t) { if (t && t.id === m.taskId) t.status = 'done'; });
+
+    var tl = data.timeline || {};
+    var nodes = tl.customNodes || [];
+    nodes.forEach(function (n) { if (n && n.id === m.timelineNodeId) { n.done = true; n.title = (n.title || '').replace(/ ✅$/, '') + ' ✅'; } });
+
+    data.teacherMilestones = ms;
+    data.tasks = tasks;
+    data.timeline = tl;
+
+    var up = await c.from('dos_workbench').upsert(
+      { user_id: userId, data: data, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+    if (up.error) { App.util.toast('写回失败：' + (up.error.message || ''), 'warn'); return { ok: false }; }
+    await log('member_milestone_done', { targetUserId: userId, dataType: 'teacherMilestones', itemId: milestoneId, detail: { teacherName: m.teacherName } });
+    App.util.toast('已标记完成并同步回子工作台', 'ok');
+    return { ok: true };
+  }
+
   /* ---------------- 对外 ---------------- */
   App.masterHub = {
     ready: ready,
@@ -376,6 +433,9 @@
     mergeReverse: mergeReverse,
     dismissReverse: dismissReverse,
     listLogs: listLogs,
+    fetchMemberData: fetchMemberData,
+    fetchAllMembersData: fetchAllMembersData,
+    markMemberMilestoneDone: markMemberMilestoneDone,
     // 工具（供视图复用）
     extractItems: extractItems,
     trimPayload: trimPayload

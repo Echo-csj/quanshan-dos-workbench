@@ -1289,6 +1289,9 @@ a:hover { color: var(--accent-hover); }
 .ms-teacher:hover { text-decoration:underline; }
 .ms-empty { padding:18px; text-align:center; }
 .ms-foot { margin-top:10px; font-size:12px; }
+.ms-team-meta { font-size:12px; margin-bottom:8px; }
+.ms-sub-owner { display:inline-block; font-size:11px; font-weight:600; color:var(--accent); background:var(--accent-soft); border-radius:6px; padding:2px 7px; }
+.ms-team-body { min-height:60px; }
 .btn-xs { font-size:11px; padding:3px 9px; border-radius:6px; }
 .overdue-row td { background:rgba(220,38,38,.05); }
 

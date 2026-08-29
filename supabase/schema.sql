@@ -336,3 +336,35 @@ as $$
   select case when auth.uid() is null then null
               else (select id from auth.users where lower(email) = lower(p_email) limit 1) end;
 $$;
+
+-- ============================================================
+-- 7.10 总工作台查看 / 操作子工作台数据（团队汇总）
+--      允许组织 owner 读取 + 写回本组织成员（子工作台）的 dos_workbench 整档数据，
+--      用于「总台汇总查看子台教师转正/工龄提醒」并「标记完成同步回子台」。
+--      复用 7.6b 的 security definer 函数 is_my_org_member，不会触发 RLS 递归。
+--      注意：org owner 因此对本组织成员的整档数据有读写权，属授权设计（可随时撤销）。
+-- ============================================================
+
+-- 读：总台可查看本组织成员的整档数据
+drop policy if exists "org_owner_select_member_dw" on dos_workbench;
+create policy "org_owner_select_member_dw" on dos_workbench
+  for select using (public.is_my_org_member(dos_workbench.user_id));
+
+-- 写：总台可为本组织成员初始化 / 更新整档数据（标记完成等操作同步回子台）
+drop policy if exists "org_owner_insert_member_dw" on dos_workbench;
+create policy "org_owner_insert_member_dw" on dos_workbench
+  for insert with check (public.is_my_org_member(dos_workbench.user_id));
+
+drop policy if exists "org_owner_update_member_dw" on dos_workbench;
+create policy "org_owner_update_member_dw" on dos_workbench
+  for update using (public.is_my_org_member(dos_workbench.user_id))
+  with check (public.is_my_org_member(dos_workbench.user_id));
+
+-- 实时：把 dos_workbench 加入 realtime，让子台实时收到总台的写回
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                 where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'dos_workbench') then
+    alter publication supabase_realtime add table dos_workbench;
+  end if;
+end $$;

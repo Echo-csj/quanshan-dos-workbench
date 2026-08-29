@@ -256,7 +256,9 @@
 
   // ---------- 面板渲染 ----------
   var panelFilter = 'pending';
+  var teamMode = false;   // true=团队汇总视图（总台查看所有子工作台的提醒）
   function setFilter(f) { panelFilter = f; if (App.views.teachers && App.views.teachers.render) App.views.teachers.render(); }
+  function switchMode(on) { teamMode = !!on; if (App.views.teachers && App.views.teachers.render) App.views.teachers.render(); }
 
   function panelHtml() {
     ensure();
@@ -270,14 +272,25 @@
     var pending = ms.filter(function (m) { return m.status !== 'done'; }).length;
 
     var html = '<div class="card ms-card">';
-    html += '<div class="ms-head"><div class="ms-title">🎯 教师职业发展关键节点提醒 <span class="ms-count">待处理 ' + pending + '</span></div>';
+    html += '<div class="ms-head"><div class="ms-title">🎯 教师职业发展关键节点提醒 <span class="ms-count">' + (teamMode ? '团队汇总' : '待处理 ' + pending) + '</span></div>';
     html += '<div class="ms-tools"><div class="ms-filter">';
-    [['pending', '待处理'], ['all', '全部'], ['done', '已完成']].forEach(function (p) {
-      html += '<button class="chip' + (panelFilter === p[0] ? ' on' : '') + '" onclick="App.views.teacherMilestones.setFilter(\'' + p[0] + '\')">' + p[1] + '</button>';
-    });
-    html += '</div><button class="btn btn-secondary btn-sm" onclick="App.views.teacherMilestones.checkAndRender()">↻ 重新检查</button></div></div>';
+    if (App.masterHub && App.masterHub.ready && App.masterHub.ready()) {
+      html += '<button class="chip' + (teamMode ? ' on' : '') + '" onclick="App.views.teacherMilestones.switchMode(true)">团队汇总</button>';
+    }
+    html += '<button class="chip' + (!teamMode ? ' on' : '') + '" onclick="App.views.teacherMilestones.switchMode(false)">我的提醒</button>';
+    if (!teamMode) {
+      [['pending', '待处理'], ['all', '全部'], ['done', '已完成']].forEach(function (p) {
+        html += '<button class="chip' + (panelFilter === p[0] ? ' on' : '') + '" onclick="App.views.teacherMilestones.setFilter(\'' + p[0] + '\')">' + p[1] + '</button>';
+      });
+    }
+    html += '</div>';
+    if (!teamMode) html += '<button class="btn btn-secondary btn-sm" onclick="App.views.teacherMilestones.checkAndRender()">↻ 重新检查</button>';
+    html += '</div></div>';
 
-    if (filtered.length === 0) {
+    if (teamMode) {
+      html += '<div id="ms-team-body" class="ms-team-body"><div class="ms-empty muted">正在加载团队数据…</div></div>';
+      setTimeout(function () { renderTeamPanel(); }, 0);
+    } else if (filtered.length === 0) {
       html += '<div class="ms-empty muted">暂无' + (panelFilter === 'done' ? '已完成' : (panelFilter === 'all' ? '' : '待处理')) + '的提醒</div>';
     } else {
       html += '<div class="table-card"><table class="teacher-table ms-table"><thead><tr>';
@@ -297,7 +310,9 @@
       });
       html += '</tbody></table></div>';
     }
-    html += '<p class="ms-foot muted">每条提醒已自动同步至「时间轴」(按触发日期展示里程碑) 与「待办事项」(含负责人/截止/状态)。标记完成后三处状态保持一致，可全程追踪。</p>';
+    html += '<p class="ms-foot muted">' + (teamMode
+      ? '团队汇总展示所有子工作台已同步到云端的转正/工龄提醒；「标记完成」会写回对应子工作台并同步其时间轴与待办。'
+      : '每条提醒已自动同步至「时间轴」(按触发日期展示里程碑) 与「待办事项」(含负责人/截止/状态)。标记完成后三处状态保持一致，可全程追踪。') + '</p>';
     html += '</div>';
     return html;
   }
@@ -305,6 +320,68 @@
   function checkAndRender() {
     forceCheck();
     if (App.views.teachers && App.views.teachers.render) App.views.teachers.render();
+  }
+
+  // ---------- 团队汇总（总台查看所有子工作台的提醒） ----------
+  function renderTeamPanel() {
+    var box = document.getElementById('ms-team-body');
+    if (!box) return;
+    if (!App.masterHub || !App.masterHub.ready || !App.masterHub.ready()) {
+      box.innerHTML = '<div class="ms-empty muted">团队汇总需要先登录云端同步（右下角小组件），并已创建组织、纳管子工作台。</div>';
+      return;
+    }
+    App.masterHub.fetchAllMembersData().then(function (members) {
+      if (!members || !members.length) {
+        box.innerHTML = '<div class="ms-empty muted">还没有子工作台。请先在「子工作台管理」里纳管下属。</div>';
+        return;
+      }
+      var rows = [];
+      members.forEach(function (mem) {
+        var ms = (mem.data && mem.data.teacherMilestones) || [];
+        ms.forEach(function (m) {
+          rows.push({ subUserId: mem.userId, subName: mem.name, m: m });
+        });
+      });
+      rows.sort(function (a, b) {
+        var pa = a.m.status === 'done' ? 1 : 0, pb = b.m.status === 'done' ? 1 : 0;
+        if (pa !== pb) return pa - pb;
+        return (a.m.dueDate || '').localeCompare(b.m.dueDate || '');
+      });
+      var pending = rows.filter(function (r) { return r.m.status !== 'done'; }).length;
+
+      var html = '<div class="ms-team-meta muted">共 ' + members.length + ' 个子工作台 · 汇总 ' + rows.length + ' 条提醒 · 待处理 ' + pending + '</div>';
+      if (!rows.length) {
+        html += '<div class="ms-empty muted">子工作台暂无教师转正/工龄提醒（或子台尚未登录云端同步上传数据）。</div>';
+      } else {
+        html += '<div class="table-card"><table class="teacher-table ms-table"><thead><tr>';
+        html += '<th style="width:88px">来源</th><th style="width:88px">教师</th><th>关键节点</th><th style="width:100px">触发</th><th style="width:100px">截止</th><th style="width:70px">状态</th><th style="width:92px">操作</th>';
+        html += '</tr></thead><tbody>';
+        rows.forEach(function (r) {
+          var m = r.m;
+          var overdue = m.status !== 'done' && App.util.isOverdue(m.dueDate);
+          html += '<tr' + (overdue ? ' class="overdue-row"' : '') + '>';
+          html += '<td><span class="ms-sub-owner">' + esc(r.subName) + '</span></td>';
+          html += '<td>' + esc(m.teacherName) + '</td>';
+          html += '<td><span class="ms-dot" style="background:' + (MS_COLORS[m.type] || '#888') + '"></span>' + esc(m.label) + (overdue ? ' <span class="ms-overdue">逾期</span>' : '') + '<div class="ms-sub muted">' + esc(m.title) + '</div></td>';
+          html += '<td class="mono">' + (m.triggerDate || '') + '</td>';
+          html += '<td class="mono">' + (m.dueDate || '') + '</td>';
+          html += '<td>' + (m.status === 'done' ? '<span class="tag status-done">已完成</span>' : '<span class="tag status-todo">待处理</span>') + '</td>';
+          html += '<td>' + (m.status === 'done' ? '<span class="muted">已同步</span>' : '<button class="btn btn-primary btn-xs" onclick="App.views.teacherMilestones.teamComplete(\'' + escA(r.subUserId) + '\', \'' + escA(m.id) + '\')">标记完成</button>') + '</td>';
+          html += '</tr>';
+        });
+        html += '</tbody></table></div>';
+      }
+      box.innerHTML = html;
+    }).catch(function (e) {
+      box.innerHTML = '<div class="ms-empty muted">加载失败：' + esc(e && e.message ? e.message : e) + '</div>';
+    });
+  }
+
+  function teamComplete(subUserId, milestoneId) {
+    if (!App.masterHub || !App.masterHub.markMemberMilestoneDone) return;
+    App.masterHub.markMemberMilestoneDone(subUserId, milestoneId).then(function () {
+      renderTeamPanel();
+    });
   }
 
   // 应用启动后自动生成（静态前端：在打开教师视图/应用启动时幂等执行）
@@ -322,6 +399,8 @@
     pendingCount: pendingCount,
     panelHtml: panelHtml,
     setFilter: setFilter,
+    switchMode: switchMode,
+    teamComplete: teamComplete,
     checkAndRender: checkAndRender,
     MS_DEFS: MS_DEFS
   };
