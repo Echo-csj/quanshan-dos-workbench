@@ -28,6 +28,9 @@
 
     html += '</div>';
 
+    // --- 项目组健康度 + 智能催办（本地智能，基于事项看板任务） ---
+    html += renderHealthCard();
+
     // --- 说明 ---
     html += '<div class="card"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('info', 18) + '关于项目组</h3></div>';
     html += '<p style="font-size:13px;color:var(--text-muted);line-height:1.8">每个项目组对应一套标准流程与检查清单。点击卡片进入详情查看标准文件、流程检查清单与注意事项。需要跟进的工作事项，请前往「<a href="javascript:App.router.navigate(\'/tasks\')" style="color:var(--accent);cursor:pointer">事项看板</a>」统一管理与流转。</p>';
@@ -110,6 +113,92 @@
       });
     });
   });
+
+  // --- 项目组健康度 + 智能催办（本地智能 · 数据不出本机） ---
+  function renderHealthCard() {
+    var U = App.util;
+    var tasks = (App.viewData().tasks || []).filter(function (t) { return !t.archived; });
+    var pgs = App.projectGroups || {};
+    var now = new Date();
+    var soon = new Date(now); soon.setDate(soon.getDate() + 3);
+    var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
+
+    var rows = [];
+    Object.keys(pgs).forEach(function (key) {
+      var pg = pgs[key];
+      var ts = tasks.filter(function (t) { return t.projGroup === pg.id; });
+      if (!ts.length) return;   // 无任务的项目组不显示，避免噪音
+      var done = ts.filter(function (t) { return t.status === 'done'; }).length;
+      var overdue = ts.filter(function (t) { return t.status !== 'done' && t.dueDate && U.isOverdue(t.dueDate); });
+      var dueSoon = ts.filter(function (t) { return t.status !== 'done' && t.dueDate && !U.isOverdue(t.dueDate) && t.dueDate <= soonStr; });
+      var health = overdue.length ? 'bad' : (dueSoon.length ? 'warn' : 'ok');
+      var rate = ts.length ? Math.round(done / ts.length * 100) : 0;
+      rows.push({ pg: pg, total: ts.length, done: done, rate: rate, overdue: overdue, dueSoon: dueSoon, health: health });
+    });
+
+    if (!rows.length) {
+      // 没有带项目组标签的任务时，也显示卡片并给出提示，让功能可感知
+      return '<div class="card" style="margin-bottom:28px">' +
+        '<div class="card-header"><h3 class="card-title">' + U.svgIcon('trending-up', 18) + '项目组健康度 · 智能催办</h3>' +
+        '<span class="ai-tag-local">本地智能 · 数据不出本机</span></div>' +
+        '<div class="ai-insight-notes ai-insight-ok">' + U.svgIcon('info', 14) + ' 暂无带「项目组」标签的任务。请到「事项看板」为任务勾选项目组（如新生/排课/预警/大考/讲义/新师培训），此处将自动生成各项目组的完成率、逾期/临期健康度与催办清单。</div>' +
+        '</div>';
+    }
+
+    // 按健康度排序：bad 在前
+    rows.sort(function (a, b) { return (a.health === 'bad' ? 0 : a.health === 'warn' ? 1 : 2) - (b.health === 'bad' ? 0 : b.health === 'warn' ? 1 : 2); });
+
+    var html = '<div class="card" style="margin-bottom:28px">';
+    html += '<div class="card-header"><h3 class="card-title">' + U.svgIcon('trending-up', 18) + '项目组健康度 · 智能催办</h3>';
+    html += '<span class="ai-tag-local">本地智能 · 数据不出本机</span></div>';
+    html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">基于「事项看板」中带项目组标签的任务实时统计：完成率、逾期、临期。逾期 → 红，临期 → 黄，正常 → 绿。</p>';
+
+    html += '<div class="pg-health-list">';
+    rows.forEach(function (r) {
+      var pg = r.pg;
+      var tone = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)' }[r.health];
+      html += '<div class="pg-health-item" style="border-left:3px solid ' + pg.color + '">';
+      html += '<div class="pg-health-head">';
+      html += '<span class="pg-health-dot" style="background:' + tone + '"></span>';
+      html += '<span class="pg-health-name">' + U.escapeHtml(pg.name) + '</span>';
+      html += '<span class="mono" style="font-size:12px;color:var(--text-muted)">完成 ' + r.done + '/' + r.total + '</span>';
+      html += '<span class="mono pg-health-rate" style="color:' + tone + '">' + r.rate + '%</span>';
+      html += '<span class="tag ' + (r.overdue.length ? 'tag-bad' : (r.dueSoon.length ? 'tag-warn' : 'tag-ok')) + '">' +
+        (r.overdue.length ? '逾期 ' + r.overdue.length : (r.dueSoon.length ? '临期 ' + r.dueSoon.length : '正常')) + '</span>';
+      html += '</div>';
+      var alerts = [];
+      r.overdue.forEach(function (t) { alerts.push('<span class="tag tag-bad">逾期</span> ' + U.escapeHtml(t.title) + (t.assignee ? ' <span class="pg-health-who">@' + U.escapeHtml(t.assignee) + '</span>' : '')); });
+      r.dueSoon.forEach(function (t) { alerts.push('<span class="tag tag-warn">临期</span> ' + U.escapeHtml(t.title) + (t.dueDate ? ' <span class="mono">' + U.escapeHtml(t.dueDate) + '</span>' : '')); });
+      if (alerts.length) {
+        html += '<div class="pg-health-alerts">' + alerts.map(function (s) { return '<div class="pg-health-alert">' + s + '</div>'; }).join('') + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+
+    // 汇总催办名单（按负责人聚合，仅逾期+临期）
+    var urgentByWho = {};
+    rows.forEach(function (r) {
+      r.overdue.concat(r.dueSoon).forEach(function (t) {
+        var who = (t.assignee || '未分配').trim();
+        (urgentByWho[who] = urgentByWho[who] || []).push(t);
+      });
+    });
+    var whoList = Object.keys(urgentByWho).filter(function (w) { return urgentByWho[w].length; });
+    if (whoList.length) {
+      html += '<div class="ai-insight-notes" style="margin-top:14px">';
+      html += '<div class="ai-insight-k" style="margin-bottom:6px">' + U.svgIcon('alert-circle', 14) + ' 催办建议（按负责人汇总）</div>';
+      html += '<ul>';
+      whoList.forEach(function (w) {
+        html += '<li><strong>' + U.escapeHtml(w) + '</strong>：' + urgentByWho[w].length + ' 项待跟进（' +
+          urgentByWho[w].map(function (t) { return U.escapeHtml(U.truncate(t.title, 12)); }).join('、') + '）</li>';
+      });
+      html += '</ul></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
 
   // --- Public API ---
 

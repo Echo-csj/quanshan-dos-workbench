@@ -275,7 +275,102 @@
     body += '</tbody></table>';
     body += '<p style="font-size:11px;color:var(--text-faint);margin-top:10px">环比 = 与上一月比较；同比 = 与同名月份上一年比较。绿色表示该指标朝「达标」方向变动，红色为偏离。当前数据均自动取自联动快照。</p>';
     body += '</div>';
+
+    // AI 洞察（本地智能：下月预测 + 异常检测）
+    body += renderAiInsight(metricId, series, meta);
+
     return body;
+  }
+
+  /* ---------------- 本地智能：趋势预测 + 异常检测（L0，数据不出本机） ---------------- */
+  function renderAiInsight(metricId, series, meta) {
+    var A = App.aiLocal;
+    if (!A) return '';
+    var label = meta ? meta.label : metricId;
+
+    // 只取有效数值点，并保留其月份，保证异常索引能正确映射回月份
+    var points = [];
+    series.forEach(function (d) {
+      if (d.value != null && !isNaN(d.value)) points.push({ month: d.month, value: d.value });
+    });
+
+    // 数据不足时也显示卡片（带提示），让功能可感知
+    if (points.length < 2) {
+      return '<div class="card ai-insight" style="margin-top:18px">' +
+        '<div class="card-header"><h3 class="card-title">' + App.util.svgIcon('zap', 18) + ' AI 洞察 · ' + App.util.escapeHtml(label) + '</h3>' +
+        '<span class="ai-tag-local">本地智能 · 数据不出本机</span></div>' +
+        '<div class="ai-insight-notes ai-insight-ok">' + App.util.svgIcon('info', 14) + ' 暂不足 2 个月数据（当前 ' + points.length + ' 个），累计更多月份后将自动生成下月预测与异常提醒。</div>' +
+        '</div>';
+    }
+
+    var values = points.map(function (p) { return p.value; });
+    var fc = A.linearForecast(values);
+    var direction = A.trendDirection(fc.slope, fc.next);
+    var momAnoms = A.momAnomalies(values);
+    var zAnoms = A.zscoreAnomalies(values);
+
+    // 下期标签（最新有效数据点的次月）
+    var lastMonth = points[points.length - 1] ? points[points.length - 1].month : null;
+    var nextLabel = nextMonthLabel(lastMonth);
+
+    var html = '<div class="card ai-insight" style="margin-top:18px">';
+    html += '<div class="card-header"><h3 class="card-title">' + App.util.svgIcon('zap', 18) + ' AI 洞察 · ' + App.util.escapeHtml(label) + '</h3>';
+    html += '<span class="ai-tag-local">本地智能 · 数据不出本机</span></div>';
+
+    // 预测 + 趋势方向
+    html += '<div class="ai-insight-row">';
+    html += '<div class="ai-insight-block"><div class="ai-insight-k">下期预测值</div>';
+    html += '<div class="mono ai-insight-v">' + (fc.next != null ? fmtMetric(metricId, fc.next) : '-') + '</div>';
+    html += '<div class="ai-insight-sub">' + (nextLabel ? nextLabel + ' 预估' : '基于历史线性趋势') + '</div></div>';
+    html += '<div class="ai-insight-block"><div class="ai-insight-k">趋势方向</div>';
+    var dirIcon = direction === '上升' ? 'trending-up' : (direction === '下降' ? 'trending-down' : 'minus');
+    var slopeStr = (fc.slope != null && isFinite(fc.slope))
+      ? ((fc.slope >= 0 ? '+' : '') + (meta && meta.unit === '%' ? (fc.slope * 100).toFixed(2) + 'pp' : fc.slope.toFixed(3)))
+      : '-';
+    html += '<div class="ai-insight-v">' + (dirIcon === 'minus' ? '<span style="font-size:20px">—</span>' : App.util.svgIcon(dirIcon, 24)) + ' ' + direction + '</div>';
+    html += '<div class="ai-insight-sub">近端每期约 ' + slopeStr + '</div></div>';
+    html += '<div class="ai-insight-block"><div class="ai-insight-k">数据点</div>';
+    html += '<div class="mono ai-insight-v">' + points.length + '</div>';
+    html += '<div class="ai-insight-sub">样本数（月）</div></div>';
+    html += '</div>';
+
+    // 异常与解读
+    var notes = [];
+    if (momAnoms.length) {
+      momAnoms.forEach(function (a) {
+        var mk = points[a.index] ? points[a.index].month : '';
+        var dir2 = a.change > 0 ? '▲ 上升' : '▼ 下降';
+        notes.push(mk + ' 环比' + dir2 + ' ' + (Math.abs(a.change) * 100).toFixed(0) + '%（' + fmtMetric(metricId, a.value) + '）');
+      });
+    }
+    if (zAnoms.length && momAnoms.length === 0) {
+      zAnoms.forEach(function (a) {
+        var mk = points[a.index] ? points[a.index].month : '';
+        notes.push(mk + ' 偏离整体均值较明显（' + fmtMetric(metricId, a.value) + '）');
+      });
+    }
+    if (fc.r2 != null && fc.r2 < 0.4 && points.length >= 3) {
+      notes.push('历史波动较大（拟合度偏低），预测仅供参考');
+    }
+
+    if (notes.length) {
+      html += '<div class="ai-insight-notes">';
+      html += '<div class="ai-insight-k" style="margin-bottom:6px">' + App.util.svgIcon('alert-circle', 14) + ' 需要关注</div>';
+      html += '<ul>' + notes.map(function (s) { return '<li>' + App.util.escapeHtml(s) + '</li>'; }).join('') + '</ul>';
+      html += '</div>';
+    } else {
+      html += '<div class="ai-insight-notes ai-insight-ok">' + App.util.svgIcon('check', 14) + ' 未发现显著环比异常，走势平稳。</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function nextMonthLabel(monthKey) {
+    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return null;
+    var y = parseInt(monthKey.slice(0, 4), 10), m = parseInt(monthKey.slice(5, 7), 10);
+    m += 1; if (m > 12) { m = 1; y += 1; }
+    return y + ' 年 ' + m + ' 月';
   }
 
   function deltaCell(d, goodDir) {

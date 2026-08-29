@@ -541,6 +541,12 @@
     var consistHtml;
     if (src == null) consistHtml = '<span class="lk-tag warn">数据源无该月周报</span> <span class="preview-note">「1v1 月生产课时」校验需上传该月 DOS 周报。</span>';
     else { var diff = res.H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(res.H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="lk-tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
+    // 本地智能：C 值合理性参考（对比参考月实际生产，纯统计，数据不出本机）
+    if (src != null && src > 0) {
+      var ratio = C / src;
+      var cTone = ratio >= 0.9 && ratio <= 1.1 ? '≈ 参考月水平' : (ratio > 1.1 ? '高于参考月 ' + Math.round((ratio - 1) * 100) + '%' : '低于参考月 ' + Math.round((1 - ratio) * 100) + '%');
+      consistHtml += '<div class="ai-insight-advice" style="margin-top:8px"><span class="ai-tag-local">本地智能参考</span> 参考月实际生产 <b>' + fmt(src) + '</b>，当前 C <b>' + fmt(Math.round(C)) + '</b>（' + cTone + '）。如需调整 C，请在数据分析台「科组生产预测」修改后重新推送。</div>';
+    }
     consEl.innerHTML = consistHtml;
 
     var today = new Date();

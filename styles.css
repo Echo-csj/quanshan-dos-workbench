@@ -1593,3 +1593,42 @@ body.auth-locked .sync-widget{display:none}
 .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;gap:3px}
 .seg button{border:none;background:transparent;color:var(--text-muted);padding:6px 13px;border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:500;transition:all .15s ease}
 .seg button.active{background:var(--bg);color:var(--text);box-shadow:var(--shadow-1);font-weight:600}
+
+/* ============================================
+   AI 洞察 / 本地智能（L0 · 数据不出本机）组件样式
+   ============================================ */
+
+/* 本地智能标签 */
+.ai-tag-local{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--accent-text);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:1px 8px;line-height:18px;white-space:nowrap}
+
+/* AI 洞察卡片（数据看板 · 趋势） */
+.ai-insight-row{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.ai-insight-block{flex:1;min-width:150px;padding:12px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm)}
+.ai-insight-k{font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px}
+.ai-insight-v{font-size:20px;font-weight:700;margin:4px 0 2px;display:flex;align-items:center;gap:6px}
+.ai-insight-sub{font-size:11px;color:var(--text-faint)}
+.ai-insight-notes{padding:10px 12px;background:var(--warn-soft);border-radius:var(--radius-sm);font-size:12px;color:var(--warn-text);line-height:1.7}
+.ai-insight-notes ul{margin:4px 0 0 16px}
+.ai-insight-notes li{margin:2px 0}
+.ai-insight-ok{background:var(--ok-soft);color:var(--ok-text)}
+
+/* 今日聚焦建议（今日指挥台） */
+.ai-focus{margin:12px 0;padding:12px 14px;background:var(--accent-soft);border:1px solid #C7D2FE;border-radius:var(--radius)}
+.ai-focus-head{font-size:12px;font-weight:700;color:var(--accent-text);display:flex;align-items:center;gap:6px;margin-bottom:8px}
+.ai-focus-list{display:flex;flex-direction:column;gap:6px}
+.ai-focus-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ai-focus-rank{width:18px;height:18px;flex-shrink:0;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.ai-focus-title{font-size:13px;font-weight:600;color:var(--text)}
+.ai-focus-why{font-size:11px;color:var(--accent-text)}
+
+/* 项目组健康度（项目组中心） */
+.pg-health-list{display:flex;flex-direction:column;gap:10px}
+.pg-health-item{padding:10px 12px;background:var(--surface-2);border-radius:var(--radius-sm)}
+.pg-health-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pg-health-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.pg-health-name{font-size:13px;font-weight:600;color:var(--text)}
+.pg-health-rate{font-size:12px;font-weight:700}
+.pg-health-who{color:var(--text-muted)}
+.pg-health-alerts{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.pg-health-alert{font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ai-insight-advice{padding:10px 12px;background:var(--accent-soft);border:1px solid #C7D2FE;border-radius:var(--radius-sm);font-size:12px;color:var(--accent-text);line-height:1.7}

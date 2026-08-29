@@ -356,6 +356,9 @@
     html += statChip('逾期', overdueCount, overdueCount ? 'var(--bad)' : 'var(--ok)');
     html += '</div>';
 
+    // AI 聚焦建议（本地智能：综合评分排序，Top 3）
+    html += aiFocusHtml(tasks, now);
+
     // 列表
     var items = [];
     if (todayFilter === 'core') {
@@ -380,6 +383,49 @@
     }
 
     html += '</div>';
+    return html;
+  }
+
+  /* ---------------- AI 聚焦建议（本地智能 · 综合评分排序） ---------------- */
+  function aiFocusHtml(tasks, now) {
+    var U = App.util;
+    var todayStr = U.formatDate(now, 'YYYY-MM-DD');
+    var soon = new Date(now); soon.setDate(soon.getDate() + 3);
+    var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
+
+    function score(t) {
+      var s = 0, why = [];
+      if (t.dueDate && U.isOverdue(t.dueDate)) { s += 5; why.push('已逾期'); }
+      else if (t.dueDate === todayStr) { s += 4; why.push('今日到期'); }
+      else if (t.dueDate && t.dueDate <= soonStr) { s += 2; why.push('临期'); }
+      if (t.priority === 'urgent') { s += 3; why.push('紧急'); }
+      else if (t.priority === 'high') { s += 1.5; why.push('高优'); }
+      if (t.status === 'doing' || t.status === 'review') { s += 1; why.push('进行中'); }
+      return { s: s, why: why };
+    }
+
+    var active = tasks.filter(function (t) { return t && !t.archived && t.status !== 'done'; });
+    var scored = active.map(function (t) {
+      var r = score(t);
+      return { t: t, s: r.s, why: r.why };
+    }).filter(function (x) { return x.s > 0; })
+      .sort(function (a, b) { return b.s - a.s; });
+
+    var top = scored.slice(0, 3);
+    if (!top.length) return '';
+
+    var html = '<div class="ai-focus">';
+    html += '<div class="ai-focus-head">' + U.svgIcon('zap', 14) + ' 今日聚焦建议 <span class="ai-tag-local">本地智能</span></div>';
+    html += '<div class="ai-focus-list">';
+    top.forEach(function (x, i) {
+      var t = x.t;
+      html += '<div class="ai-focus-item">';
+      html += '<span class="ai-focus-rank">' + (i + 1) + '</span>';
+      html += '<span class="ai-focus-title">' + U.escapeHtml(t.title || '未命名任务') + '</span>';
+      if (x.why.length) html += '<span class="ai-focus-why">' + x.why.join(' · ') + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
     return html;
   }
 
