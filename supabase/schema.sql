@@ -127,12 +127,6 @@ drop policy if exists "org_owner_all" on org;
 create policy "org_owner_all" on org
   for all using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
 
-drop policy if exists "org_member_read" on org;
-create policy "org_member_read" on org
-  for select using (
-    exists (select 1 from org_member m where m.org_id = org.id and m.user_id = auth.uid())
-  );
-
 -- 7.2 org_member：子工作台成员
 create table if not exists org_member (
   id         uuid primary key default gen_random_uuid(),
@@ -154,6 +148,13 @@ create policy "member_owner_all" on org_member
 drop policy if exists "member_self_read" on org_member;
 create policy "member_self_read" on org_member
   for select using (user_id = auth.uid());
+
+-- 注意：org 的「成员可读」策略引用 org_member，必须在 org_member 建好之后再建
+drop policy if exists "org_member_read" on org;
+create policy "org_member_read" on org
+  for select using (
+    exists (select 1 from org_member m where m.org_id = org.id and m.user_id = auth.uid())
+  );
 
 -- 7.3 profile：账号档案（邮箱 ↔ user_id 解析、显示名）
 create table if not exists profile (
