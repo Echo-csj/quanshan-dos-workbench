@@ -121,13 +121,25 @@
   }
 
   async function createOrg(name) {
-    var c = client(); if (!c || !uid()) { App.util.toast('请先登录云端同步', 'warn'); return null; }
-    var r = await c.from('org').insert({ name: name || '我的团队', owner_user_id: uid() }).select().maybeSingle();
-    if (r.error) { App.util.toast('创建组织失败：' + (r.error.message || ''), 'warn'); return null; }
-    _orgIdCache = r.data.id;
-    await log('org_created', { orgId: r.data.id, detail: { name: name } });
+    var c = client(); if (!c || !uid()) { App.util.toast('请先登录云端同步', 'warn'); return { ok: false, error: 'not-signed-in' }; }
+    name = (name || '我的团队').trim();
+    // 已有组织则直接返回，避免重复创建
+    var existing = await getMyOrg();
+    if (existing) { App.util.toast('已有组织「' + existing.name + '」', 'ok'); return { ok: true, data: existing }; }
+    var r = await c.from('org').insert({ name: name, owner_user_id: uid() }).select().maybeSingle();
+    if (r.error) {
+      console.error('[masterHub] createOrg 失败:', r.error);
+      var msg = r.error.message || (r.error.details ? r.error.details : JSON.stringify(r.error));
+      App.util.toast('创建组织失败：' + msg, 'warn');
+      return { ok: false, error: msg };
+    }
+    var org = r.data;
+    if (!org) org = await getMyOrg();   // select 被挡回时兜底重查
+    if (!org) { App.util.toast('组织已创建但读取失败，请刷新页面', 'warn'); return { ok: false, error: 'read-back-failed' }; }
+    _orgIdCache = org.id;
+    await log('org_created', { orgId: org.id, detail: { name: name } });
     App.util.toast('组织已创建', 'ok');
-    return r.data;
+    return { ok: true, data: org };
   }
 
   /* ---------------- 子工作台成员 ---------------- */

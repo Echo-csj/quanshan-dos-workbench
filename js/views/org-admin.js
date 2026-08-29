@@ -221,12 +221,21 @@
     App.util.modal({
       title: '创建组织（总工作台）',
       content: '<div class="form-group"><label class="form-label">组织名称</label>' +
-        '<input class="form-input" id="oa-org-name" placeholder="如：状元港教学团队"></div>',
+        '<input class="form-input" id="oa-org-name" placeholder="如：状元港教学团队"></div>' +
+        '<div id="oa-org-err" class="oa-err" style="display:none"></div>',
       confirmText: '创建',
       onConfirm: function (close) {
         var v = document.getElementById('oa-org-name').value.trim();
         if (!v) { App.util.toast('请填写组织名称', 'warn'); return; }
-        App.masterHub.createOrg(v).then(function () { close(); loadAll().then(render); });
+        var errEl = document.getElementById('oa-org-err');
+        if (errEl) errEl.style.display = 'none';
+        App.masterHub.createOrg(v).then(function (r) {
+          if (r && r.ok) { close(); loadAll().then(render); }
+          else if (errEl) {
+            errEl.textContent = '创建失败：' + (r && r.error ? r.error : '未知错误');
+            errEl.style.display = '';
+          }
+        });
       }
     });
   }
