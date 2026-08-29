@@ -93,6 +93,9 @@
     html += '</div>';
     html += '</div></div>';
 
+    // --- AI 智能（DeepSeek） ---
+    html += renderAICard();
+
     // --- 示例数据 ---
     html += '<div class="card"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('star', 18) + '示例数据</h3></div>';
     html += '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">首次使用？注入示例数据快速体验全部功能。</p>';
@@ -101,6 +104,38 @@
 
     container.innerHTML = html;
   });
+
+  // --- AI 智能设置卡 ---
+  function renderAICard() {
+    var A = App.ai;
+    if (!A) return '';
+    var s = A.getSettings();
+    var keyHint = s.apiKey ? A.maskApiKey(s.apiKey) : '未配置';
+    var html = '<div class="card" style="margin-bottom:20px">';
+    html += '<div class="card-header"><h3 class="card-title">' + App.util.svgIcon('zap', 18) + 'AI 智能（DeepSeek）</h3>';
+    html += '<span class="ai-tag-local">可选 · 数据可脱敏</span></div>';
+    html += '<p style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-bottom:14px">接入 DeepSeek 大模型，解锁「智能周报」「数据红绿灯解读」「粘贴任务语义解析」。<b>Key 仅存本机浏览器</b>（不进 Git 仓库）；开启脱敏后，发送前会把教师姓名替换为代号。</p>';
+
+    html += '<div class="form-group"><label class="form-label">DeepSeek API Key（' + keyHint + '）</label>';
+    html += '<input type="password" id="ai-key" class="form-input" placeholder="sk-..." value="' + App.util.escapeAttr(s.apiKey) + '" autocomplete="off"></div>';
+
+    html += '<div class="form-group"><label class="form-label">模型名</label>';
+    html += '<input type="text" id="ai-model" class="form-input" value="' + App.util.escapeAttr(s.model) + '" placeholder="deepseek-chat">';
+    html += '<p class="form-hint">默认 deepseek-chat（V3 通用）；推理用 deepseek-reasoner。若官方模型名变更，直接改这里即可。</p></div>';
+
+    html += '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">';
+    html += '<label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px"><input type="checkbox" id="ai-mask" style="width:16px;height:16px"' + (s.mask ? ' checked' : '') + '> 发送前脱敏教师姓名（替换为代号）</label>';
+    html += '<label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px"><input type="checkbox" id="ai-enabled" style="width:16px;height:16px"' + (s.enabled ? ' checked' : '') + '> 启用 AI 功能</label>';
+    html += '</div>';
+
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.settings.saveAI()">' + App.util.svgIcon('check', 14) + '保存设置</button>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="App.views.settings.testAI()">' + App.util.svgIcon('refresh-cw', 14) + '测试连接</button>';
+    html += '</div>';
+    html += '<div id="ai-status" style="margin-top:10px;font-size:12px"></div>';
+    html += '</div>';
+    return html;
+  }
 
   // --- Public API ---
 
@@ -201,6 +236,30 @@
       var added = App.store.mergeResearchTimeline();
       App.util.toast(added > 0 ? ('已同步 ' + added + ' 个教研时间轴节点') : '教研时间轴节点已是最新', 'ok');
       App.router.resolve();
+    },
+
+    saveAI: function() {
+      if (!App.ai) return;
+      var s = App.ai.getSettings();
+      s.apiKey = (document.getElementById('ai-key') || {}).value.trim();
+      s.model = ((document.getElementById('ai-model') || {}).value || 'deepseek-chat').trim();
+      s.mask = document.getElementById('ai-mask') ? document.getElementById('ai-mask').checked : true;
+      s.enabled = document.getElementById('ai-enabled') ? document.getElementById('ai-enabled').checked : true;
+      App.ai.saveSettings(s);
+      App.util.toast('AI 设置已保存', 'ok');
+    },
+
+    testAI: function() {
+      if (!App.ai) return;
+      App.views.settings.saveAI();
+      var statusEl = document.getElementById('ai-status');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted)">正在测试连接…</span>';
+      App.ai.chat('你是助手，只按指令回复。', '请只回复两个字：正常').then(function(r) {
+        if (!statusEl) return;
+        statusEl.innerHTML = r.ok
+          ? '<span style="color:var(--ok)">✓ 连接成功：' + App.util.escapeHtml(r.text) + '</span>'
+          : '<span style="color:var(--bad)">✗ ' + App.util.escapeHtml(r.error || '失败') + '</span>';
+      });
     }
   };
 

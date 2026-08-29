@@ -7,6 +7,8 @@
 
 (function() {
 
+  var _baselineAiItems = [];   // AI 解读暂存（当前对标月份的指标清单）
+
   /* ---------------- 工具 ---------------- */
   function fmtMetric(id, v) {
     var m = App.importer.metric(id);
@@ -119,6 +121,20 @@
       items.push({ id: id, meta: meta, value: metrics[id] });
     });
 
+    // 暂存 AI 解读用的指标清单（label/value/baseline/status）
+    _baselineAiItems = items.map(function(it) {
+      var lvl = judgeLevel(it.value, it.meta.baseline);
+      var baseVal = Array.isArray(it.meta.baseline.value)
+        ? (it.meta.baseline.value[0] * 100).toFixed(0) + '~' + (it.meta.baseline.value[1] * 100).toFixed(0) + '%'
+        : (it.meta.baseline.unit === '%' ? (it.meta.baseline.value * 100).toFixed(1) + '%' : it.meta.baseline.value);
+      return {
+        label: it.meta.label,
+        value: fmtMetric(it.id, it.value),
+        baseline: baseVal,
+        status: (lvl === 'ok' ? '达标' : lvl === 'warn' ? '临界' : lvl === 'bad' ? '异常' : '无基准')
+      };
+    });
+
     // 汇总
     body += '<div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">';
     body += sumChip('达标', items.filter(function(i){ return judgeLevel(i.value, i.meta.baseline)==='ok'; }).length, 'ok');
@@ -145,6 +161,11 @@
       });
       body += '</div>';
     }
+
+    // AI 解读（DeepSeek 红绿灯归因）
+    body += '<div class="card ai-insight" style="margin-top:20px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('zap', 18) + 'AI 解读</h3>';
+    body += '<button class="btn btn-primary btn-sm" onclick="App.views.data.aiExplainBaseline()">' + App.util.svgIcon('zap', 14) + ' 生成解读</button></div>';
+    body += '<div id="baseline-ai-result" style="font-size:13px;color:var(--text-muted);line-height:1.8">' + (_baselineAiItems.length ? '点击「生成解读」，让 AI 对以上红绿灯做归因与整改建议（需先在「设置 → AI」配置 Key）。' : '暂无对标指标，导入数据后可用 AI 解读。') + '</div></div>';
 
     // 五项满意度明细（若快照附带）
     if (snap.satisfaction && snap.satisfaction.totals) {
@@ -572,9 +593,33 @@
     }
   }
 
+  // AI 解读：红绿灯归因 + 整改建议
+  function aiExplainBaseline() {
+    var U = App.util;
+    if (!App.ai || !App.ai.isReady()) {
+      U.toast('请先在「设置 → AI」配置 DeepSeek API Key 并启用', 'warn');
+      return;
+    }
+    if (!_baselineAiItems.length) {
+      U.toast('暂无对标指标，无法解读', 'warn');
+      return;
+    }
+    var box = document.getElementById('baseline-ai-result');
+    if (box) box.innerHTML = '<span style="color:var(--text-muted)">AI 解读中，请稍候…</span>';
+    App.ai.explainBaseline(_baselineAiItems).then(function(r) {
+      if (!box) return;
+      if (r.ok) {
+        box.innerHTML = U.escapeHtml(r.text).replace(/\n/g, '<br>');
+      } else {
+        box.innerHTML = '<span style="color:var(--bad)">✗ ' + U.escapeHtml(r.error || '解读失败') + '</span>';
+      }
+    });
+  }
+
   App.views = App.views || {};
   App.views.data = {
-    calcPeriodSummary: calcPeriodSummary
+    calcPeriodSummary: calcPeriodSummary,
+    aiExplainBaseline: aiExplainBaseline
   };
 
   // 联动快照回填后，若当前正停留在数据看板的某个标签，自动刷新以显示最新数据

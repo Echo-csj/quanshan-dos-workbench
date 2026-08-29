@@ -1009,6 +1009,10 @@
     html += '</div>';
 
     html += '<textarea id="paste-input" class="form-input" rows="6" style="font-family:var(--font-mono);font-size:12px" placeholder="示例：\n@张老师 完成次月预排课表 8月20日\n下周三前 提交教务周报 — 李教务\n（王主管）核对新生名单 截止8/25 紧急"></textarea>';
+    html += '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">';
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.tasks.aiParsePaste()">' + App.util.svgIcon('zap', 14) + ' AI 语义解析</button>';
+    html += '<span id="paste-ai-status" style="font-size:12px;color:var(--text-muted)">规则解析不准时，可一键用 AI 语义兜底解析</span>';
+    html += '</div>';
     html += '<div id="paste-preview" style="margin-top:14px"></div>';
 
     App.util.modal({
@@ -2110,6 +2114,48 @@
       return '<option value="' + c.status + '"' + (c.status === sel ? ' selected' : '') + '>' + c.label + '</option>';
     }).join('');
   }
+  // AI 语义解析：规则引擎兜底（调 DeepSeek 结构化解析）
+  function aiParsePaste() {
+    var U = App.util;
+    if (!App.ai || !App.ai.isReady()) {
+      U.toast('请先在「设置 → AI」配置 DeepSeek API Key 并启用', 'warn');
+      return;
+    }
+    var ta = document.getElementById('paste-input');
+    if (!ta || !ta.value.trim()) { U.toast('请先粘贴群消息内容', 'warn'); return; }
+    var statusEl = document.getElementById('paste-ai-status');
+    if (statusEl) statusEl.innerHTML = 'AI 解析中，请稍候…';
+    App.ai.parseTasks(ta.value.trim()).then(function(r) {
+      if (!r.ok) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--bad)">✗ ' + U.escapeHtml(r.error || '解析失败') + '</span>';
+        return;
+      }
+      var items = (r.items || []).map(function(t) {
+        var p = ['urgent', 'high', 'normal', 'low'].indexOf(t.priority) >= 0 ? t.priority : 'normal';
+        return {
+          title: (t.title || '').trim(),
+          assignee: (t.assignee || '').trim(),
+          dueDate: (t.dueDate || '').trim(),
+          time: '',
+          priority: p,
+          note: (t.note || '').trim(),
+          _raw: (t.title || '').trim(),
+          _errors: []
+        };
+      }).filter(function(it) { return it.title; });
+
+      if (!items.length) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--bad)">✗ AI 未识别到任何任务</span>';
+        return;
+      }
+      _pasteItems = items;
+      _pasteSkipped = [];
+      _pasteResult = { items: items, skipped: [], errors: [], linesCount: items.length };
+      renderPastePreview();
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--ok)">✓ AI 识别 ' + items.length + ' 条，可编辑后「一键生成待办」</span>';
+    });
+  }
+
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.tasks = {
@@ -2129,6 +2175,7 @@
     openPasteModal: openPasteModal,
     onPasteRuleChange: onPasteRuleChange,
     onPasteInput: onPasteInput,
+    aiParsePaste: aiParsePaste,
     removePasteRow: removePasteRow,
     toggleAllPaste: toggleAllPaste,
     // —— 规则管理 + 编辑器 ——

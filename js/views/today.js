@@ -108,6 +108,8 @@
   });
 
   /* ---------------- 周报草稿 ---------------- */
+  var _weeklyAgg = null;   // 供 AI 智能生成按钮复用的聚合数据
+
   function generateWeeklyReport() {
     var U = App.util;
     var now = new Date();
@@ -126,7 +128,9 @@
       var u = t.updatedAt ? new Date(t.updatedAt).getTime() : 0;
       return u >= ws && u < we;
     });
-    var doingCount = tasks.filter(function(t) { return t.status === 'doing' || t.status === 'review'; }).length;
+    var doing = tasks.filter(function(t) { return !t.archived && (t.status === 'doing' || t.status === 'review'); });
+    var overdue = tasks.filter(function(t) { return !t.archived && t.status !== 'done' && t.dueDate && U.isOverdue(t.dueDate); });
+    var doingCount = doing.length;
 
     // 最新月报
     var monthly = (data.reports && data.reports.monthly) || {};
@@ -160,22 +164,28 @@
     else lines.push('  （无记录，可在事项看板补充）');
     lines.push('');
     lines.push('二、进行中 / 待跟进（' + doingCount + '项）');
-    lines.push('  详见「事项看板」，重点关注逾期与本周截止任务。');
+    if (doing.length) doing.forEach(function(t) { lines.push('  · ' + (t.title || '未命名任务') + (t.dueDate ? ('（' + t.dueDate + '截止）') : '')); });
+    else lines.push('  暂无进行中事项');
+    if (overdue.length) lines.push('  ⚠ 逾期 ' + overdue.length + ' 项，请优先处理。');
     lines.push('');
     lines.push('三、关键节律');
+    var keyNodes = [];
     getWeekNodes((data.timeline && data.timeline.fixedNodes) || [], now).forEach(function(item) {
       var d = new Date(now); d.setDate(d.getDate() + (item.weekday - now.getDay()));
-      lines.push('  · ' + U.formatDate(d, 'MM-DD') + ' ' + U.getWeekdayName(d) + '：' + item.node.title);
+      var s = U.formatDate(d, 'MM-DD') + ' ' + U.getWeekdayName(d) + '：' + item.node.title;
+      lines.push('  · ' + s);
+      keyNodes.push(s);
     });
     lines.push('');
     lines.push('四、教学数据（最新月报 ' + (latestKey || '无') + '）');
+    var metrics = [];
     if (latest && latest.dos && latest.dos.metrics) {
       var m = latest.dos.metrics;
-      pushMetric(lines, m.productionRateMonth, '生产完成率', base.production);
-      pushMetric(lines, m.saturationMonth, '饱和度', base.saturation);
-      pushMetric(lines, m.renewalRateSubjectMonth, '续费单科率', base.renewal);
-      pushMetric(lines, m.refundRateSubjectMonth, '退费单科率', base.refund);
-      pushMetric(lines, m.suspendRatePersonMonth, '停课人次率', base.suspend);
+      pushMetric(lines, m.productionRateMonth, '生产完成率', base.production, metrics);
+      pushMetric(lines, m.saturationMonth, '饱和度', base.saturation, metrics);
+      pushMetric(lines, m.renewalRateSubjectMonth, '续费单科率', base.renewal, metrics);
+      pushMetric(lines, m.refundRateSubjectMonth, '退费单科率', base.refund, metrics);
+      pushMetric(lines, m.suspendRatePersonMonth, '停课人次率', base.suspend, metrics);
     } else {
       lines.push('  （暂无月报数据，请在「数据看板」录入）');
     }
@@ -186,7 +196,24 @@
     lines.push('—— 自动生成于 ' + U.formatDate(now, 'YYYY-MM-DD HH:mm') + '，可在周报模板中补充微调。');
 
     var text = lines.join('\n');
-    var bodyHtml = '<div style="font-size:12px;color:var(--text-faint);margin-bottom:10px">已按本周完成事项、关键节律、最新月报与人事数据自动汇总，复制后可在周报模板中微调。</div>';
+
+    // 聚合数据（供 AI 智能生成复用）
+    _weeklyAgg = {
+      weekLabel: U.formatDate(now, 'YYYY') + '年第' + U.getWeekNumber(now) + '周',
+      dateRange: U.formatDate(weekStart, 'MM.DD') + ' - ' + U.formatDate(weekEnd, 'MM.DD'),
+      done: doneThisWeek.map(function(t) { return { title: t.title || '', assignee: t.assignee || '' }; }),
+      doing: doing.map(function(t) { return { title: t.title || '', assignee: t.assignee || '', dueDate: t.dueDate || '' }; }),
+      overdue: overdue.map(function(t) { return { title: t.title || '', assignee: t.assignee || '', dueDate: t.dueDate || '' }; }),
+      keyNodes: keyNodes,
+      metrics: metrics,
+      hr: { month: curMonth, hire: hire, leave: leave }
+    };
+
+    var bodyHtml = '<div style="font-size:12px;color:var(--text-faint);margin-bottom:10px">已按本周完成事项、关键节律、最新月报与人事数据自动汇总。可点「✨ AI 智能生成」让 DeepSeek 写成完整周报（需先在「设置 → AI」配置 Key）。</div>';
+    bodyHtml += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">';
+    bodyHtml += '<button class="btn btn-primary btn-sm" onclick="App.views.today.aiGenerateWeeklyReport()">' + U.svgIcon('zap', 14) + ' AI 智能生成</button>';
+    bodyHtml += '<span id="weekly-ai-status" style="font-size:12px;color:var(--text-muted)"></span>';
+    bodyHtml += '</div>';
     bodyHtml += '<textarea id="weekly-report-text" class="form-input" style="width:100%;height:320px;font-family:var(--font-mono);font-size:12px;line-height:1.6" readonly>' + U.escapeHtml(text) + '</textarea>';
 
     U.modal({
@@ -195,17 +222,39 @@
       showCancel: false,
       confirmText: '复制全文',
       onConfirm: function(close) {
-        copyText(text);
+        var ta = document.getElementById('weekly-report-text');
+        copyText(ta ? ta.value : text);
         U.toast('已复制到剪贴板', 'ok');
         close();
       }
     });
   }
 
-  function pushMetric(lines, val, label, base) {
+  // AI 智能生成周报（调 DeepSeek，失败保留本地草稿）
+  function aiGenerateWeeklyReport() {
+    var U = App.util;
+    if (!App.ai || !App.ai.isReady()) {
+      U.toast('请先在「设置 → AI」配置 DeepSeek API Key 并启用', 'warn');
+      return;
+    }
+    var statusEl = document.getElementById('weekly-ai-status');
+    var ta = document.getElementById('weekly-report-text');
+    if (statusEl) statusEl.innerHTML = 'AI 生成中，请稍候…';
+    App.ai.generateWeeklyReport(_weeklyAgg).then(function(r) {
+      if (r.ok) {
+        if (ta) ta.value = r.text;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--ok)">✓ AI 已生成，可微调后复制</span>';
+      } else {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--bad)">✗ ' + U.escapeHtml(r.error || '生成失败') + '</span>';
+      }
+    });
+  }
+
+  function pushMetric(lines, val, label, base, metricsArr) {
     if (val == null) return;
     var baseStr = Array.isArray(base) ? ((base[0] * 100) + '%~' + (base[1] * 100) + '%') : ((base * 100) + '%');
     lines.push('  · ' + label + '：' + (val * 100).toFixed(1) + '%（基准 ' + baseStr + '）');
+    if (metricsArr) metricsArr.push({ label: label, value: (val * 100).toFixed(1) + '%', baseline: baseStr });
   }
 
   function copyText(text) {
@@ -576,6 +625,7 @@
   App.views = App.views || {};
   App.views.today = {
     generateWeeklyReport: generateWeeklyReport,
+    aiGenerateWeeklyReport: aiGenerateWeeklyReport,
     classifyTask: classifyTask,
     almanac: almanac,
     setTodayFilter: setTodayFilter,
