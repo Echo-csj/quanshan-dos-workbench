@@ -25,6 +25,12 @@ window.App = window.App || {};
   function resolve() {
     var hash = window.location.hash.replace('#', '') || '/today';
 
+    // 权限守卫：子台无权访问的模块，重定向到「今日指挥台」
+    if (App.perm && App.perm.canView && !App.perm.canView(hash)) {
+      navigate('/today');
+      return;
+    }
+
     // 精确匹配
     if (routes[hash]) {
       currentRoute = hash;

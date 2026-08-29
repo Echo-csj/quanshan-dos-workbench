@@ -390,6 +390,13 @@
     var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : (t.source === 'teacher-milestone' ? '🎯 里程碑' : '手动'));
     var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
     html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.escapeHtml(t.title || '未命名任务');
+    if (t.permTags && t.permTags.length) {
+      t.permTags.forEach(function (g) {
+        var lbl = (App.perm && App.perm.TASK_TAG_LABELS && App.perm.TASK_TAG_LABELS[g]) || g;
+        if (g === 'project' && t.projGroup) lbl = lbl + '·' + (projectGroupName(t.projGroup) || t.projGroup);
+        html += '<span class="perm-chip-mini">' + App.util.escapeHtml(lbl) + '</span>';
+      });
+    }
     if (t.scope === 'team') html += '<span class="scope-tag">团队</span>';
     else if (!t.scope) html += '<span class="scope-tag scope-tag-unassigned">未分配</span>';
     if (t.note) html += '<div class="list-note">' + App.util.escapeHtml(t.note) + '</div>';
@@ -514,6 +521,13 @@
     html += '<div class="kanban-card-title">' + App.util.escapeHtml(t.title || '未命名任务') + '</div>';
     html += '<div class="kanban-card-meta">';
     html += '<span class="tag priority-' + prio + '">' + App.util.priorityLabel(prio) + '</span>';
+    if (t.permTags && t.permTags.length) {
+      t.permTags.forEach(function (g) {
+        var lbl = (App.perm && App.perm.TASK_TAG_LABELS && App.perm.TASK_TAG_LABELS[g]) || g;
+        if (g === 'project' && t.projGroup) lbl = lbl + '·' + (projectGroupName(t.projGroup) || t.projGroup);
+        html += '<span class="tag perm-tag">' + App.util.escapeHtml(lbl) + '</span>';
+      });
+    }
     if (t.scope === 'team') html += '<span class="tag scope-team">团队</span>';
     else if (!t.scope) html += '<span class="tag scope-unassigned">未分配</span>';
     if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
@@ -579,6 +593,74 @@
     }
   }
 
+  /* ---------------- 权限标签 ---------------- */
+  function permTagOptions() {
+    return (App.perm && App.perm.TASK_TAGS) || [
+      { v: 'subject_lead', label: '学科组长' },
+      { v: 'principal_intern', label: '教学校长实习生' },
+      { v: 'project_lead', label: '项目组负责人' },
+      { v: 'team', label: '团队' },
+      { v: 'personal', label: '个人' },
+      { v: 'project', label: '项目组' }
+    ];
+  }
+
+  function projectGroupOptions(sel) {
+    var pgs = App.projectGroups || {};
+    var html = '<option value="">— 选择项目组 —</option>';
+    Object.keys(pgs).forEach(function (k) {
+      var g = pgs[k];
+      html += '<option value="' + App.util.escapeAttr(g.id) + '"' + (g.id === sel ? ' selected' : '') + '>' + App.util.escapeHtml(g.name) + '</option>';
+    });
+    return html;
+  }
+
+  function projectGroupName(id) {
+    var pgs = App.projectGroups || {};
+    var g = pgs[id];
+    return g ? g.name : null;
+  }
+
+  // 权限标签选择器（仅总台 DOS 使用；子台自建任务恒为个人/本台，不显示）
+  function permTagsEditor(data) {
+    var selected = Array.isArray(data.permTags) ? data.permTags : [];
+    var projOn = selected.indexOf('project') >= 0;
+    var html = '<div class="form-group"><label class="form-label">权限标签（决定同步到哪些子工作台）</label>' +
+      '<div class="perm-tags" id="perm-tags">';
+    permTagOptions().forEach(function (t) {
+      html += '<label class="perm-chip"><input type="checkbox" value="' + t.v + '"' +
+        (selected.indexOf(t.v) >= 0 ? ' checked' : '') + ' onchange="App.views.tasks.permTagToggle()">' + App.util.escapeHtml(t.label) + '</label>';
+    });
+    html += '</div>' +
+      '<div class="oa-hint" style="margin-top:6px">团队=全员可见 · 个人=仅DOS可见 · 角色标签=同步到对应角色子台 · 项目组=同步到带同标签子台。不选则沿用旧规则。</div>' +
+      '</div>';
+    html += '<div class="form-group" id="perm-proj-wrap" style="' + (projOn ? '' : 'display:none') + '">' +
+      '<label class="form-label">选择具体项目组</label>' +
+      '<select class="form-input" id="perm-proj-group">' + projectGroupOptions(data.projGroup) + '</select></div>';
+    return html;
+  }
+
+  function permTagToggle() {
+    var wrap = document.getElementById('perm-proj-wrap');
+    if (!wrap) return;
+    var tags = document.getElementById('perm-tags');
+    var on = false;
+    if (tags) {
+      Array.prototype.forEach.call(tags.querySelectorAll('input[type=checkbox]'), function (cb) {
+        if (cb.checked && cb.value === 'project') on = true;
+      });
+    }
+    wrap.style.display = on ? '' : 'none';
+  }
+
+  function readPermTags() {
+    var box = document.getElementById('perm-tags');
+    if (!box) return [];
+    var out = [];
+    Array.prototype.forEach.call(box.querySelectorAll('input[type=checkbox]:checked'), function (cb) { out.push(cb.value); });
+    return out;
+  }
+
   /* ---------------- 新建 / 编辑 ---------------- */
   function openTaskModal(id) {
     var isEdit = !!id;
@@ -595,6 +677,7 @@
     html += '<div class="form-group"><label class="form-label">负责人</label><input class="form-input" id="task-assignee" value="' + App.util.escapeAttr(data.assignee) + '" placeholder="DOS＝个人任务；填成员名＝团队任务"></div>';
     html += '<div class="form-group"><label class="form-label">截止日期</label><input class="form-input" id="task-due" type="date" value="' + App.util.escapeAttr(data.dueDate) + '"></div>';
     html += '</div>';
+    if (!isSubView()) html += permTagsEditor(data);
     html += '<div class="form-group"><label class="form-label">备注</label><textarea class="form-input" id="task-note" placeholder="补充说明（可选）">' + App.util.escapeHtml(data.note || '') + '</textarea></div>';
     html += '</div>';
 
@@ -618,16 +701,23 @@
     var note = document.getElementById('task-note').value.trim();
 
     var tasks = localTasks();
+    var isSub = isSubView();
+    var permTags = isSub ? [] : readPermTags();
+    var projGroup = '';
+    if (!isSub) {
+      var pgEl = document.getElementById('perm-proj-group');
+      if (pgEl) projGroup = pgEl.value;
+      if (permTags.indexOf('project') === -1) projGroup = '';
+    }
     if (id) {
       var t = tasks.filter(function(x) { return x.id === id; })[0];
       if (t && !isEditable(t)) { App.util.toast('总台任务不可编辑', 'warn'); return; }
       if (t) {
-        var scope = isSubView() ? 'personal' : App.util.deriveScope(assignee);
-        Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, updatedAt: new Date().toISOString() });
+        var scope = isSub ? 'personal' : App.util.deriveScope(assignee);
+        Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, permTags: permTags, projGroup: projGroup, updatedAt: new Date().toISOString() });
         maybeSyncDone(t, status);
       }
     } else {
-      var isSub = isSubView();
       var myName = isSub ? (App.subContext.myName() || '') : '';
       tasks.push({
         id: App.store.uid('task'),
@@ -635,6 +725,7 @@
         assignee: isSub ? (myName || assignee) : assignee,
         dueDate: dueDate, note: note,
         scope: isSub ? 'personal' : App.util.deriveScope(assignee),
+        permTags: permTags, projGroup: projGroup,
         source: isSub ? 'sub' : 'manual',
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
       });
@@ -2033,6 +2124,7 @@
     deleteTask: deleteTask,
     saveTask: saveTask,
     sendTask: sendTask,
+    permTagToggle: permTagToggle,
     generateFromTimeline: generateFromTimeline,
     openPasteModal: openPasteModal,
     onPasteRuleChange: onPasteRuleChange,

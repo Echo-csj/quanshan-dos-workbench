@@ -162,7 +162,7 @@
     return r.data || [];
   }
 
-  async function addSub(email, name) {
+  async function addSub(email, name, role) {
     var orgId = await getMyOrgId();
     var c = client();
     if (!c || !orgId) { App.util.toast('请先创建组织', 'warn'); return null; }
@@ -176,13 +176,36 @@
       App.util.toast('没找到该邮箱对应的账号，请先在 Supabase 建好账号', 'warn');
       return null;
     }
+    role = role || 'subject_lead';   // 默认归属「学科组长」
     var r = await c.from('org_member')
-      .upsert({ org_id: orgId, user_id: targetId, name: name || email.split('@')[0], status: 'active' },
+      .upsert({ org_id: orgId, user_id: targetId, name: name || email.split('@')[0], role: role, status: 'active' },
               { onConflict: 'org_id,user_id' })
       .select().maybeSingle();
     if (r.error) { App.util.toast('纳管失败：' + (r.error.message || ''), 'warn'); return null; }
-    await log('member_added', { orgId: orgId, targetUserId: targetId, detail: { email: email, name: name } });
+    await log('member_added', { orgId: orgId, targetUserId: targetId, detail: { email: email, name: name, role: role } });
     App.util.toast('已纳管子工作台', 'ok');
+    return r.data;
+  }
+
+  // 设置子工作台权限角色（学科组长 / 教学校长实习生 / 项目组负责人）
+  async function setSubRole(memberId, role) {
+    var c = client(); if (!c) return null;
+    role = role || 'subject_lead';
+    var r = await c.from('org_member').update({ role: role }).eq('id', memberId).select().maybeSingle();
+    if (r.error) { App.util.toast('设置角色失败：' + (r.error.message || ''), 'warn'); return null; }
+    await log('member_role_set', { targetUserId: r.data && r.data.user_id, detail: { role: role } });
+    App.util.toast('已更新权限角色', 'ok');
+    return r.data;
+  }
+
+  // 设置子工作台项目组标签（用于「项目组」权限标签的任务同步）
+  async function setSubProjectTags(memberId, tags) {
+    var c = client(); if (!c) return null;
+    tags = Array.isArray(tags) ? tags : [];
+    var r = await c.from('org_member').update({ project_tags: tags }).eq('id', memberId).select().maybeSingle();
+    if (r.error) { App.util.toast('设置项目组标签失败：' + (r.error.message || ''), 'warn'); return null; }
+    await log('member_tags_set', { targetUserId: r.data && r.data.user_id, detail: { project_tags: tags } });
+    App.util.toast('已更新项目组标签', 'ok');
     return r.data;
   }
 
@@ -412,6 +435,8 @@
     createOrg: createOrg,
     listSubs: listSubs,
     addSub: addSub,
+    setSubRole: setSubRole,
+    setSubProjectTags: setSubProjectTags,
     suspendSub: suspendSub,
     removeSub: removeSub,
     listGrants: listGrants,

@@ -88,6 +88,7 @@
     return '<div class="oa-sub-item' + active + '" onclick="App.views.orgAdmin.select(\'' + s.user_id + '\')">' +
       '<div class="oa-sub-name">' + esc(s.name || (p.email || '子工作台')) + '</div>' +
       '<div class="oa-sub-mail">' + esc(p.email || s.user_id) + '</div>' +
+      '<span class="oa-badge oa-badge-role">' + esc(roleLabel(s.role)) + '</span>' +
       (s.status === 'suspended' ? '<span class="oa-badge">已停用</span>' : '') +
       '</div>';
   }
@@ -106,6 +107,14 @@
       '<button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.toggleSuspend(\'' + s.id + '\',' + (s.status === 'suspended') + ')">' + (s.status === 'suspended' ? '启用' : '停用') + '</button>' +
       '<button class="btn btn-danger btn-sm" onclick="App.views.orgAdmin.removeSub(\'' + s.id + '\')">移除</button>' +
       '</div></div>';
+
+    html += '<div class="oa-section-title">权限设置</div>';
+    html += '<div class="oa-perm-row">' +
+      '<label class="form-label" style="margin:0">权限角色</label>' +
+      '<select class="form-input" id="oa-detail-role" onchange="App.views.orgAdmin.changeRole(\'' + s.id + '\')">' + roleOptions(s.role || 'subject_lead') + '</select>' +
+      '</div>';
+    html += '<div class="oa-perm-row"><label class="form-label" style="margin:0">项目组标签</label></div>';
+    html += projectTagsEditor(s);
 
     html += '<div class="oa-section-title">查看子工作台内容</div>';
     html += '<div id="oa-view-content" class="oa-view-content"><div class="oa-hint">加载中…</div></div>';
@@ -230,19 +239,70 @@
         '<input class="form-input" id="oa-sub-email" type="email" placeholder="需先在 Supabase 建好该账号"></div>' +
         '<div class="form-group"><label class="form-label">子工作台名称（＝学科组，须与「教师管理」科组一致）</label>' +
         '<input class="form-input" id="oa-sub-name" placeholder="如：数学 / 英语 / 文综 / 理综"></div>' +
-        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。名称须为学科组名称（数学/英语/文综/理综，可带「科组/组」后缀），子台据此筛选本科组教师与转正提醒；同时作为任务归属标识。</div>' +
+        '<div class="form-group"><label class="form-label">权限角色</label>' +
+        '<select class="form-input" id="oa-sub-role">' + roleOptions('subject_lead') + '</select></div>' +
+        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。名称须为学科组名称（数学/英语/文综/理综，可带「科组/组」后缀），子台据此筛选本科组教师与转正提醒。角色决定子台可见模块与任务同步范围（默认「学科组长」）。</div>' +
         '</div>',
       confirmText: '纳管',
       onConfirm: function (close) {
         var e = document.getElementById('oa-sub-email').value.trim();
         var n = document.getElementById('oa-sub-name').value.trim();
+        var role = document.getElementById('oa-sub-role').value;
         if (!e) { App.util.toast('请填写邮箱', 'warn'); return; }
-        App.masterHub.addSub(e, n).then(function (r) { if (r) { close(); loadAll().then(render); } });
+        App.masterHub.addSub(e, n, role).then(function (r) { if (r) { close(); loadAll().then(render); } });
       }
     });
   }
 
+  function roleOptions(sel) {
+    var roles = (App.perm && App.perm.ROLES) || [
+      { v: 'subject_lead', label: '学科组长' },
+      { v: 'principal_intern', label: '教学校长实习生' },
+      { v: 'project_lead', label: '项目组负责人' }
+    ];
+    return roles.map(function (r) {
+      return '<option value="' + r.v + '"' + (r.v === sel ? ' selected' : '') + '>' + esc(r.label) + '</option>';
+    }).join('');
+  }
+
+  function roleLabel(role) {
+    var m = (App.perm && App.perm.ROLE_LABELS) || {};
+    return m[role] || role || '学科组长';
+  }
+
   function select(userId) { _selected = userId; render(); }
+
+  // 项目组标签编辑器（来源：项目组中心的 6 大项目组）
+  function projectTagsEditor(s) {
+    var pgs = App.projectGroups || {};
+    var keys = Object.keys(pgs);
+    var tags = Array.isArray(s.project_tags) ? s.project_tags : [];
+    if (!keys.length) return '<div class="oa-hint">暂无项目组可标记</div>';
+    var chips = keys.map(function (k) {
+      var g = pgs[k];
+      return '<label class="oa-tag-chip"><input type="checkbox" value="' + esc(g.id) + '"' +
+        (tags.indexOf(g.id) >= 0 ? ' checked' : '') + '>' + esc(g.name) + '</label>';
+    }).join('');
+    return '<div class="oa-tags-edit" id="oa-tags-edit">' + chips + '</div>' +
+      '<div style="margin:8px 0 2px"><button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.saveProjectTags(\'' + s.id + '\')">保存项目组标签</button></div>' +
+      '<div class="oa-hint">项目组标签用于「项目组」权限标签的任务同步：新建任务选择具体项目组后，会同步到带相同标签的子工作台。</div>';
+  }
+
+  async function changeRole(memberId) {
+    var sel = document.getElementById('oa-detail-role');
+    if (!sel) return;
+    await App.masterHub.setSubRole(memberId, sel.value);
+    await loadAll(); render();
+  }
+
+  async function saveProjectTags(memberId) {
+    var box = document.getElementById('oa-tags-edit');
+    if (!box) return;
+    var out = [];
+    Array.prototype.forEach.call(box.querySelectorAll('input[type=checkbox]:checked'), function (cb) { out.push(cb.value); });
+    await App.masterHub.setSubProjectTags(memberId, out);
+    await loadAll(); render();
+  }
 
   async function sendAnno() {
     if (!_selected) return;
@@ -276,6 +336,8 @@
     select: select,
     sendAnno: sendAnno,
     toggleSuspend: toggleSuspend,
-    removeSub: removeSub
+    removeSub: removeSub,
+    changeRole: changeRole,
+    saveProjectTags: saveProjectTags
   };
 })();
