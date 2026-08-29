@@ -104,3 +104,224 @@ create trigger trg_ts before update on task_share
 
 -- 开启实时推送（需在项目已启用 Realtime 的前提下）
 alter publication supabase_realtime add table task_share;
+
+-- ============================================================
+-- 7) 多层级工作台（总工作台 → 子工作台）
+--    org 组织 / org_member 子工作台 / profile 账号档案
+--    share_grant 共享规则 / shared_item 共享数据 / share_log 审计日志
+--    执行方式：Supabase 控制台 → SQL Editor → 粘贴本节 → Run。
+--    注意建表顺序：org / org_member 必须先于 profile（profile 策略引用它们）。
+-- ============================================================
+
+-- 7.1 org：组织（总工作台）
+create table if not exists org (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+alter table org enable row level security;
+
+drop policy if exists "org_owner_all" on org;
+create policy "org_owner_all" on org
+  for all using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
+
+drop policy if exists "org_member_read" on org;
+create policy "org_member_read" on org
+  for select using (
+    exists (select 1 from org_member m where m.org_id = org.id and m.user_id = auth.uid())
+  );
+
+-- 7.2 org_member：子工作台成员
+create table if not exists org_member (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null references org(id) on delete cascade,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  name       text,
+  status     text not null default 'active',   -- active | suspended
+  created_at timestamptz not null default now(),
+  unique (org_id, user_id)
+);
+alter table org_member enable row level security;
+
+drop policy if exists "member_owner_all" on org_member;
+create policy "member_owner_all" on org_member
+  for all using (
+    exists (select 1 from org o where o.id = org_member.org_id and o.owner_user_id = auth.uid())
+  );
+
+drop policy if exists "member_self_read" on org_member;
+create policy "member_self_read" on org_member
+  for select using (user_id = auth.uid());
+
+-- 7.3 profile：账号档案（邮箱 ↔ user_id 解析、显示名）
+create table if not exists profile (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  email      text,
+  name       text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table profile enable row level security;
+
+drop policy if exists "profile_self" on profile;
+create policy "profile_self" on profile
+  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- 组织 owner 可读本组织成员档案；子工作台之间仍互不可见
+drop policy if exists "profile_org_owner_read" on profile;
+create policy "profile_org_owner_read" on profile
+  for select using (
+    exists (select 1 from org o join org_member m on m.org_id = o.id
+            where o.owner_user_id = auth.uid() and m.user_id = profile.user_id)
+  );
+
+-- 7.4 share_grant：共享规则（核心）
+create table if not exists share_grant (
+  id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references org(id) on delete cascade,
+  from_user_id  uuid not null references auth.users(id) on delete cascade,
+  to_user_id    uuid not null references auth.users(id) on delete cascade,
+  data_type     text not null,                 -- tasks | reports | teachers | timeline | projects | hr | *
+  item_id       text,                          -- 具体条目 id（null = 该类型全部）
+  item_filter   jsonb,                         -- 更细筛选，如 {"status":["todo","doing"]}
+  permission    text not null default 'read',  -- summary | read | edit
+  allow_reverse boolean not null default false,
+  reverse_mode  text,                          -- status（仅状态） | full（完整编辑）
+  active        boolean not null default true,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists idx_share_grant_to   on share_grant(to_user_id, active);
+create index if not exists idx_share_grant_from on share_grant(from_user_id);
+
+alter table share_grant enable row level security;
+
+drop policy if exists "grant_owner_all" on share_grant;
+create policy "grant_owner_all" on share_grant
+  for all using (
+    exists (select 1 from org o where o.id = share_grant.org_id and o.owner_user_id = auth.uid())
+  );
+
+drop policy if exists "grant_sub_read" on share_grant;
+create policy "grant_sub_read" on share_grant
+  for select using (to_user_id = auth.uid());
+
+-- 7.5 shared_item：共享数据（物化快照）
+create table if not exists shared_item (
+  id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references org(id) on delete cascade,
+  grant_id      uuid references share_grant(id) on delete cascade,
+  from_user_id  uuid not null references auth.users(id) on delete cascade,
+  to_user_id    uuid not null references auth.users(id) on delete cascade,
+  data_type     text not null,
+  item_id       text not null,                 -- 原条目 id
+  permission    text not null,                 -- 冗余自 grant，便于快速判断
+  direction     text not null default 'down',  -- down 总→子 | up 子回传
+  reply_to_id   uuid,                          -- 回传时指向原 shared_item.id
+  payload       jsonb not null default '{}'::jsonb,
+  version       int not null default 1,
+  status        text not null default 'active',-- active | revoked | superseded
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists idx_shared_item_to    on shared_item(to_user_id, status);
+create index if not exists idx_shared_item_from  on shared_item(from_user_id, direction);
+create index if not exists idx_shared_item_grant on shared_item(grant_id);
+
+alter table shared_item enable row level security;
+
+drop policy if exists "item_owner_all" on shared_item;
+create policy "item_owner_all" on shared_item
+  for all using (
+    exists (select 1 from org o where o.id = shared_item.org_id and o.owner_user_id = auth.uid())
+  );
+
+drop policy if exists "item_sub_read" on shared_item;
+create policy "item_sub_read" on shared_item
+  for select using (to_user_id = auth.uid());
+
+-- 子工作台回传（direction='up'）：需存在「发给我的、allow_reverse、data_type 匹配」的有效规则
+drop policy if exists "item_sub_reverse" on shared_item;
+create policy "item_sub_reverse" on shared_item
+  for insert with check (
+    from_user_id = auth.uid() and direction = 'up'
+    and exists (select 1 from share_grant g
+                where g.to_user_id = auth.uid()
+                  and g.from_user_id = shared_item.to_user_id
+                  and g.data_type = shared_item.data_type
+                  and g.allow_reverse = true and g.active = true)
+  );
+
+-- 7.6 share_log：审计日志
+create table if not exists share_log (
+  id             bigint generated always as identity primary key,
+  org_id         uuid,
+  actor_user_id  uuid references auth.users(id) on delete set null,
+  action         text not null,
+  target_user_id uuid references auth.users(id) on delete set null,
+  data_type      text,
+  item_id        text,
+  detail         jsonb,
+  created_at     timestamptz not null default now()
+);
+
+create index if not exists idx_share_log_org   on share_log(org_id, created_at);
+create index if not exists idx_share_log_actor on share_log(actor_user_id, created_at);
+
+alter table share_log enable row level security;
+
+drop policy if exists "log_insert_auth" on share_log;
+create policy "log_insert_auth" on share_log
+  for insert with check (actor_user_id = auth.uid());
+
+drop policy if exists "log_owner_read" on share_log;
+create policy "log_owner_read" on share_log
+  for select using (
+    exists (select 1 from org o where o.id = share_log.org_id and o.owner_user_id = auth.uid())
+  );
+
+drop policy if exists "log_self_read" on share_log;
+create policy "log_self_read" on share_log
+  for select using (target_user_id = auth.uid() or actor_user_id = auth.uid());
+
+-- 7.7 updated_at 自动刷新（复用第 5 节的 touch_updated_at）
+drop trigger if exists trg_org on org;
+create trigger trg_org before update on org
+  for each row execute function touch_updated_at();
+
+drop trigger if exists trg_profile on profile;
+create trigger trg_profile before update on profile
+  for each row execute function touch_updated_at();
+
+drop trigger if exists trg_grant on share_grant;
+create trigger trg_grant before update on share_grant
+  for each row execute function touch_updated_at();
+
+drop trigger if exists trg_item on shared_item;
+create trigger trg_item before update on shared_item
+  for each row execute function touch_updated_at();
+
+-- 7.8 实时推送（子台即时收到共享、总台即时收到回传）——幂等判断，重复执行不报错
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                 where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'shared_item') then
+    alter publication supabase_realtime add table shared_item;
+  end if;
+end $$;
+
+-- 7.9（可选）按邮箱查 user_id——让「子工作台尚未首次登录」时也能被纳管
+--     安全：调用者必须已登录（auth.uid() 非 null），禁止匿名枚举
+create or replace function public.lookup_user_id_by_email(p_email text)
+returns uuid
+language sql
+security definer
+set search_path = public
+as $$
+  select case when auth.uid() is null then null
+              else (select id from auth.users where lower(email) = lower(p_email) limit 1) end;
+$$;

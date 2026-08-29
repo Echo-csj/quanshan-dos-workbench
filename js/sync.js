@@ -32,6 +32,22 @@
   }
   function uid() { return session && session.user ? session.user.id : null; }
 
+  // ---- profile 自动 upsert（多层级工作台：邮箱 ↔ user_id 解析） ----
+  // 表尚未建立（未执行 schema.sql 第 7 节）时静默跳过，不影响登录与主流程
+  async function upsertProfile() {
+    var c = ensureClient();
+    var u = session && session.user;
+    if (!c || !u) return;
+    try {
+      await c.from('profile').upsert(
+        { user_id: u.id, email: u.email || null },
+        { onConflict: 'user_id' }
+      );
+    } catch (e) {
+      console.warn('[sync] profile upsert skipped:', e && e.message ? e.message : e);
+    }
+  }
+
   // ---- 认证 ----
   async function handleRedirect() {
     if (disabled) return false;
@@ -59,6 +75,7 @@
     subscribeStore();
     await applyRemote();
     subscribeRealtime();
+    upsertProfile();
     // 通知联动数据模块（若已挂载）刷新
     try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {}
   }
@@ -151,7 +168,7 @@
   async function start() {
     if (disabled) { setStatus('disabled'); renderWidget(); return; }
     var ok = await handleRedirect();
-    if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); subscribeRealtime(); try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {} }
+    if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); subscribeRealtime(); upsertProfile(); try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {} }
     else { setStatus('signedout'); }
     renderWidget();
   }
