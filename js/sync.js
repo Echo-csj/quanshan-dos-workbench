@@ -68,17 +68,22 @@
   async function signIn(email, password) {
     var c = ensureClient(); if (!c) return;
     setStatus('signingin');
-    var r = await c.auth.signInWithPassword({ email: email, password: password });
-    if (r.error) { setStatus('error', r.error.message || '登录失败'); return; }
-    session = r.data.session;
-    setStatus('ok');
-    subscribeStore();
-    await applyRemote();
-    try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
-    subscribeRealtime();
-    upsertProfile();
-    // 通知联动数据模块（若已挂载）刷新
-    try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {}
+    try {
+      var r = await c.auth.signInWithPassword({ email: email, password: password });
+      if (r.error) { setStatus('error', r.error.message || '登录失败'); return; }
+      session = r.data.session;
+      setStatus('ok');
+      subscribeStore();
+      await applyRemote();
+      try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
+      subscribeRealtime();
+      upsertProfile();
+      // 通知联动数据模块（若已挂载）刷新
+      try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {}
+    } catch (e) {
+      console.error('[sync] signIn 异常', e);
+      setStatus('error', (e && e.message) ? e.message : '网络异常，请稍后重试');
+    }
   }
   async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
 
@@ -184,16 +189,19 @@
       return;
     }
     if (status === 'signedout' || status === 'signingin') {
-      w.innerHTML = '<div class="sw-box"><span class="sw-dot grey"></span>' +
-        '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱" class="sw-input"/>' +
-        '<input id="sync-pass" type="password" placeholder="密码" class="sw-input"/>' +
-        '<button id="sync-login" class="sw-btn">登录</button></div>' +
-        '<div class="sw-tip">开启后数据可在多设备同步（本机仍保留备份）</div></div>';
-      el('sync-login').onclick = function () {
-        var e = el('sync-email').value.trim();
-        var p = el('sync-pass').value;
-        if (e && p) signIn(e, p);
-      };
+      var signing = status === 'signingin';
+      w.innerHTML = '<div class="sw-box"><span class="sw-dot ' + (signing ? 'blue' : 'grey') + '"></span>' +
+        '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱" class="sw-input"' + (signing ? ' disabled' : '') + '/>' +
+        '<input id="sync-pass" type="password" placeholder="密码" class="sw-input"' + (signing ? ' disabled' : '') + '/>' +
+        '<button id="sync-login" class="sw-btn"' + (signing ? ' disabled' : '') + '>' + (signing ? '登录中…' : '登录') + '</button></div>' +
+        (signing ? '<div class="sw-tip">正在验证身份…</div>' : '<div class="sw-tip">开启后数据可在多设备同步（本机仍保留备份）</div>') + '</div>';
+      if (!signing) {
+        el('sync-login').onclick = function () {
+          var e = el('sync-email').value.trim();
+          var p = el('sync-pass').value;
+          if (e && p) signIn(e, p);
+        };
+      }
       return;
     }
     if (status === 'error') {

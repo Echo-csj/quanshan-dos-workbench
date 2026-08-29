@@ -1289,6 +1289,17 @@ body.auth-locked .sync-widget{display:none}
 .ag-btn:hover{background:var(--accent-hover)}
 .ag-err{font-size:12px;color:var(--bad)}
 .ag-offline{font-size:13px;color:var(--text-muted)}
+.ag-remember{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);text-align:left;cursor:pointer;user-select:none}
+.ag-remember input{width:14px;height:14px;accent-color:var(--accent);cursor:pointer}
+.ag-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s ease}
+.ag-btn:hover{background:var(--accent-hover)}
+.ag-btn.loading,.ag-btn:disabled{opacity:.75;cursor:not-allowed}
+.ag-btn.loading:hover,.ag-btn:disabled:hover{background:var(--accent)}
+.ag-btn.success{background:#22c55e}
+.ag-btn.success:hover{background:#22c55e}
+.ag-spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.45);border-top-color:#fff;border-radius:50%;display:none;animation:ag-spin .7s linear infinite}
+@keyframes ag-spin{to{transform:rotate(360deg)}}
+.ag-ok{font-size:13px;color:#22c55e;font-weight:600}
 
 /* ===== 教师职业发展关键节点提醒面板 ===== */
 .stat-ms { color:var(--accent-text); border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); }
