@@ -488,14 +488,14 @@
       h += '<div class="lk-empty">暂无最佳科组月度明细。请在数据分析工作台上传科组月度数据并推送后查看预测。</div></div>';
       return { html: h };
     }
-    // C 初始值：云端同步（snap.kezu.C）> 本地记忆 > 默认 1000
-    var C0 = (snap.kezu && typeof snap.kezu.C === 'number') ? snap.kezu.C : null;
-    try { var lc = localStorage.getItem('dos_kezu_target_C'); if (lc != null && lc !== '') { var n = parseFloat(lc); if (isFinite(n) && n >= 0) C0 = n; } } catch (e) {}
-    if (C0 == null) C0 = 1000;
+    // C 值：直接从数据分析台快照同步（snap.kezu.C），不再手动输入；无值时提示去数据分析台填写
+    var C0 = (snap.kezu && typeof snap.kezu.C === 'number' && isFinite(snap.kezu.C)) ? snap.kezu.C : null;
     var defY = months[months.length - 1].year, defM = months[months.length - 1].month;
     var ys = Array.from(new Set(months.map(function (m) { return m.year; })));
     h += '<div class="lk-cmp-toolbar" style="margin-bottom:12px">' +
-      '<label>校区生产指标（总盘 C）</label><input type="number" id="dtC" class="lk-input mono" min="0" step="any" value="' + C0 + '">' +
+      '<label>校区生产指标（总盘 C）</label><span id="dtC" class="lk-input lk-readonly mono" style="display:inline-flex;align-items:center;min-width:96px;background:var(--surface-2);cursor:default">' +
+      (C0 != null ? fmt(C0) : '<span class="lk-muted">未同步</span>') + '</span>' +
+      '<span class="lk-tag ok">自动同步</span>' +
       '<label>参考月份（已完成月）</label><select id="dtMonthSel" class="lk-input">' +
       months.map(function (m) { return '<option value="' + m.year + '-' + m.month + '"' + (m.year === defY && m.month === defM ? ' selected' : '') + '>' + m.year + ' 年 ' + m.month + ' 月</option>'; }).join('') +
       '</select>' +
@@ -507,14 +507,19 @@
     return { html: h };
   }
   function drawForecast(snap, weekly) {
-    var cEl = document.getElementById('dtC');
     var mEl = document.getElementById('dtMonthSel');
     var pEl = document.getElementById('dtPred');
     var consEl = document.getElementById('dtConsist');
     var resEl = document.getElementById('dtResult');
-    if (!cEl || !mEl || !pEl || !resEl) return;
-    var C = parseFloat(cEl.value) || 0;
-    try { localStorage.setItem('dos_kezu_target_C', String(C)); } catch (e) {}
+    if (!mEl || !pEl || !resEl) return;
+    // C 值：直接从数据分析台快照同步，不再手动输入（无值则无法预测）
+    var C = (snap.kezu && typeof snap.kezu.C === 'number' && isFinite(snap.kezu.C)) ? snap.kezu.C : null;
+    if (C == null) {
+      if (consEl) consEl.innerHTML = '';
+      if (pEl) pEl.value = '';
+      resEl.innerHTML = '<div class="lk-empty">校区生产指标 C 尚未从数据分析台同步。请在「数据分析台 → 核心看板 → 科组生产预测」填写校区生产指标 C，并点击「推送分析到个人台」，本工作台登录同一账号后自动同步。</div>';
+      return;
+    }
     var parts = mEl.value.split('-');
     var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
     var depts = loadMonth(snap, y, m);
@@ -606,9 +611,7 @@
     if (document.getElementById('kezuCmpDashWrap')) renderCompare(snap, 'kezuCmpDashWrap');
   }
   function bindForecast(snap, weekly) {
-    var cEl = document.getElementById('dtC');
     var mEl = document.getElementById('dtMonthSel');
-    if (cEl) cEl.addEventListener('input', function () { drawForecast(snap, weekly); });
     if (mEl) mEl.addEventListener('change', function () { drawForecast(snap, weekly); });
     drawForecast(snap, weekly);
   }
