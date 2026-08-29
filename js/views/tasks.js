@@ -34,7 +34,21 @@
   });
 
   /* ---------------- 数据访问 ---------------- */
-  function getTasks() { return App.store.get('tasks') || []; }
+  // 渲染用：子台视角返回「团队任务 + 派给我的个人任务 + 我的自建任务」；否则返回本地全部
+  function getTasks() {
+    if (App.subContext && App.subContext.isSub && App.subContext.isSub()) {
+      return App.subContext.mergedTasks();
+    }
+    return App.store.get('tasks') || [];
+  }
+  // 写入用：总是操作本地 store（子台自建任务存这里）
+  function localTasks() { return App.store.get('tasks') || []; }
+  function isSubView() { return !!(App.subContext && App.subContext.isSub && App.subContext.isSub()); }
+  // 该任务当前账号是否可编辑：总台可编辑全部；子台只能编辑自建任务（source='sub'）
+  function isEditable(t) {
+    if (!isSubView()) return true;
+    return !!(t && t.source === 'sub');
+  }
 
   /* 同级互发任务开关（config.js TASK_SHARE）：关闭时不显示「📤 发送」入口 */
   function taskShareOn() {
@@ -152,8 +166,8 @@
 
   /* ---------------- 渲染 ---------------- */
   function renderBoard() {
+    autoArchive(localTasks()); // 超期已完成自动归档（仅本地自建任务，避免污染总台投影）
     var allTasks = getTasks();
-    autoArchive(allTasks); // 超期已完成自动归档
 
     var tasks = allTasks.filter(function(t) { return !t.archived; });
     var view = getViewSettings();
@@ -539,9 +553,10 @@
   }
 
   function moveTask(id, status) {
-    var tasks = getTasks();
+    var tasks = localTasks();
     var t = tasks.filter(function(x) { return x.id === id; })[0];
-    if (!t) return;
+    if (!t) { App.util.toast('总台任务不可修改', 'warn'); return; }
+    if (!isEditable(t)) { App.util.toast('总台任务不可修改', 'warn'); return; }
     if (t.status === status) return;
     t.status = status;
     t.updatedAt = new Date().toISOString();
@@ -601,18 +616,27 @@
     var assignee = document.getElementById('task-assignee').value.trim();
     var dueDate = document.getElementById('task-due').value;
     var note = document.getElementById('task-note').value.trim();
-    var scope = App.util.deriveScope(assignee);
 
-    var tasks = getTasks();
+    var tasks = localTasks();
     if (id) {
       var t = tasks.filter(function(x) { return x.id === id; })[0];
-      if (t) { Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, updatedAt: new Date().toISOString() }); maybeSyncDone(t, status); }
+      if (t && !isEditable(t)) { App.util.toast('总台任务不可编辑', 'warn'); return; }
+      if (t) {
+        var scope = isSubView() ? 'personal' : App.util.deriveScope(assignee);
+        Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, updatedAt: new Date().toISOString() });
+        maybeSyncDone(t, status);
+      }
     } else {
+      var isSub = isSubView();
+      var myName = isSub ? (App.subContext.myName() || '') : '';
       tasks.push({
         id: App.store.uid('task'),
         title: title, priority: priority, status: status,
-        assignee: assignee, dueDate: dueDate, note: note, scope: scope,
-        source: 'manual', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+        assignee: isSub ? (myName || assignee) : assignee,
+        dueDate: dueDate, note: note,
+        scope: isSub ? 'personal' : App.util.deriveScope(assignee),
+        source: isSub ? 'sub' : 'manual',
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
       });
     }
     App.store.set('tasks', tasks);
@@ -651,14 +675,14 @@
   }
 
   function deleteTask(id) {
-    var t = getTasks().filter(function(x) { return x.id === id; })[0];
-    if (!t) return;
+    var t = localTasks().filter(function(x) { return x.id === id; })[0];
+    if (!t || !isEditable(t)) { App.util.toast('总台任务不可删除', 'warn'); return; }
     App.util.modal({
       title: '确认删除任务',
       content: '确定删除任务「' + App.util.escapeHtml(t.title) + '」？此操作不可撤销。',
       confirmText: '删除', confirmStyle: 'danger',
       onConfirm: function(close) {
-        var tasks = getTasks().filter(function(x) { return x.id !== id; });
+        var tasks = localTasks().filter(function(x) { return x.id !== id; });
         App.store.set('tasks', tasks);
         close();
         App.util.toast('已删除', 'ok');
@@ -686,9 +710,9 @@
   function toggleHideDone() { localStorage.setItem('tasks_hide_done', getHideDone() ? '0' : '1'); App.router.resolve(); }
 
   function archiveTask(id) {
-    var tasks = getTasks();
+    var tasks = localTasks();
     var t = tasks.filter(function(x) { return x.id === id; })[0];
-    if (!t) return;
+    if (!t || !isEditable(t)) { App.util.toast('总台任务不可归档', 'warn'); return; }
     t.archived = true;
     App.store.set('tasks', tasks);
     App.util.toast('已归档「' + App.util.escapeHtml(t.title) + '」', 'ok');
@@ -696,7 +720,7 @@
   }
 
   function archiveAllDone() {
-    var tasks = getTasks();
+    var tasks = localTasks();
     var cnt = 0;
     tasks.forEach(function(t) { if (t.status === 'done' && !t.archived) { t.archived = true; cnt++; } });
     if (cnt === 0) { App.util.toast('没有可归档的已完成事项', 'warn'); return; }
@@ -716,7 +740,7 @@
   function openArchiveModal() {
     var ex = document.querySelector('.modal-overlay');
     if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
-    var all = getTasks();
+    var all = localTasks();
     var archived = all.filter(function(t) { return t.archived; })
       .sort(function(a, b) {
         var ta = a.completedAt ? new Date(a.completedAt).getTime() : 0;
@@ -751,7 +775,7 @@
   }
 
   function unarchiveTask(id) {
-    var tasks = getTasks();
+    var tasks = localTasks();
     var t = tasks.filter(function(x) { return x.id === id; })[0];
     if (!t) return;
     t.archived = false;
@@ -763,14 +787,14 @@
   }
 
   function purgeArchived(id) {
-    var t = getTasks().filter(function(x) { return x.id === id; })[0];
+    var t = localTasks().filter(function(x) { return x.id === id; })[0];
     if (!t) return;
     App.util.modal({
       title: '确认彻底删除',
       content: '确定彻底删除「' + App.util.escapeHtml(t.title) + '」？此操作不可恢复，且不会保留在归档列表中。',
       confirmText: '彻底删除', confirmStyle: 'danger',
       onConfirm: function(close) {
-        var tasks = getTasks().filter(function(x) { return x.id !== id; });
+        var tasks = localTasks().filter(function(x) { return x.id !== id; });
         App.store.set('tasks', tasks);
         close();
         App.util.toast('已彻底删除', 'ok');
@@ -781,7 +805,7 @@
   }
 
   function clearAllArchived() {
-    var tasks = getTasks();
+    var tasks = localTasks();
     var cnt = tasks.filter(function(t) { return t.archived; }).length;
     if (cnt === 0) { App.util.toast('没有可清空的归档', 'warn'); return; }
     App.util.modal({
@@ -803,7 +827,9 @@
   function generateFromTimeline() {
     var data = App.store.getData();
     var nodes = ((data.timeline && data.timeline.fixedNodes) || []).concat((data.timeline && data.timeline.customNodes) || []);
-    var tasks = getTasks();
+    var tasks = localTasks();
+    var isSub = isSubView();
+    var myName = isSub ? (App.subContext.myName() || '') : '';
     var existingIds = tasks.map(function(t) { return t.timelineNodeId; });
     var added = 0;
 
@@ -814,10 +840,10 @@
         id: App.store.uid('task'),
         title: node.title,
         priority: defaultPriority(node),
-        assignee: 'DOS',
+        assignee: isSub ? (myName || 'DOS') : 'DOS',
         dueDate: due ? App.util.formatDate(due, 'YYYY-MM-DD') : '',
         status: 'todo',
-        source: 'timeline',
+        source: isSub ? 'sub' : 'timeline',
         scope: 'personal',
         timelineNodeId: node.id,
         note: node.note || '',
@@ -1035,7 +1061,9 @@
   }
 
   function confirmPasteImport(close) {
-    var tasks = getTasks();
+    var tasks = localTasks();
+    var isSub = isSubView();
+    var myName = isSub ? (App.subContext.myName() || '') : '';
     var added = 0;
     var items = _pasteResult ? _pasteResult.items : _pasteItems;
     for (var i = 0; i < items.length; i++) {
@@ -1053,11 +1081,11 @@
         title: title,
         priority: prio,
         status: 'todo',
-        assignee: assignee,
+        assignee: isSub ? (myName || assignee) : assignee,
         dueDate: due || '',
         note: timeVal ? ('时间 ' + timeVal) : '',
-        source: 'paste',
-        scope: App.util.deriveScope(assignee),
+        source: isSub ? 'sub' : 'paste',
+        scope: isSub ? 'personal' : App.util.deriveScope(assignee),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

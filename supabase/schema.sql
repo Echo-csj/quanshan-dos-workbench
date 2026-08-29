@@ -370,3 +370,26 @@ end $$;
 --      总台(org owner) 可插入（item_owner_all 策略），子台(item_sub_read) 只读。
 --      子台在对应条目展示标注，看到后自行处理（完成/修改）。
 -- ============================================================
+
+-- ============================================================
+-- 7.12 子工作台读总工作台数据（数据源于总台）
+--      允许组织成员（子工作台）读取本组织 owner（总工作台）的 dos_workbench 整档数据，
+--      支撑「子台数据源于总台」：子台实时读总台数据，再按模块规则在本地做过滤视图。
+--      各模块可见性（今日/看板过滤、时间轴/数据/项目组全量、教师全量）在子台前端呈现。
+--      复用 security definer 函数 is_my_org_owner，不触发 RLS 递归。
+--      信任边界：子台可读总台整档数据（授权设计），过滤属展示层规则，非数据库隔离。
+-- ============================================================
+
+create or replace function public.is_my_org_owner(p_user_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (
+    select 1 from org o join org_member m on m.org_id = o.id
+    where m.user_id = auth.uid() and o.owner_user_id = p_user_id
+  );
+$$;
+
+-- 读：子工作台可读本组织 owner（总工作台）的整档数据
+drop policy if exists "org_member_read_owner_dw" on dos_workbench;
+create policy "org_member_read_owner_dw" on dos_workbench
+  for select using (public.is_my_org_owner(dos_workbench.user_id));

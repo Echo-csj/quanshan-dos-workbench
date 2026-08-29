@@ -18,7 +18,7 @@
     var weekNum = App.util.getWeekNumber(now);
     var U = App.util;
 
-    var data = App.store.getData();
+    var data = App.viewData();
     var fixedNodes = (data.timeline && data.timeline.fixedNodes) || [];
 
     // 今日固定节点
@@ -111,7 +111,7 @@
   function generateWeeklyReport() {
     var U = App.util;
     var now = new Date();
-    var data = App.store.getData();
+    var data = App.viewData();
     var tasks = data.tasks || [];
 
     // 本周一 ~ 周日 区间
@@ -224,7 +224,7 @@
 
   /* ---------------- 备份提醒 ---------------- */
   function backupBannerHtml() {
-    var data = App.store.getData();
+    var data = App.viewData();
     if (!(data.settings && data.settings.remindBackup !== false)) return '';
     var lastExport = data.meta && data.meta.lastBackupAt;
     var thisMonth = App.util.formatDate(new Date(), 'YYYY-MM');
@@ -258,7 +258,7 @@
 
   // 读待处理教师发展里程碑（直接读 store，避免对 teacher-milestones 加载顺序依赖）
   function getPendingMilestones() {
-    var ms = App.store.get('teacherMilestones') || [];
+    var ms = App.viewData().teacherMilestones || [];
     return ms.filter(function (m) { return m.status !== 'done'; });
   }
 
@@ -312,7 +312,7 @@
     var soon = new Date(now); soon.setDate(soon.getDate() + 3);
     var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
 
-    var tasks = (App.store.get('tasks') || []).filter(function (t) { return !t.archived; });
+    var tasks = (App.viewData().tasks || []).filter(function (t) { return !t.archived; });
     var milestones = getPendingMilestones();
 
     var core = [], alert = [], other = [];
@@ -422,13 +422,13 @@
     var soon = new Date(now); soon.setDate(soon.getDate() + 3);
     var soonStr = U.formatDate(soon, 'YYYY-MM-DD');
 
-    var tasks = (App.store.get('tasks') || []).filter(function (t) { return !t.archived; });
+    var tasks = (App.viewData().tasks || []).filter(function (t) { return !t.archived; });
     var overdue = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate && U.isOverdue(t.dueDate); });
     var dueToday = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate === todayStr; });
     var dueSoon = tasks.filter(function (t) { return t.status !== 'done' && t.dueDate && t.dueDate > todayStr && t.dueDate <= soonStr; });
     var msPending = getPendingMilestones();
 
-    var data = App.store.getData();
+    var data = App.viewData();
     var fixedNodes = (data.timeline && data.timeline.fixedNodes) || [];
     var todayNodes = fixedNodes.filter(function (n) {
       if (n.type === 'monthly') return false;

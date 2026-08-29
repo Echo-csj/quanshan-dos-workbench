@@ -60,7 +60,7 @@
 
   /* ---------------- ① 基准值对标 ---------------- */
   function renderBaseline() {
-    var reports = App.store.get('reports') || { monthly: {} };
+    var reports = App.viewData().reports || { monthly: {} };
     var months = Object.keys(reports.monthly || {}).sort();
     var html = '';
 
@@ -92,7 +92,7 @@
   }
 
   function renderBaselineBody(monthKey) {
-    var reports = App.store.get('reports') || { monthly: {} };
+    var reports = App.viewData().reports || { monthly: {} };
     var snap = reports.monthly[monthKey];
     if (!snap) return '<div class="empty-state">无数据</div>';
     var metrics = snap.metrics || {};
@@ -182,7 +182,7 @@
 
   /* ---------------- ② 环比 · 同比趋势 ---------------- */
   function renderTrend() {
-    var reports = App.store.get('reports') || { monthly: {} };
+    var reports = App.viewData().reports || { monthly: {} };
     var months = Object.keys(reports.monthly || {}).sort();
     var html = '';
 
@@ -216,7 +216,7 @@
   }
 
   function renderTrendBody(metricId) {
-    var reports = App.store.get('reports') || { monthly: {} };
+    var reports = App.viewData().reports || { monthly: {} };
     var months = Object.keys(reports.monthly || {}).sort();
     var meta = App.importer.metric(metricId);
     var body = '';
@@ -283,7 +283,7 @@
 
   /* ---------------- ③ 人事数据（联动自动填充） ---------------- */
   function getHRData() {
-    return App.store.get('hr') || { weekly: {}, baseHeadcount: null, baseDate: null, linked: null };
+    return App.viewData().hr || { weekly: {}, baseHeadcount: null, baseDate: null, linked: null };
   }
 
   /**
@@ -427,7 +427,7 @@
     var updateSourceBadge = function (mk) {
       var badge = document.getElementById('baseline-source');
       if (!badge) return;
-      var reports = App.store.get('reports') || { monthly: {} };
+      var reports = App.viewData().reports || { monthly: {} };
       var s = (reports.monthly || {})[mk] || {};
       if (s.source === 'weekly') {
         badge.textContent = '周报·月累计（月度未定稿）';

@@ -66,7 +66,10 @@
 
   function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
 
-  function getTeachers() { return App.store.get('teachers') || []; }
+  // 渲染读取：子台视角读总台教师数据（全量只读，暂不分片）
+  function getTeachers() { return (App.viewData().teachers) || []; }
+  // 写入用：总是本地 store（总台编辑教师；子台视角下编辑入口已隐藏）
+  function localTeachers() { return App.store.get('teachers') || []; }
 
   function hasTag(t, tag) { return Array.isArray(t.tags) && t.tags.indexOf(tag) >= 0; }
 
@@ -193,10 +196,14 @@
     html += '<input type="text" class="form-input form-input-sm" id="tch-search" placeholder="搜索姓名/院校/专业/证书/状态…" value="' + esc(search) + '" oninput="App.views.teachers.onSearchChange(this.value)">';
     html += '</div>';
     html += '<div class="teacher-actions">';
-    html += '<button class="btn btn-primary btn-sm" onclick="App.views.teachers.addTeacher()">' + App.util.svgIcon('plus', 15) + ' 新建教师</button>';
-    html += '<button class="btn btn-secondary btn-sm" onclick="App.views.teachers.downloadTemplate()">' + App.util.svgIcon('download', 15) + ' 下载模板</button>';
-    html += '<button class="btn btn-primary btn-sm" onclick="document.getElementById(\'tch-file-input\').click()">' + App.util.svgIcon('upload', 15) + ' 上传 Excel 更新</button>';
-    html += '<input type="file" id="tch-file-input" accept=".xlsx,.xls" style="display:none" onchange="App.views.teachers.handleFile(this)">';
+    if (!App.isSub()) {
+      html += '<button class="btn btn-primary btn-sm" onclick="App.views.teachers.addTeacher()">' + App.util.svgIcon('plus', 15) + ' 新建教师</button>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.teachers.downloadTemplate()">' + App.util.svgIcon('download', 15) + ' 下载模板</button>';
+      html += '<button class="btn btn-primary btn-sm" onclick="document.getElementById(\'tch-file-input\').click()">' + App.util.svgIcon('upload', 15) + ' 上传 Excel 更新</button>';
+      html += '<input type="file" id="tch-file-input" accept=".xlsx,.xls" style="display:none" onchange="App.views.teachers.handleFile(this)">';
+    } else {
+      html += '<span class="muted" style="font-size:12px">教师数据来自总工作台 · 只读</span>';
+    }
     html += '</div>';
     html += '</div>';
 
@@ -256,7 +263,8 @@
         var certHtml = certs ? '<span class="certs">' + certs + '</span>' : '<span class="muted">—</span>';
         var posBadge = '<span class="pos-badge" title="' + esc(posName(t.positionCode)) + '">' + esc(t.positionCode || '—') + '</span>';
         var rowCls = st === 'left' ? ' class="row-leave"' : (st === 'pending' ? ' class="row-pending"' : ' class="row-active"');
-        html += '<tr' + rowCls + ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑">';
+        var rowClick = App.isSub() ? '' : ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑"';
+        html += '<tr' + rowCls + rowClick + '>';
         html += '<td class="mono muted">' + (i + 1) + '</td>';
         html += '<td class="name-cell">' + nameCellHtml(t, sm) + '</td>';
         html += '<td><span class="dot" style="background:' + sc + ';margin-right:4px"></span>' + esc(t.subjectGroup) + '</td>';
@@ -318,7 +326,7 @@
     if (degEditId !== id) return;
     degEditId = null;
     val = normDegree(val);
-    var teachers = getTeachers().slice();
+    var teachers = localTeachers().slice();
     var idx = teachers.findIndex(function(t) { return t.id === id; });
     if (idx < 0) { render(); return; }
     var old = teachers[idx].degree || '';
@@ -470,7 +478,7 @@
     var newKey = name.trim() + '||' + subjectGroup;
 
     try {
-      var teachers = getTeachers().slice();
+      var teachers = localTeachers().slice();
       if (edId == null) {
         // 新建：查重（姓名 + 学科组 已存在则阻止，避免产生重复主键）
         if (teachers.some(function(t) { return keyOf(t) === newKey; })) {
@@ -533,7 +541,7 @@
   // 注：本系统以「姓名 + 学科组」为主键（无工号字段，遵循既有约定），删除键即内部教师 ID
   function deleteTeacherById(idOrKey, done) {
     if (idOrKey == null) { App.util.toast('请提供教师 ID 或标识', 'bad'); return false; }
-    var teachers = getTeachers();
+    var teachers = localTeachers();
     var t = teachers.find(function(x) {
       if (x.id === idOrKey) return true;
       return (x.name + '｜' + x.subjectGroup) === idOrKey;
@@ -621,7 +629,7 @@
 
   // 计算差异
   function diffRows(parsed) {
-    var existing = getTeachers();
+    var existing = localTeachers();
     var keyOf = function(t) { return (t.name || '') + '||' + (t.subjectGroup || ''); };
     var index = {};
     existing.forEach(function(t, i) { index[keyOf(t)] = i; });
@@ -687,7 +695,7 @@
   }
 
   function applyUpsert(actions) {
-    var teachers = getTeachers().slice();
+    var teachers = localTeachers().slice();
     actions.forEach(function(a) {
       if (a.action === 'skip') return;
       var p = a.p;

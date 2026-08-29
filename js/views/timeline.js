@@ -12,7 +12,7 @@
     var today = new Date();
     var anchor = getAnchor();
 
-    var data = App.store.getData();
+    var data = App.viewData();
     var fixedNodes = (data.timeline && data.timeline.fixedNodes) || [];
     var customNodes = (data.timeline && data.timeline.customNodes) || [];
     var allNodes = fixedNodes.concat(customNodes);
@@ -30,7 +30,7 @@
     html += '<button class="tab ' + (viewMode === 'week' ? 'active' : '') + '" onclick="App.views.timeline.switchView(\'week\')">📅 周视图</button>';
     html += '<button class="tab ' + (viewMode === 'month' ? 'active' : '') + '" onclick="App.views.timeline.switchView(\'month\')">📆 月视图</button>';
     html += '</div>';
-    html += '<button class="btn btn-primary btn-sm" onclick="App.views.timeline.openNodeModal()">' + App.util.svgIcon('plus', 15) + ' 新建节点</button>';
+    if (!App.isSub()) html += '<button class="btn btn-primary btn-sm" onclick="App.views.timeline.openNodeModal()">' + App.util.svgIcon('plus', 15) + ' 新建节点</button>';
     html += '</div>';
     html += '<p style="font-size:12px;color:var(--text-faint);margin:0 0 12px">💡 点击卡片可编辑<b>类型/颜色</b>；<b>周视图拖动</b>改星期，<b>月视图拖动到某天</b>即设为<b>绝对日期</b>（仅当天显示，不再每周重复）。</p>';
 
