@@ -66,6 +66,9 @@
 
   function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
 
+  // 学科组归一：去除尾部「科组」后缀，使「数学」与「数学科组」视为同一组
+  function subjBase(s) { return String(s || '').trim().replace(/科组$/, ''); }
+
   // 渲染读取：子台视角读总台教师数据（全量只读，暂不分片）
   function getTeachers() { return (App.viewData().teachers) || []; }
   // 写入用：总是本地 store（总台编辑教师；子台视角下编辑入口已隐藏）
@@ -167,10 +170,10 @@
     var subName = isSub && App.subContext ? App.subContext.myName() : null;
     var teachers = getTeachers();
 
-    // 子台只看本科组（学科组 == 子工作台名称）
+    // 子台只看本科组：教师学科组去除「科组」后缀后，与本子工作台名称匹配
     if (isSub && subName) {
       teachers = teachers.filter(function(t) {
-        return String(t.subjectGroup || '').trim() === String(subName).trim();
+        return subjBase(t.subjectGroup) === subjBase(subName);
       });
     }
 
@@ -178,7 +181,7 @@
     var stats = { total: teachers.length, bySubject: {}, byPos: {} };
     var statusCount = { active: 0, pending: 0, left: 0 };
     teachers.forEach(function(t) {
-      stats.bySubject[t.subjectGroup] = (stats.bySubject[t.subjectGroup] || 0) + 1;
+      stats.bySubject[subjBase(t.subjectGroup)] = (stats.bySubject[subjBase(t.subjectGroup)] || 0) + 1;
       stats.byPos[t.positionCode] = (stats.byPos[t.positionCode] || 0) + 1;
       statusCount[statusOf(t)]++;
     });
@@ -239,7 +242,7 @@
 
     // 表格
     var list = teachers.filter(function(t) {
-      if (filterSubject && t.subjectGroup !== filterSubject) return false;
+      if (filterSubject && subjBase(t.subjectGroup) !== filterSubject) return false;
       if (filterPos && t.positionCode !== filterPos) return false;
       if (search) {
         var q = search.toLowerCase();
@@ -274,7 +277,7 @@
       html += '<tr><td colspan="' + (isSub ? 7 : 10) + '" class="empty-row">' + (isSub && subName ? ('本科组「' + esc(subName) + '」暂无匹配教师') : '无匹配教师') + '</td></tr>';
     } else {
       list.forEach(function(t, i) {
-        var sc = SUBJECT_COLORS[t.subjectGroup] || '#888';
+        var sc = SUBJECT_COLORS[subjBase(t.subjectGroup)] || '#888';
         var st = statusOf(t);
         var sm = STATUS_META[st];
         var certs = (t.certificates || []).map(function(c) {

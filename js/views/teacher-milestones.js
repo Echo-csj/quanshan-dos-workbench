@@ -85,13 +85,17 @@
 
   // ---------- 数据访问 ----------
   // 统一走 App.viewData()：子台返回总台镜像数据，总台返回本地数据
+
+  // 学科组归一：去除尾部「科组」后缀，使「数学」与「数学科组」视为同一组
+  function subjBase(s) { return String(s || '').trim().replace(/科组$/, ''); }
+
   function getTeachers() {
     var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {});
     var teachers = d.teachers || [];
     // 子台只看本科组（与教师管理过滤规则一致）
     if (isSub() && App.subContext && App.subContext.myName) {
       var nm = App.subContext.myName();
-      if (nm) teachers = teachers.filter(function(t) { return String(t.subjectGroup || '').trim() === String(nm).trim(); });
+      if (nm) teachers = teachers.filter(function(t) { return subjBase(t.subjectGroup) === subjBase(nm); });
     }
     return teachers;
   }
@@ -101,7 +105,7 @@
     // 子台只看本科组的提醒
     if (isSub() && App.subContext && App.subContext.myName) {
       var nm = App.subContext.myName();
-      if (nm) ms = ms.filter(function(m) { return String(m.subjectGroup || '').trim() === String(nm).trim(); });
+      if (nm) ms = ms.filter(function(m) { return subjBase(m.subjectGroup) === subjBase(nm); });
     }
     return ms;
   }
