@@ -517,7 +517,16 @@
     if (C == null) {
       if (consEl) consEl.innerHTML = '';
       if (pEl) pEl.value = '';
-      resEl.innerHTML = '<div class="lk-empty">校区生产指标 C 尚未从数据分析台同步。请在「数据分析台 → 核心看板 → 科组生产预测」填写校区生产指标 C，并点击「推送分析到个人台」，本工作台登录同一账号后自动同步。</div>';
+      resEl.innerHTML = '<div class="lk-empty">' +
+        '<p><b>校区生产指标 C 尚未从数据分析台同步。</b></p>' +
+        '<p>请按以下顺序排查：</p>' +
+        '<ol style="text-align:left;display:inline-block;margin:8px 0;line-height:1.8">' +
+        '<li>在「数据分析台 → 核心看板 → 科组生产预测」的<b>校区生产指标（总盘 C）</b>输入框中填写数字；</li>' +
+        '<li>点击数据分析台右下角的<b>「推送分析到个人台」</b>；</li>' +
+        '<li>在本页点击右上角的<b>「查看联动数据」</b>确认快照已更新，或刷新本页面。</li>' +
+        '</ol>' +
+        '<p style="font-size:12px;color:var(--text-faint)">提示：如果在数据分析台输入 C 后未触发自动保存，请任意修改一次 C 值（如先删后写）再推送。</p>' +
+        '</div>';
       return;
     }
     var parts = mEl.value.split('-');
