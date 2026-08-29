@@ -36,6 +36,11 @@
   /* ---------------- 数据访问 ---------------- */
   function getTasks() { return App.store.get('tasks') || []; }
 
+  /* 同级互发任务开关（config.js TASK_SHARE）：关闭时不显示「📤 发送」入口 */
+  function taskShareOn() {
+    return !!(App.taskShare && App.taskShare.isEnabled && App.taskShare.isEnabled());
+  }
+
   /* ---------------- 视图设置（持久化）---------------- */
   var VIEW_DEFAULT = { mode:'kanban', density:'standard', filters:{status:[],priority:[],source:[],scope:[]}, sortBy:'dueDate', sortDir:'asc', search:'', expanded:{}, columnLimit:10 };
   function getViewSettings() {
@@ -382,7 +387,7 @@
     html += '<td><span style="font-size:11px;color:var(--text-muted)">' + srcLabel + '</span></td>';
     html += '<td class="list-actions">';
     html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
-    html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
+    if (taskShareOn()) html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
     if (t.status === 'done') html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
     html += '<button class="btn-icon btn-icon-danger" title="删除" onclick="App.views.tasks.deleteTask(\'' + t.id + '\')">' + App.util.svgIcon('trash-2', 14) + '</button>';
     html += '</td>';
@@ -483,7 +488,7 @@
     // 操作按钮
     html += '<div class="kanban-card-actions">';
     html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
-    html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
+    if (taskShareOn()) html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
     if (t.status === 'done') {
       html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
     }
@@ -554,7 +559,7 @@
 
   // 若任务来自同事发送（shareId），完成时回写状态给发送方
   function maybeSyncDone(t, status) {
-    if (status === 'done' && t && t.shareId && App.taskShare && App.taskShare.markDone) {
+    if (status === 'done' && t && t.shareId && taskShareOn() && App.taskShare.markDone) {
       try { App.taskShare.markDone(t.shareId); } catch (e) {}
     }
   }

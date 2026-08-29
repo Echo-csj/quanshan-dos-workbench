@@ -201,12 +201,13 @@
       return;
     }
     var user = session && session.user && session.user.email ? session.user.email : '已同步';
+    var tsOn = !!(App.taskShare && App.taskShare.isEnabled && App.taskShare.isEnabled());
     w.innerHTML = '<div class="sw-box"><span class="sw-dot green"></span>' +
       '<span class="sw-user">' + user + ' · 已同步</span>' +
-      '<button id="sync-tasks" class="sw-btn small">任务协作<span id="ts-badge" class="sw-badge" style="display:none"></span></button>' +
+      (tsOn ? '<button id="sync-tasks" class="sw-btn small">任务协作<span id="ts-badge" class="sw-badge" style="display:none"></span></button>' : '') +
       '<button id="sync-link" class="sw-btn small">查看联动数据</button>' +
       '<button id="sync-out" class="sw-link">退出</button></div>';
-    el('sync-tasks').onclick = function () { if (App.taskShare && App.taskShare.openInbox) App.taskShare.openInbox(); };
+    if (tsOn) el('sync-tasks').onclick = function () { if (App.taskShare && App.taskShare.openInbox) App.taskShare.openInbox(); };
     el('sync-link').onclick = openSharedModal;
     el('sync-out').onclick = signOut;
   }

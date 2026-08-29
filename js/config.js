@@ -5,5 +5,8 @@
 window.APP_CONFIG = {
   SUPABASE_URL: 'https://zxemcyngesgxpbevdxsu.supabase.co',
   SUPABASE_ANON_KEY: 'sb_publishable_b3iWR8Dd4Gng8PEeI98IWg_1cHuB2Dt',
-  APP_NAME: 'dos-workbench'
+  APP_NAME: 'dos-workbench',
+  // 同级互发任务（task_share）：当前关闭——团队/下属场景由「多层级工作台」承担。
+  // 若以后要和同级同事互派任务：改为 true，并在 Supabase 执行 schema.sql 第 6 节建表即可恢复。
+  TASK_SHARE: false
 };

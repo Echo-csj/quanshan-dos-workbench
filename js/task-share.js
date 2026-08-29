@@ -21,12 +21,14 @@
     return !cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY ||
       /YOUR_/.test(cfg.SUPABASE_URL || '') || /YOUR_/.test(cfg.SUPABASE_ANON_KEY || '');
   }
+  // 模块总开关（config.js 的 TASK_SHARE）：关闭时整模块停摆，UI 入口不渲染
+  function moduleEnabled() { return cfg.TASK_SHARE === true; }
   function client() { return App.sync && App.sync.getClient ? App.sync.getClient() : null; }
   function myEmail() {
     var e = App.sync && App.sync.getEmail ? App.sync.getEmail() : null;
     return e ? String(e).toLowerCase() : null;
   }
-  function signedIn() { return !disabled() && !!myEmail(); }
+  function signedIn() { return moduleEnabled() && !disabled() && !!myEmail(); }
 
   function setPending(n) {
     _pending = n;
@@ -239,8 +241,8 @@
     listEl.innerHTML = html;
   }
 
-  /* ---------------- 启动：登录后订阅 ---------------- */
-  if (App.sync && App.sync.onStatus) {
+  /* ---------------- 启动：登录后订阅（模块关闭时不订阅、不查表） ---------------- */
+  if (moduleEnabled() && App.sync && App.sync.onStatus) {
     App.sync.onStatus(function (s) {
       if (s === 'ok') { subscribeRealtime(); refreshPending(); }
       else if (s === 'signedout' || s === 'disabled') { setPending(0); }
@@ -263,6 +265,7 @@
     onPending: function (f) { _pendingListeners.push(f); },
     getPending: function () { return _pending; },
     refreshPending: refreshPending,
-    signedIn: signedIn
+    signedIn: signedIn,
+    isEnabled: moduleEnabled
   };
 })(window);
