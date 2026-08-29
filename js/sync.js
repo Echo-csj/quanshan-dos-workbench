@@ -16,7 +16,11 @@
   var status = disabled ? 'disabled' : 'signedout';
   var statusListeners = [];
 
-  function setStatus(s, msg) { status = s; statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} }); }
+  function setStatus(s, msg) {
+    status = s;
+    try { renderWidget(); } catch (e) {}   // 状态变化即重绘小组件，避免登录后残留登录框
+    statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} });
+  }
   function ensureClient() {
     if (disabled || client) return client;
     if (global.supabase && global.supabase.createClient) {
@@ -161,12 +165,25 @@
       schedulePush(App.store.getData());
     });
   }
+  function onVisibility() { if (!document.hidden && session) applyRemote(); }
   function subscribeRealtime() {
     if (!session || !client) return;
-    channel = client.channel(TABLE + ':' + uid())
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: 'user_id=eq.' + uid() }, function () { applyRemote(); })
-      .subscribe();
-    document.addEventListener('visibilitychange', function () { if (!document.hidden && session) applyRemote(); });
+    try {
+      // 幂等：释放已存在的同频道订阅，避免重复订阅触发“cannot add postgres_changes after subscribe”
+      if (channel) {
+        try { channel.unsubscribe(); } catch (e) {}
+        try { client.removeChannel(channel); } catch (e) {}
+        channel = null;
+      }
+      channel = client.channel(TABLE + ':' + uid())
+        .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: 'user_id=eq.' + uid() }, function () { applyRemote(); })
+        .subscribe();
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.addEventListener('visibilitychange', onVisibility);
+    } catch (e) {
+      // 实时订阅失败不应影响登录主流程
+      console.warn('[sync] subscribeRealtime 失败（不影响登录）:', e && e.message ? e.message : e);
+    }
   }
 
   // ---- 联动桥：读取分析台推送的快照 ----
