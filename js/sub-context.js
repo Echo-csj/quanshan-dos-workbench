@@ -74,17 +74,25 @@
     project_lead:     ['/data', '/teachers']
   };
 
+  // 所有子工作台统一隐藏的模块（与角色无关）——「设置」对所有子台不可见
+  var SUB_WIDE_HIDDEN = ['/settings'];
+
+  // 子台生效的完整隐藏路由 = 全员统一隐藏 + 角色差异隐藏
+  function subHiddenRoutes() {
+    return SUB_WIDE_HIDDEN.concat(ROLE_HIDDEN_ROUTES[myRole()] || []);
+  }
+
   // 子台是否允许查看某路由（模块可见性守卫；前缀匹配，覆盖 /data 下的子路由如 /data/kezu-rank）
   function canView(route) {
     if (!isSub()) return true;               // 总台最高权限
-    var hidden = ROLE_HIDDEN_ROUTES[myRole()] || [];
+    var hidden = subHiddenRoutes();
     for (var i = 0; i < hidden.length; i++) {
       if (route === hidden[i] || route.indexOf(hidden[i] + '/') === 0) return false;
     }
     return true;
   }
   function hiddenRoutes() {
-    return isSub() ? (ROLE_HIDDEN_ROUTES[myRole()] || []) : [];
+    return isSub() ? subHiddenRoutes() : [];
   }
 
   // 识别：我是否某组织的子工作台成员
@@ -161,10 +169,10 @@
     applyRoleVisibility();
   }
 
-  // 按角色隐藏无权访问的侧栏/移动端模块入口
+  // 按角色隐藏无权访问的侧栏/移动端模块入口（含全员统一隐藏，如「设置」）
   function applyRoleVisibility() {
     if (!isSub()) return;
-    var hidden = ROLE_HIDDEN_ROUTES[myRole()] || [];
+    var hidden = subHiddenRoutes();
     if (!hidden.length) return;
     try {
       var items = document.querySelectorAll('[data-route]');

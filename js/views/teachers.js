@@ -180,12 +180,8 @@
     var subName = isSub && App.subContext ? App.subContext.myName() : null;
     var teachers = getTeachers();
 
-    // 子台只看本科组：教师学科组去除「科组」后缀后，与本子工作台名称匹配
-    if (isSub && subName) {
-      teachers = teachers.filter(function(t) {
-        return canonSubject(t.subjectGroup) === canonSubject(subName);
-      });
-    }
+    // 权限规则：所有子工作台均可查看全部教师（不再按本科组过滤），
+    // 仅隐藏「毕业院校 / 学历 / 专业」三字段（见下方表头与行渲染的 isSub 分支）。
 
     // 统计
     var stats = { total: teachers.length, bySubject: {}, byPos: {} };
@@ -232,17 +228,11 @@
     // 统计条
     html += '<div class="teacher-stats">';
     html += '<span class="stat-pill">共 <b>' + stats.total + '</b> 人</span>';
-    if (isSub) {
-      if (subName) {
-        var c2 = SUBJECT_COLORS[subName] || '#4F46E5';
-        html += '<span class="stat-pill"><span class="dot" style="background:' + c2 + '"></span>' + esc(subName) + ' ' + (stats.bySubject[subName] || 0) + '</span>';
-      }
-    } else {
-      SUBJECT_GROUPS.forEach(function(sg) {
-        var c = SUBJECT_COLORS[sg] || '#888';
-        html += '<span class="stat-pill"><span class="dot" style="background:' + c + '"></span>' + sg + ' ' + (stats.bySubject[sg] || 0) + '</span>';
-      });
-    }
+    SUBJECT_GROUPS.forEach(function(sg) {
+      var c = SUBJECT_COLORS[sg] || '#888';
+      var mine = isSub && subName && canonSubject(subName) === sg;
+      html += '<span class="stat-pill"><span class="dot" style="background:' + c + '"></span>' + sg + ' ' + (stats.bySubject[sg] || 0) + (mine ? ' · 我的科组' : '') + '</span>';
+    });
     html += '<span class="stat-pill stat-active"><span class="dot" style="background:#16A34A"></span>在职 ' + statusCount.active + '</span>';
     html += '<span class="stat-pill stat-pending"><span class="dot" style="background:#F97316"></span>待离职 ' + statusCount.pending + '</span>';
     html += '<span class="stat-pill stat-left"><span class="dot" style="background:#94A3B8"></span>离职 ' + statusCount.left + '</span>';
@@ -284,7 +274,7 @@
     html += '<th style="width:180px">证书</th>';
     html += '</tr></thead><tbody>';
     if (list.length === 0) {
-      html += '<tr><td colspan="' + (isSub ? 7 : 10) + '" class="empty-row">' + (isSub && subName ? ('本科组「' + esc(subName) + '」暂无匹配教师') : '无匹配教师') + '</td></tr>';
+      html += '<tr><td colspan="' + (isSub ? 7 : 10) + '" class="empty-row">无匹配教师</td></tr>';
     } else {
       list.forEach(function(t, i) {
         var sc = SUBJECT_COLORS[canonSubject(t.subjectGroup)] || '#888';
