@@ -85,8 +85,26 @@
 
   // ---------- 数据访问 ----------
   // 统一走 App.viewData()：子台返回总台镜像数据，总台返回本地数据
-  function getTeachers() { var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {}); return d.teachers || []; }
-  function getMilestones() { var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {}); return d.teacherMilestones || []; }
+  function getTeachers() {
+    var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {});
+    var teachers = d.teachers || [];
+    // 子台只看本科组（与教师管理过滤规则一致）
+    if (isSub() && App.subContext && App.subContext.myName) {
+      var nm = App.subContext.myName();
+      if (nm) teachers = teachers.filter(function(t) { return String(t.subjectGroup || '').trim() === String(nm).trim(); });
+    }
+    return teachers;
+  }
+  function getMilestones() {
+    var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {});
+    var ms = d.teacherMilestones || [];
+    // 子台只看本科组的提醒
+    if (isSub() && App.subContext && App.subContext.myName) {
+      var nm = App.subContext.myName();
+      if (nm) ms = ms.filter(function(m) { return String(m.subjectGroup || '').trim() === String(nm).trim(); });
+    }
+    return ms;
+  }
   function teacherKey(t) { return t.id || (t.name + '｜' + t.subjectGroup); }
   function isSub() { return !!(App.isSub && App.isSub()); }
 

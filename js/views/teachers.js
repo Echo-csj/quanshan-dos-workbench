@@ -163,7 +163,16 @@
   function render() {
     var container = document.getElementById('view-container');
     if (!container) return;
+    var isSub = !!App.isSub();
+    var subName = isSub && App.subContext ? App.subContext.myName() : null;
     var teachers = getTeachers();
+
+    // 子台只看本科组（学科组 == 子工作台名称）
+    if (isSub && subName) {
+      teachers = teachers.filter(function(t) {
+        return String(t.subjectGroup || '').trim() === String(subName).trim();
+      });
+    }
 
     // 统计
     var stats = { total: teachers.length, bySubject: {}, byPos: {} };
@@ -193,7 +202,7 @@
       html += '<option value="' + code + '"' + (filterPos === code ? ' selected' : '') + '>' + code + ' · ' + POSITION_CODEBOOK[code] + ' (' + (stats.byPos[code] || 0) + ')</option>';
     });
     html += '</select>';
-    html += '<input type="text" class="form-input form-input-sm" id="tch-search" placeholder="搜索姓名/院校/专业/证书/状态…" value="' + esc(search) + '" oninput="App.views.teachers.onSearchChange(this.value)">';
+    html += '<input type="text" class="form-input form-input-sm" id="tch-search" placeholder="' + (isSub ? '搜索姓名/证书/状态…' : '搜索姓名/院校/专业/证书/状态…') + '" value="' + esc(search) + '" oninput="App.views.teachers.onSearchChange(this.value)">';
     html += '</div>';
     html += '<div class="teacher-actions">';
     if (!App.isSub()) {
@@ -210,10 +219,17 @@
     // 统计条
     html += '<div class="teacher-stats">';
     html += '<span class="stat-pill">共 <b>' + stats.total + '</b> 人</span>';
-    SUBJECT_GROUPS.forEach(function(sg) {
-      var c = SUBJECT_COLORS[sg] || '#888';
-      html += '<span class="stat-pill"><span class="dot" style="background:' + c + '"></span>' + sg + ' ' + (stats.bySubject[sg] || 0) + '</span>';
-    });
+    if (isSub) {
+      if (subName) {
+        var c2 = SUBJECT_COLORS[subName] || '#4F46E5';
+        html += '<span class="stat-pill"><span class="dot" style="background:' + c2 + '"></span>' + esc(subName) + ' ' + (stats.bySubject[subName] || 0) + '</span>';
+      }
+    } else {
+      SUBJECT_GROUPS.forEach(function(sg) {
+        var c = SUBJECT_COLORS[sg] || '#888';
+        html += '<span class="stat-pill"><span class="dot" style="background:' + c + '"></span>' + sg + ' ' + (stats.bySubject[sg] || 0) + '</span>';
+      });
+    }
     html += '<span class="stat-pill stat-active"><span class="dot" style="background:#16A34A"></span>在职 ' + statusCount.active + '</span>';
     html += '<span class="stat-pill stat-pending"><span class="dot" style="background:#F97316"></span>待离职 ' + statusCount.pending + '</span>';
     html += '<span class="stat-pill stat-left"><span class="dot" style="background:#94A3B8"></span>离职 ' + statusCount.left + '</span>';
@@ -228,7 +244,9 @@
       if (search) {
         var q = search.toLowerCase();
         var sm = STATUS_META[statusOf(t)];
-        var hay = [t.name, t.school, t.major, t.degree, sm.label, (t.certificates || []).join(' '), (t.tags || []).join(' '), posName(t.positionCode)].join(' ').toLowerCase();
+        var hay = [t.name, t.subjectGroup, sm.label, (t.certificates || []).join(' '), (t.tags || []).join(' '), posName(t.positionCode)];
+        if (!isSub) hay.push(t.school, t.major, t.degree);
+        hay = hay.join(' ').toLowerCase();
         if (hay.indexOf(q) < 0) return false;
       }
       return true;
@@ -245,13 +263,15 @@
     html += '<th style="width:60px">岗位</th>';
     html += '<th style="width:92px">入职日期</th>';
     html += '<th style="width:80px">工龄</th>';
-    html += '<th style="width:132px">毕业院校</th>';
-    html += '<th style="width:72px">学历</th>';
-    html += '<th>专业</th>';
+    if (!isSub) {
+      html += '<th style="width:132px">毕业院校</th>';
+      html += '<th style="width:72px">学历</th>';
+      html += '<th>专业</th>';
+    }
     html += '<th style="width:180px">证书</th>';
     html += '</tr></thead><tbody>';
     if (list.length === 0) {
-      html += '<tr><td colspan="10" class="empty-row">无匹配教师</td></tr>';
+      html += '<tr><td colspan="' + (isSub ? 7 : 10) + '" class="empty-row">' + (isSub && subName ? ('本科组「' + esc(subName) + '」暂无匹配教师') : '无匹配教师') + '</td></tr>';
     } else {
       list.forEach(function(t, i) {
         var sc = SUBJECT_COLORS[t.subjectGroup] || '#888';
@@ -271,9 +291,11 @@
         html += '<td>' + posBadge + '</td>';
         html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
         html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
-        html += '<td class="school-cell">' + esc(t.school || '—') + '</td>';
-        html += '<td class="degree-cell">' + degreeCellHtml(t) + '</td>';
-        html += '<td class="major-cell">' + esc(t.major || '—') + '</td>';
+        if (!isSub) {
+          html += '<td class="school-cell">' + esc(t.school || '—') + '</td>';
+          html += '<td class="degree-cell">' + degreeCellHtml(t) + '</td>';
+          html += '<td class="major-cell">' + esc(t.major || '—') + '</td>';
+        }
         html += '<td class="cert-cell">' + certHtml + '</td>';
         html += '</tr>';
       });
@@ -349,6 +371,7 @@
 
   /* ---------- 点击编辑教师资料 / 新建教师 ---------- */
   function openEdit(id) {
+    if (App.isSub()) { App.util.toast('子工作台只读，不可编辑教师资料', 'warn'); return; }
     var isNew = !id;
     var t = isNew ? null : getTeachers().find(function(x) { return x.id === id; });
     if (!isNew && !t) { App.util.toast('未找到该教师', 'bad'); return; }
@@ -379,19 +402,21 @@
     html += '</select></div>';
     html += '<div class="ed-field"><label>入职日期</label><input class="form-input" type="date" id="ed-entry" value="' + esc(v('entryDate')) + '"></div>';
     html += '</div>';
-    html += '<div class="ed-row">';
-    html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(v('school')) + '"></div>';
-    html += '<div class="ed-field"><label>学历</label><select class="form-input" id="ed-degree">';
-    html += '<option value=""' + (isNew || !t.degree ? ' selected' : '') + '>未填写</option>';
-    DEGREE_OPTIONS.forEach(function(d) {
-      html += '<option value="' + d + '"' + sel('degree', d) + '>' + d + '</option>';
-    });
-    if (!isNew && t.degree && DEGREE_OPTIONS.indexOf(t.degree) < 0) {
-      html += '<option value="' + esc(t.degree) + '" selected>' + esc(t.degree) + '（原值）</option>';
+    if (!App.isSub()) {
+      html += '<div class="ed-row">';
+      html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(v('school')) + '"></div>';
+      html += '<div class="ed-field"><label>学历</label><select class="form-input" id="ed-degree">';
+      html += '<option value=""' + (isNew || !t.degree ? ' selected' : '') + '>未填写</option>';
+      DEGREE_OPTIONS.forEach(function(d) {
+        html += '<option value="' + d + '"' + sel('degree', d) + '>' + d + '</option>';
+      });
+      if (!isNew && t.degree && DEGREE_OPTIONS.indexOf(t.degree) < 0) {
+        html += '<option value="' + esc(t.degree) + '" selected>' + esc(t.degree) + '（原值）</option>';
+      }
+      html += '</select></div>';
+      html += '<div class="ed-field"><label>专业</label><input class="form-input" id="ed-major" value="' + esc(v('major')) + '"></div>';
+      html += '</div>';
     }
-    html += '</select></div>';
-    html += '<div class="ed-field"><label>专业</label><input class="form-input" id="ed-major" value="' + esc(v('major')) + '"></div>';
-    html += '</div>';
     html += '<div class="ed-field"><label>证书（用 、或 , 分隔多个）</label><input class="form-input" id="ed-certs" value="' + esc((isNew ? [] : (t.certificates || [])).join('、')) + '"></div>';
     html += '<div class="ed-field"><label>标签（点击添加/移除，可输入自定义标签后回车）</label><div class="ed-tags" id="ed-tags-wrap"></div></div>';
     html += '</div>';
