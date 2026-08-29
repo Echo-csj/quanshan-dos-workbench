@@ -160,6 +160,14 @@
     readyCbs.push(cb);
   }
 
+  // 重置子台身份（退出登录时调用）：清空身份与总台缓存，允许下次登录重新解析
+  function reset() {
+    identity = null;
+    masterData = null;
+    started = false;
+    readyFired = false;
+  }
+
   // 子台视角 UI 调整：隐藏「团队」导航段 + 按角色隐藏无权模块
   function applySubUI() {
     try {
@@ -282,7 +290,8 @@
     myRole: myRole,
     myProjectTags: myProjectTags,
     onMasterChange: onMasterChange,
-    onReady: onReady
+    onReady: onReady,
+    reset: reset
   };
 
   // 权限模块（供总台/子台共用：角色列表、任务标签、模块可见性守卫）

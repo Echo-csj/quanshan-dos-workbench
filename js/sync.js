@@ -32,6 +32,16 @@
   }
   function uid() { return session && session.user ? session.user.id : null; }
 
+  // 兜底清除 Supabase 本端持久化的会话令牌（键形如 sb-<ref>-auth-token），
+  // 保证即便 signOut 网络请求失败，刷新后也不会“复活”会话。
+  function clearAuthToken() {
+    try {
+      Object.keys(localStorage).forEach(function (k) {
+        if (/^sb-.*-auth-token$/.test(k)) localStorage.removeItem(k);
+      });
+    } catch (e) {}
+  }
+
   // ---- profile 自动 upsert（多层级工作台：邮箱 ↔ user_id 解析） ----
   // 表尚未建立（未执行 schema.sql 第 7 节）时静默跳过，不影响登录与主流程
   async function upsertProfile() {
@@ -85,7 +95,30 @@
       setStatus('error', (e && e.message) ? e.message : '网络异常，请稍后重试');
     }
   }
-  async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
+  async function signOut() {
+    // 释放实时订阅与防抖推送，避免退出后残留连接/定时器
+    if (channel) {
+      try { channel.unsubscribe(); } catch (e) {}
+      try { if (client && client.removeChannel) client.removeChannel(channel); } catch (e) {}
+      channel = null;
+    }
+    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+    // 退出：scope:'local' 只清本端会话，不撤销其它设备/另一工作台的会话
+    if (client) {
+      try { await client.auth.signOut({ scope: 'local' }); } catch (e) { console.warn('[sync] signOut', e); }
+    }
+    // 兜底：无论网络成败，强制清除本端持久化令牌，防刷新后会话复活
+    clearAuthToken();
+    session = null;
+    setStatus('signedout');
+    // 重置子台身份，保证换账号后重新解析角色/科组
+    try { if (App.subContext && App.subContext.reset) App.subContext.reset(); } catch (e) {}
+    // 清除本机记住的邮箱，避免残留上一账号
+    try { localStorage.removeItem('ca_remember'); } catch (e) {}
+    // 回默认页，避免下次进入深层/无权路由
+    try { if (App.router && App.router.navigate) App.router.navigate('/today'); } catch (e) {}
+    renderWidget();
+  }
 
   // ---- 数据 ----
   async function pull() {

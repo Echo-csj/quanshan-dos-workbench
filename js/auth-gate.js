@@ -6,16 +6,16 @@
    依赖：App.sync（登录状态 getStatus / 登录方法 signIn / 状态回调 onStatus）。
 
    登录体验增强：
-   - 记住密码：勾选后将账号+密码保存在本机 localStorage，下次自动填充，
-     并支持勾选后的「快捷登录」（再次打开页面自动发起登录）。
-   - 状态反馈：点击登录后立即进入「加载中」态（按钮禁用+旋转动画），
-     成功后显示「登录成功 ✓」再解锁，失败显示明确错误并恢复可点击。
+   - 记住邮箱：仅在本机保存邮箱用于下次自动填充；绝不保存密码。明文密码
+     是安全隐患，已改为依赖 Supabase 会话持久化实现「保持登录」。
+   - 状态反馈：点击登录后立即进入「加载中」态，成功显示「登录成功 ✓」，
+     失败显示明确错误；退出登录后立即重新锁屏并清空已渲染内容。
    ============================================ */
 (function (global) {
   'use strict';
   var App = global.App || (global.App = {});
 
-  var REMEMBER_KEY = 'ca_remember';   // 本机保存的登录凭据（明文，仅用于本机便捷登录）
+  var REMEMBER_KEY = 'ca_remember';   // 仅存邮箱（不存密码）
   var prevStatus = null;
 
   function status() {
@@ -23,18 +23,24 @@
   }
   function isAuthed() { return status() === 'ok'; }
 
-  /* ---------------- 记住密码（本地持久化） ---------------- */
+  /* ---------------- 记住邮箱（本地持久化，只存邮箱） ---------------- */
   function loadRemember() {
     try {
       var raw = localStorage.getItem(REMEMBER_KEY);
       if (!raw) return null;
       var o = JSON.parse(raw);
+      // 迁移：清掉历史版本遗留的明文密码，只保留邮箱
+      if (o && o.password) {
+        var clean = { email: typeof o.email === 'string' ? o.email : '' };
+        try { localStorage.setItem(REMEMBER_KEY, JSON.stringify(clean)); } catch (e) {}
+        return clean;
+      }
       if (o && typeof o.email === 'string') return o;
     } catch (e) {}
     return null;
   }
-  function saveRemember(email, password) {
-    try { localStorage.setItem(REMEMBER_KEY, JSON.stringify({ email: email, password: password, auto: true })); } catch (e) {}
+  function saveRemember(email) {
+    try { localStorage.setItem(REMEMBER_KEY, JSON.stringify({ email: email })); } catch (e) {}
   }
   function clearRemember() {
     try { localStorage.removeItem(REMEMBER_KEY); } catch (e) {}
@@ -78,31 +84,13 @@
     var email = e ? e.value.trim() : '';
     var pass = p ? p.value : '';
     if (!email || !pass) { showError('请填写邮箱和密码'); return; }
-    // 立即给出反馈：进入加载态，避免“点击无响应”
     var err = document.getElementById('ag-err');
     if (err) err.style.display = 'none';
-    setLoading(true);
-    // 记住密码：勾选则保存，未勾选则清除
-    if (rem && rem.checked) saveRemember(email, pass);
+    setLoading(true);   // 立即进入加载态，避免“点击无响应”
+    // 记住邮箱：勾选则保存邮箱，未勾选则清除（不保存密码）
+    if (rem && rem.checked) saveRemember(email);
     else clearRemember();
     App.sync.signIn(email, pass);
-  }
-
-  // 快捷登录：本机存有凭据且未自动鉴权成功时，自动发起登录
-  function tryQuickLogin() {
-    var rem = loadRemember();
-    if (!rem || !rem.email || !rem.password) return;
-    var e = document.getElementById('ag-email');
-    var p = document.getElementById('ag-pass');
-    var cb = document.getElementById('ag-remember');
-    if (e) e.value = rem.email;
-    if (p) p.value = rem.password;
-    if (cb) cb.checked = true;
-    // 仅在确实未登录（Supabase 会话已失效）时才自动登录，避免无谓请求
-    if (status() === 'signedout') {
-      setLoading(true);
-      App.sync.signIn(rem.email, rem.password);
-    }
   }
 
   // 云端未配置（APP_CONFIG 为 YOUR_ 占位）时无登录能力，给出提示
@@ -119,14 +107,12 @@
     var pass = document.getElementById('ag-pass');
     if (pass) pass.onkeydown = function (ev) { if (ev.key === 'Enter') signIn(); };
 
-    // 回显已记住的凭据
+    // 回显已记住的邮箱（仅邮箱，不存密码）
     var rem = loadRemember();
-    if (rem) {
+    if (rem && rem.email) {
       var e = document.getElementById('ag-email');
-      var p = document.getElementById('ag-pass');
       var cb = document.getElementById('ag-remember');
-      if (e && rem.email) e.value = rem.email;
-      if (p && rem.password) p.value = rem.password;
+      if (e) e.value = rem.email;
       if (cb) cb.checked = true;
     }
 
@@ -146,13 +132,14 @@
             apply();
           }
         }
+        else if (s === 'signedout') {
+          setLoading(false);
+          apply();   // 退出登录 → 立即重新锁屏并清空已渲染内容
+        }
         prevStatus = s;
       });
     }
     apply();
-
-    // 延迟一点再尝试快捷登录，等 sync.start() 的会话探测完成
-    setTimeout(tryQuickLogin, 400);
   }
 
   // 锁定 / 解锁整个应用（body.auth-locked 控制 CSS：隐藏 app-shell，显示登录屏）
@@ -163,10 +150,12 @@
       // 清除已渲染内容，避免 DOM 残留（防御：即便用 devtools 去掉锁定类也看不到数据）
       var vc = document.getElementById('view-container');
       if (vc) vc.innerHTML = '';
-      // 回到锁定态时复位按钮（防止残留 success/loading 样式）
+      // 回到锁定态时复位按钮与密码框（防止残留 success/loading 样式与明文密码）
       var btn = document.getElementById('ag-login');
       if (btn && btn.classList) btn.classList.remove('success', 'loading');
       setLoading(false);
+      var pass = document.getElementById('ag-pass');
+      if (pass) pass.value = '';
     } else {
       document.body.classList.remove('auth-locked');
       // 登录成功 → 重新渲染当前路由，恢复完整内容
