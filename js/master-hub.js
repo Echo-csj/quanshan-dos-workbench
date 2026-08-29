@@ -377,38 +377,29 @@
     return out;
   }
 
-  // 总台标记完成某子工作台的一条教师里程碑（转正/工龄提醒），三方联动写回子台
-  async function markMemberMilestoneDone(userId, milestoneId) {
-    var c = client(); if (!c || !uid()) { App.util.toast('请先登录云端同步', 'warn'); return { ok: false }; }
-    var row = await c.from('dos_workbench').select('data').eq('user_id', userId).maybeSingle();
-    if (row.error || !row.data) { App.util.toast('读不到该子工作台的数据（子台可能尚未登录云端同步）', 'warn'); return { ok: false }; }
-    var data = row.data.data || {};
-
-    var ms = data.teacherMilestones || [];
-    var m = null;
-    ms.forEach(function (x) { if (String(x.id) === String(milestoneId)) m = x; });
-    if (!m) { App.util.toast('该提醒已不存在（可能子台已处理）', 'warn'); return { ok: false }; }
-    m.status = 'done';
-    m.doneAt = new Date().toISOString();
-
-    var tasks = data.tasks || [];
-    tasks.forEach(function (t) { if (t && t.id === m.taskId) t.status = 'done'; });
-
-    var tl = data.timeline || {};
-    var nodes = tl.customNodes || [];
-    nodes.forEach(function (n) { if (n && n.id === m.timelineNodeId) { n.done = true; n.title = (n.title || '').replace(/ ✅$/, '') + ' ✅'; } });
-
-    data.teacherMilestones = ms;
-    data.tasks = tasks;
-    data.timeline = tl;
-
-    var up = await c.from('dos_workbench').upsert(
-      { user_id: userId, data: data, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id' }
-    );
-    if (up.error) { App.util.toast('写回失败：' + (up.error.message || ''), 'warn'); return { ok: false }; }
-    await log('member_milestone_done', { targetUserId: userId, dataType: 'teacherMilestones', itemId: milestoneId, detail: { teacherName: m.teacherName } });
-    App.util.toast('已标记完成并同步回子工作台', 'ok');
+  // 总台对子工作台内容发「标注提示」（只读 + 标注，不直接修改子台数据）
+  // targetType: 'teacherMilestone' | 'task' | 'teacher' | ...；targetId: 目标条目 id；note: 标注文字
+  async function sendAnnotation(toUserId, targetType, targetId, note) {
+    var orgId = await getMyOrgId();
+    var c = client();
+    if (!c || !orgId) { App.util.toast('请先创建组织', 'warn'); return { ok: false }; }
+    note = String(note || '').trim();
+    if (!note) { App.util.toast('请填写标注内容', 'warn'); return { ok: false }; }
+    var r = await c.from('shared_item').insert({
+      org_id: orgId,
+      grant_id: null,
+      from_user_id: uid(),
+      to_user_id: toUserId,
+      data_type: 'annotation',
+      item_id: String(targetId || ''),
+      permission: 'read',
+      direction: 'down',
+      payload: { targetType: targetType, targetId: targetId, note: note, at: new Date().toISOString() },
+      status: 'active'
+    });
+    if (r.error) { App.util.toast('标注失败：' + (r.error.message || ''), 'warn'); return { ok: false }; }
+    await log('annotation_sent', { targetUserId: toUserId, dataType: 'annotation', itemId: targetId, detail: { note: note } });
+    App.util.toast('标注已发送给子工作台', 'ok');
     return { ok: true };
   }
 
@@ -435,7 +426,7 @@
     listLogs: listLogs,
     fetchMemberData: fetchMemberData,
     fetchAllMembersData: fetchAllMembersData,
-    markMemberMilestoneDone: markMemberMilestoneDone,
+    sendAnnotation: sendAnnotation,
     // 工具（供视图复用）
     extractItems: extractItems,
     trimPayload: trimPayload

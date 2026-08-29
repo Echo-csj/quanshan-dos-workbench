@@ -338,11 +338,12 @@ as $$
 $$;
 
 -- ============================================================
--- 7.10 总工作台查看 / 操作子工作台数据（团队汇总）
---      允许组织 owner 读取 + 写回本组织成员（子工作台）的 dos_workbench 整档数据，
---      用于「总台汇总查看子台教师转正/工龄提醒」并「标记完成同步回子台」。
+-- 7.10 总工作台查看子工作台数据（团队汇总 · 只读）
+--      允许组织 owner 读取本组织成员（子工作台）的 dos_workbench 整档数据，
+--      用于「总台汇总查看子台教师转正/工龄提醒」。
+--      总台对子台数据仅「只读 + 标注」：标注通过 shared_item(direction=down, data_type='annotation') 下发，
+--      不直接修改子台数据 —— 故此处只授 SELECT，不授 insert/update。
 --      复用 7.6b 的 security definer 函数 is_my_org_member，不会触发 RLS 递归。
---      注意：org owner 因此对本组织成员的整档数据有读写权，属授权设计（可随时撤销）。
 -- ============================================================
 
 -- 读：总台可查看本组织成员的整档数据
@@ -350,17 +351,11 @@ drop policy if exists "org_owner_select_member_dw" on dos_workbench;
 create policy "org_owner_select_member_dw" on dos_workbench
   for select using (public.is_my_org_member(dos_workbench.user_id));
 
--- 写：总台可为本组织成员初始化 / 更新整档数据（标记完成等操作同步回子台）
+-- 撤销：总台不再直接写子台数据（改为标注提示，见 7.11）
 drop policy if exists "org_owner_insert_member_dw" on dos_workbench;
-create policy "org_owner_insert_member_dw" on dos_workbench
-  for insert with check (public.is_my_org_member(dos_workbench.user_id));
-
 drop policy if exists "org_owner_update_member_dw" on dos_workbench;
-create policy "org_owner_update_member_dw" on dos_workbench
-  for update using (public.is_my_org_member(dos_workbench.user_id))
-  with check (public.is_my_org_member(dos_workbench.user_id));
 
--- 实时：把 dos_workbench 加入 realtime，让子台实时收到总台的写回
+-- 实时：把 dos_workbench 加入 realtime（子台数据变化时总台汇总可近实时刷新）
 do $$
 begin
   if not exists (select 1 from pg_publication_tables
@@ -368,3 +363,10 @@ begin
     alter publication supabase_realtime add table dos_workbench;
   end if;
 end $$;
+
+-- ============================================================
+-- 7.11 总台 → 子台标注提示（总台只读，不改子台数据）
+--      标注即一条 shared_item(direction=down, data_type='annotation')，
+--      总台(org owner) 可插入（item_owner_all 策略），子台(item_sub_read) 只读。
+--      子台在对应条目展示标注，看到后自行处理（完成/修改）。
+-- ============================================================

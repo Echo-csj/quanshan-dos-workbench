@@ -311,7 +311,7 @@
       html += '</tbody></table></div>';
     }
     html += '<p class="ms-foot muted">' + (teamMode
-      ? '团队汇总展示所有子工作台已同步到云端的转正/工龄提醒；「标记完成」会写回对应子工作台并同步其时间轴与待办。'
+      ? '团队汇总展示所有子工作台已同步到云端的转正/工龄提醒；你可点「标注」发送提示，由对应子工作台自行处理。'
       : '每条提醒已自动同步至「时间轴」(按触发日期展示里程碑) 与「待办事项」(含负责人/截止/状态)。标记完成后三处状态保持一致，可全程追踪。') + '</p>';
     html += '</div>';
     return html;
@@ -366,7 +366,7 @@
           html += '<td class="mono">' + (m.triggerDate || '') + '</td>';
           html += '<td class="mono">' + (m.dueDate || '') + '</td>';
           html += '<td>' + (m.status === 'done' ? '<span class="tag status-done">已完成</span>' : '<span class="tag status-todo">待处理</span>') + '</td>';
-          html += '<td>' + (m.status === 'done' ? '<span class="muted">已同步</span>' : '<button class="btn btn-primary btn-xs" onclick="App.views.teacherMilestones.teamComplete(\'' + escA(r.subUserId) + '\', \'' + escA(m.id) + '\')">标记完成</button>') + '</td>';
+          html += '<td><button class="btn btn-secondary btn-xs" onclick="App.views.teacherMilestones.teamAnnotate(\'' + escA(r.subUserId) + '\', \'' + escA(m.id) + '\')">标注</button></td>';
           html += '</tr>';
         });
         html += '</tbody></table></div>';
@@ -377,10 +377,20 @@
     });
   }
 
-  function teamComplete(subUserId, milestoneId) {
-    if (!App.masterHub || !App.masterHub.markMemberMilestoneDone) return;
-    App.masterHub.markMemberMilestoneDone(subUserId, milestoneId).then(function () {
-      renderTeamPanel();
+  function teamAnnotate(subUserId, milestoneId) {
+    if (!App.masterHub || !App.masterHub.sendAnnotation) return;
+    App.util.modal({
+      title: '发送标注提示',
+      content: '<div class="form-group"><label class="form-label">标注内容（子工作台将收到此提示，自行处理）</label>' +
+        '<textarea class="form-input" id="ms-anno-note" rows="3" placeholder="如：请尽快完成该教师的转正评估并签署合同"></textarea></div>',
+      confirmText: '发送标注',
+      onConfirm: function (close) {
+        var v = document.getElementById('ms-anno-note').value.trim();
+        if (!v) { App.util.toast('请填写标注内容', 'warn'); return; }
+        App.masterHub.sendAnnotation(subUserId, 'teacherMilestone', milestoneId, v).then(function (res) {
+          if (res && res.ok) close();
+        });
+      }
     });
   }
 
@@ -400,7 +410,7 @@
     panelHtml: panelHtml,
     setFilter: setFilter,
     switchMode: switchMode,
-    teamComplete: teamComplete,
+    teamAnnotate: teamAnnotate,
     checkAndRender: checkAndRender,
     MS_DEFS: MS_DEFS
   };
