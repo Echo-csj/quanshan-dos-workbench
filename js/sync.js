@@ -74,6 +74,7 @@
     setStatus('ok');
     subscribeStore();
     await applyRemote();
+    try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
     subscribeRealtime();
     upsertProfile();
     // 通知联动数据模块（若已挂载）刷新
@@ -168,7 +169,7 @@
   async function start() {
     if (disabled) { setStatus('disabled'); renderWidget(); return; }
     var ok = await handleRedirect();
-    if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); subscribeRealtime(); upsertProfile(); try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {} }
+    if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {} subscribeRealtime(); upsertProfile(); try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {} }
     else { setStatus('signedout'); }
     renderWidget();
   }

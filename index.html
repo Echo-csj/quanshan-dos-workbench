@@ -7,12 +7,30 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20260829g">
+  <link rel="stylesheet" href="styles.css?v=20260829h">
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#4F46E5">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
 </head>
-<body>
+<body class="auth-locked">
+
+  <!-- 登录门禁：未登录不展示任何内容（后端 RLS 已拒匿名读取，前端同步隐藏） -->
+  <div id="auth-gate" class="auth-gate">
+    <div class="ag-card">
+      <div class="ag-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      </div>
+      <h1 class="ag-title">状元港·泉山工作台</h1>
+      <p class="ag-sub">请登录后查看内容</p>
+      <div id="ag-form" class="ag-form">
+        <input id="ag-email" class="ag-input" type="email" placeholder="邮箱" autocomplete="username" />
+        <input id="ag-pass" class="ag-input" type="password" placeholder="密码" autocomplete="current-password" />
+        <button id="ag-login" class="ag-btn">登录</button>
+        <div id="ag-err" class="ag-err" style="display:none"></div>
+      </div>
+      <div id="ag-offline" class="ag-offline" style="display:none">云端同步未启用，无法验证身份。</div>
+    </div>
+  </div>
 
 <div class="app-shell">
 
@@ -145,7 +163,7 @@
 <script src="js/baseline.js?v=20260820zc"></script>
 <script src="js/lib/xlsx.full.min.js?v=20260820zc"></script>
 <script src="js/lib/lunar.js?v=20260828b"></script>
-<script src="js/router.js?v=20260829g"></script>
+<script src="js/router.js?v=20260829h"></script>
 <script src="js/util.js?v=20260828c"></script>
 <script src="js/importer.js?v=20260820zc"></script>
 <script src="js/views/today.js?v=20260829a"></script>
@@ -156,7 +174,7 @@
 <script src="js/views/teachers.js?v=20260829f"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/config.js?v=20260829b"></script>
-<script src="js/sync.js?v=20260829b"></script>
+<script src="js/sync.js?v=20260829h"></script>
 <script src="js/sub-context.js?v=20260829g"></script>
 <script src="js/views/teacher-milestones.js?v=20260829f"></script>
 <script src="js/views/projects.js?v=20260820zc"></script>
@@ -164,6 +182,7 @@
 <script src="js/task-share.js?v=20260829b"></script>
 <script src="js/master-hub.js?v=20260829g"></script>
 <script src="js/views/org-admin.js?v=20260829g"></script>
+<script src="js/auth-gate.js?v=20260829h"></script>
 
 <!-- ===== 初始化 ===== -->
 <script>

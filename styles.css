@@ -1272,6 +1272,24 @@ a:hover { color: var(--accent-hover); }
 .sw-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
 .sw-dot.green{background:#22c55e}.sw-dot.grey{background:#a1a1aa}.sw-dot.blue{background:#4F46E5}.sw-dot.red{background:#ef4444}
 
+/* ===== 登录门禁（auth-gate.js）：未登录锁定整个应用 ===== */
+.auth-gate{display:none}
+body.auth-locked .auth-gate{display:flex;position:fixed;inset:0;z-index:99999;align-items:center;justify-content:center;background:#fff;padding:24px}
+body.auth-locked .app-shell{display:none}
+body.auth-locked .sync-widget{display:none}
+.ag-card{width:100%;max-width:360px;text-align:center;display:flex;flex-direction:column;gap:14px}
+.ag-logo{width:48px;height:48px;margin:0 auto;border-radius:12px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center}
+.ag-logo svg{width:24px;height:24px}
+.ag-title{font-size:20px;font-weight:700;color:var(--text)}
+.ag-sub{font-size:13px;color:var(--text-muted)}
+.ag-form{display:flex;flex-direction:column;gap:10px}
+.ag-input{height:42px;padding:0 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;color:var(--text);background:#fff}
+.ag-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.ag-btn{height:42px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer}
+.ag-btn:hover{background:var(--accent-hover)}
+.ag-err{font-size:12px;color:var(--bad)}
+.ag-offline{font-size:13px;color:var(--text-muted)}
+
 /* ===== 教师职业发展关键节点提醒面板 ===== */
 .stat-ms { color:var(--accent-text); border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .ms-card { margin-top:18px; }

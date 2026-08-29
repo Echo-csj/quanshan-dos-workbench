@@ -25,6 +25,13 @@ window.App = window.App || {};
   function resolve() {
     var hash = window.location.hash.replace('#', '') || '/today';
 
+    // 登录守卫：未登录不渲染任何内容（防止直接访问网址看到数据/接口内容）
+    if (!(App.auth && App.auth.isAuthed && App.auth.isAuthed())) {
+      var vc = document.getElementById('view-container');
+      if (vc) vc.innerHTML = '';
+      return;
+    }
+
     // 权限守卫：子台无权访问的模块，重定向到「今日指挥台」
     if (App.perm && App.perm.canView && !App.perm.canView(hash)) {
       navigate('/today');
