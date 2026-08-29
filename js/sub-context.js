@@ -141,9 +141,9 @@
   async function start() {
     if (started) return;
     started = true;
-    if (disabled()) { fireReady(); return; }
+    if (disabled()) { restoreNavUI(); fireReady(); return; }
     var id = await resolveIdentity();
-    if (!id) { fireReady(); return; }   // 不是子台（可能是总台或独立用户）
+    if (!id) { restoreNavUI(); fireReady(); return; }   // 总台/独立用户：恢复导航
     identity = id;
     applySubUI();      // 子台视角 UI：隐藏「团队」导航段 + 按角色隐藏无权模块
     // 子台身份就绪：刷新联动数据——此时 sync.readShared 可按角色读总台 owner 的
@@ -166,6 +166,19 @@
     masterData = null;
     started = false;
     readyFired = false;
+    restoreNavUI();   // 恢复导航，避免总台残留子台视角的隐藏
+  }
+
+  // 恢复所有导航入口（总台 / 非子台视角用）：清除子台视角残留的内联隐藏
+  function restoreNavUI() {
+    try {
+      var nav = document.getElementById('nav-team');
+      if (nav) nav.style.display = '';
+    } catch (e) {}
+    try {
+      var items = document.querySelectorAll('[data-route]');
+      Array.prototype.forEach.call(items, function (el) { el.style.display = ''; });
+    } catch (e) {}
   }
 
   // 子台视角 UI 调整：隐藏「团队」导航段 + 按角色隐藏无权模块
