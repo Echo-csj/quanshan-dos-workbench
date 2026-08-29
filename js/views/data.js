@@ -1,8 +1,8 @@
 /* ============================================
-   data.js — 数据看板 v3
-   标签页：① 基准值对标  ② 环比·同比趋势  ③ 人事数据（联动自动填充）  ④ 联动数据
+   data.js — 数据看板 v4
+   标签页：① 基准值对标  ② 环比·同比趋势  ③ 人事数据  ④ 最佳科组排名  ⑤ 科组生产预测  ⑥ 联动数据
    说明：报表数据不再需要手动导入/录入，全部由「联动数据」（数据分析工作台推送的快照）自动提取填充。
-         import / 手动补录 板块已移除。
+         ④⑤ 由 linked-kezu.js 渲染，口径与数据分析台「核心看板」的「最佳科组排名 / 科组生产预测」一致。
    ============================================ */
 
 (function() {
@@ -29,28 +29,34 @@
     var container = document.getElementById('view-container');
     if (!container) return;
     var tab = (params && params.tab) || 'baseline';
-    if (['baseline', 'trend', 'hr', 'linked'].indexOf(tab) < 0) tab = 'baseline';
+    if (['baseline', 'trend', 'hr', 'linked', 'kezu-rank', 'kezu-forecast'].indexOf(tab) < 0) tab = 'baseline';
 
     var html = '';
     html += '<div class="page-head"><h1 class="page-title">数据看板</h1>';
-    html += '<p class="page-sub">基准值对标红绿灯 · 环比/同比趋势 · 人事数据（联动自动填充） · 联动数据分析台</p></div>';
+    html += '<p class="page-sub">基准值对标红绿灯 · 环比/同比趋势 · 人事数据 · 最佳科组排名 · 科组生产预测（均联动数据分析台，口径一致）</p></div>';
 
     // Tabs
     html += '<div class="tabs" style="margin-bottom:18px">';
     html += tabBtn('baseline', '🎯 基准值对标', tab);
     html += tabBtn('trend', '📈 环比 · 同比趋势', tab);
     html += tabBtn('hr', '👥 人事数据', tab);
+    html += tabBtn('kezu-rank', '🏆 最佳科组排名', tab);
+    html += tabBtn('kezu-forecast', '📊 科组生产预测', tab);
     html += tabBtn('linked', '🔗 联动数据', tab);
     html += '</div>';
 
-    if (  tab === 'baseline') html += renderBaseline();
+    if (tab === 'baseline') html += renderBaseline();
     else if (tab === 'trend') html += renderTrend();
     else if (tab === 'hr') html += renderHR();
+    else if (tab === 'kezu-rank') html += '<div id="kezu-rank-root"></div>';
+    else if (tab === 'kezu-forecast') html += '<div id="kezu-forecast-root"></div>';
     else html += '<div id="linked-root"></div>';
 
     container.innerHTML = html;
     if (tab === 'baseline') bindBaseline();
     if (tab === 'trend') bindTrend();
+    if (tab === 'kezu-rank' && App.views.linkedKezu) App.views.linkedKezu.renderRank(document.getElementById('kezu-rank-root'));
+    if (tab === 'kezu-forecast' && App.views.linkedKezu) App.views.linkedKezu.renderForecast(document.getElementById('kezu-forecast-root'));
     if (tab === 'linked' && App.views.linkedData) App.views.linkedData.render(document.getElementById('linked-root'));
   });
 

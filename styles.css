@@ -1541,3 +1541,55 @@ body.auth-locked .sync-widget{display:none}
   .oa-layout{grid-template-columns:1fr}
   .oa-detail-actions{flex-wrap:wrap}
 }
+
+/* ============================================================
+   联动 · 最佳科组排名 / 科组生产预测（linked-kezu.js）
+   口径与样式对齐「数据分析台·核心看板」，仅此处个人工作台使用
+   ============================================================ */
+.lk-kezu-wrap{display:flex;flex-direction:column;gap:16px}
+.lk-loading{color:var(--text-muted);font-size:13px;padding:28px;text-align:center}
+.lk-section{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow-1)}
+.lk-section-head{margin-bottom:12px}
+.lk-section-title{font-size:15px;font-weight:700;color:var(--text)}
+.lk-section-sub{font-size:12px;color:var(--text-muted);margin-top:3px}
+.lk-cmp-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.lk-cmp-toolbar label{font-size:12px;color:var(--text-muted)}
+.lk-input{border:1px solid var(--border-strong);border-radius:var(--radius-sm);padding:7px 10px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);min-width:96px}
+.lk-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.lk-empty{text-align:center;color:var(--text-faint);padding:32px 12px;font-size:13px}
+.lk-sub-h{font-size:13px;font-weight:600;color:var(--text);margin:16px 0 8px;padding-left:9px;border-left:3px solid var(--accent)}
+.lk-muted{color:var(--text-faint)}
+.lk-tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;font-weight:600;background:var(--surface-2);color:var(--text-muted)}
+.lk-tag.ok{background:#DCFCE7;color:var(--ok)}
+.lk-tag.warn{background:#FEF3C7;color:var(--warn)}
+.lk-section-h-flex{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px}
+
+/* 排名/对比表格（作用域内，避免影响 .data-table） */
+.lk-table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}
+.lk-table-wrap table{border-collapse:collapse;width:100%;font-size:13px}
+.lk-table-wrap th,.lk-table-wrap td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+.lk-table-wrap thead th{background:var(--surface-2);font-weight:600;color:var(--text-muted);font-size:12px}
+.lk-table-wrap tbody tr:hover{background:var(--surface-2)}
+.lk-table-wrap td.num,.lk-table-wrap th.num{text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.lk-table-wrap tfoot td{font-weight:600;background:var(--accent-soft);color:var(--accent-text);border-top:2px solid #C7D2FE}
+.lk-table-wrap tfoot td.total-label{font-weight:700}
+.lk-table-wrap tr.winner{background:#EEF2FF}
+.lk-table-wrap tr.winner td:first-child{font-weight:700;color:var(--accent)}
+.lk-table-wrap td .lk-muted{color:var(--text-faint)}
+
+/* 评分最佳 banner */
+.badge-best{display:inline-block;font-size:11px;font-weight:700;line-height:1;padding:3px 7px;border-radius:999px;background:var(--accent);color:#fff;vertical-align:1px}
+.bk-best-banner{display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,#EEF2FF,#FAFAFF);border:1px solid #C7D2FE;border-radius:var(--radius);padding:14px 16px;margin-bottom:16px;font-size:14px;color:var(--text)}
+.bk-best-banner b{font-size:16px;color:var(--accent)}
+
+/* 生产预测指标卡 */
+.lk-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+@media (max-width:880px){.lk-stat-grid{grid-template-columns:1fr 1fr}}
+.lk-stat-card{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px}
+.lk-stat-card .k{font-size:12px;color:var(--text-muted)}
+.lk-stat-card .v{font-size:22px;font-weight:700;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:6px;letter-spacing:-.01em}
+
+/* 对比模式切换（.seg 仅本板块使用，全站无冲突） */
+.seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:3px;gap:3px}
+.seg button{border:none;background:transparent;color:var(--text-muted);padding:6px 13px;border-radius:5px;cursor:pointer;font-size:13px;font-family:inherit;font-weight:500;transition:all .15s ease}
+.seg button.active{background:var(--bg);color:var(--text);box-shadow:var(--shadow-1);font-weight:600}

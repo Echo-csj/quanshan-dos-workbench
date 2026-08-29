@@ -69,11 +69,14 @@
     project_lead:     ['/data', '/teachers']
   };
 
-  // 子台是否允许查看某路由（模块可见性守卫）
+  // 子台是否允许查看某路由（模块可见性守卫；前缀匹配，覆盖 /data 下的子路由如 /data/kezu-rank）
   function canView(route) {
     if (!isSub()) return true;               // 总台最高权限
     var hidden = ROLE_HIDDEN_ROUTES[myRole()] || [];
-    return hidden.indexOf(route) === -1;
+    for (var i = 0; i < hidden.length; i++) {
+      if (route === hidden[i] || route.indexOf(hidden[i] + '/') === 0) return false;
+    }
+    return true;
   }
   function hiddenRoutes() {
     return isSub() ? (ROLE_HIDDEN_ROUTES[myRole()] || []) : [];
