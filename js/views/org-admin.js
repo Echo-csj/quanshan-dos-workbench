@@ -1,23 +1,14 @@
 /* ============================================
    views/org-admin.js — 总工作台「子工作台管理」
-   子工作台列表 / 纳管 / 共享配置 / 下发 / 回传处理 / 日志
+   子工作台列表 / 纳管 / 查看内容 / 标注提示 / 日志
    ============================================ */
 (function () {
   'use strict';
   var App = window.App || (window.App = {});
-
-  var PERMISSIONS = [
-    { v: '',         label: '不共享' },
-    { v: 'summary',  label: '仅摘要' },
-    { v: 'read',     label: '只读' },
-    { v: 'edit',     label: '可编辑' }
-  ];
+  var esc = function (s) { return App.util.escapeHtml ? App.util.escapeHtml(s) : (s == null ? '' : String(s)); };
 
   var _org = null;
   var _subs = [];
-  var _grants = [];
-  var _outgoing = [];
-  var _reverse = [];
   var _logs = [];
   var _profiles = {};
   var _selected = null;
@@ -31,14 +22,11 @@
 
   /* ---------------- 数据 ---------------- */
   async function loadAll() {
-    _org = null; _subs = []; _grants = []; _outgoing = []; _reverse = []; _logs = []; _profiles = {};
+    _org = null; _subs = []; _logs = []; _profiles = {};
     if (!App.masterHub || !App.masterHub.ready()) return;
     _org = await App.masterHub.getMyOrg();
     if (!_org) return;
     _subs = await App.masterHub.listSubs();
-    _grants = await App.masterHub.listGrants();
-    _outgoing = await App.masterHub.listOutgoing();
-    _reverse = await App.masterHub.listReverse();
     _logs = await App.masterHub.listLogs(60);
     _profiles = await loadProfiles(_subs.map(function (s) { return s.user_id; }));
     var still = _subs.filter(function (s) { return s.user_id === _selected; })[0];
@@ -68,7 +56,7 @@
 
     var html = '';
     html += '<div class="oa-head">' +
-      '<div><h2 class="oa-title">' + App.util.escapeHtml(_org.name) + '</h2>' +
+      '<div><h2 class="oa-title">' + esc(_org.name) + '</h2>' +
       '<div class="oa-sub">共 ' + _subs.length + ' 个子工作台 · 子工作台之间互相不可见</div></div>' +
       '<button class="btn btn-primary" onclick="App.views.orgAdmin.openAddSub()">+ 纳管子工作台</button>' +
       '</div>';
@@ -83,12 +71,13 @@
     }
     html += renderLogs();
     c.innerHTML = html;
+    if (_selected) setTimeout(function () { loadMemberView(); }, 0);
   }
 
   function renderNoOrg() {
     return '<div class="oa-tip">' +
       '<p><strong>还没有创建组织。</strong></p>' +
-      '<p>组织就是你的「总工作台」，创建后即可把下属纳管为子工作台并向他们共享数据。</p>' +
+      '<p>组织就是你的「总工作台」，创建后即可把下属纳管为子工作台，查看他们的内容并发送标注提示。</p>' +
       '<button class="btn btn-primary" onclick="App.views.orgAdmin.openCreateOrg()">创建组织</button>' +
       '</div>';
   }
@@ -96,13 +85,9 @@
   function renderSubItem(s) {
     var p = _profiles[s.user_id] || {};
     var active = s.user_id === _selected ? ' active' : '';
-    var nOut = _outgoing.filter(function (x) { return x.to_user_id === s.user_id && x.status === 'active'; }).length;
-    var nRev = _reverse.filter(function (x) { return x.from_user_id === s.user_id && x.status === 'active'; }).length;
-    var badge = nRev ? '<span class="oa-badge warn">回传 ' + nRev + '</span>' : '';
     return '<div class="oa-sub-item' + active + '" onclick="App.views.orgAdmin.select(\'' + s.user_id + '\')">' +
-      '<div class="oa-sub-name">' + App.util.escapeHtml(s.name || (p.email || '子工作台')) + '</div>' +
-      '<div class="oa-sub-mail">' + App.util.escapeHtml(p.email || s.user_id) + '</div>' +
-      '<div class="oa-sub-meta">已共享 ' + nOut + ' 条 ' + badge + '</div>' +
+      '<div class="oa-sub-name">' + esc(s.name || (p.email || '子工作台')) + '</div>' +
+      '<div class="oa-sub-mail">' + esc(p.email || s.user_id) + '</div>' +
       (s.status === 'suspended' ? '<span class="oa-badge">已停用</span>' : '') +
       '</div>';
   }
@@ -115,103 +100,100 @@
     var html = '';
 
     html += '<div class="oa-detail-head">' +
-      '<div><strong>' + App.util.escapeHtml(s.name || (p.email || '')) + '</strong>' +
-      '<div class="oa-sub-mail">' + App.util.escapeHtml(p.email || s.user_id) + '</div></div>' +
+      '<div><strong>' + esc(s.name || (p.email || '')) + '</strong>' +
+      '<div class="oa-sub-mail">' + esc(p.email || s.user_id) + '</div></div>' +
       '<div class="oa-detail-actions">' +
       '<button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.toggleSuspend(\'' + s.id + '\',' + (s.status === 'suspended') + ')">' + (s.status === 'suspended' ? '启用' : '停用') + '</button>' +
       '<button class="btn btn-danger btn-sm" onclick="App.views.orgAdmin.removeSub(\'' + s.id + '\')">移除</button>' +
       '</div></div>';
 
-    html += '<div class="oa-section-title">共享内容配置</div>';
-    html += '<table class="oa-table"><tr><th>数据类型</th><th>可见范围</th><th>允许回传</th><th>回传粒度</th></tr>';
-    App.masterHub.DATA_TYPES.forEach(function (t) {
-      var g = _grants.filter(function (x) { return x.to_user_id === s.user_id && x.data_type === t.v && x.active; })[0];
-      var perm = g ? g.permission : '';
-      var rev = g ? !!g.allow_reverse : false;
-      var mode = g && g.reverse_mode ? g.reverse_mode : 'status';
-      html += '<tr>' +
-        '<td>' + App.util.escapeHtml(t.label) + '</td>' +
-        '<td><select class="oa-select" id="oa-perm-' + t.v + '">' + permOptions(perm) + '</select></td>' +
-        '<td><input type="checkbox" id="oa-rev-' + t.v + '"' + (rev ? ' checked' : '') + '></td>' +
-        '<td><select class="oa-select" id="oa-revmode-' + t.v + '">' +
-          '<option value="status"' + (mode === 'status' ? ' selected' : '') + '>仅状态</option>' +
-          '<option value="full"' + (mode === 'full' ? ' selected' : '') + '>完整编辑</option>' +
-        '</select></td>' +
-        '</tr>';
-    });
-    html += '</table>';
-    html += '<div class="oa-actions"><button class="btn btn-primary" onclick="App.views.orgAdmin.saveConfig()">保存并立即下发</button>' +
-      '<span class="oa-hint">保存后按配置把当前数据下发给该子工作台；选「不共享」则收回。</span></div>';
+    html += '<div class="oa-section-title">查看子工作台内容</div>';
+    html += '<div id="oa-view-content" class="oa-view-content"><div class="oa-hint">加载中…</div></div>';
 
-    // 已下发
-    var outs = _outgoing.filter(function (x) { return x.to_user_id === s.user_id; });
-    html += '<div class="oa-section-title">已下发（' + outs.length + '）</div>';
-    if (!outs.length) html += '<div class="oa-hint">暂无</div>';
-    else {
-      html += '<div class="oa-items">' + outs.slice(0, 30).map(function (x) {
-        return '<div class="oa-item"><span class="oa-typ">' + App.util.escapeHtml(typeLabel(x.data_type)) + '</span>' +
-          App.util.escapeHtml(x.payload && x.payload.title ? x.payload.title : (x.item_id || '')) +
-          ' <span class="oa-badge">' + App.util.escapeHtml(x.permission) + '</span></div>';
-      }).join('') + '</div>';
-    }
+    html += '<div class="oa-section-title">标注提示</div>';
+    html += '<div class="oa-annotate">' +
+      '<textarea class="form-input" id="oa-anno-note" rows="2" placeholder="给该子工作台发一条提示（只提示，不修改其数据）"></textarea>' +
+      '<button class="btn btn-primary btn-sm" onclick="App.views.orgAdmin.sendAnno()">发送标注</button>' +
+      '</div>';
 
-    // 回传
-    var revs = _reverse.filter(function (x) { return x.from_user_id === s.user_id && x.status === 'active'; });
-    html += '<div class="oa-section-title">收到回传（' + revs.length + '）</div>';
-    if (!revs.length) html += '<div class="oa-hint">暂无</div>';
-    else {
-      html += '<div class="oa-items">' + revs.map(function (x) {
-        return '<div class="oa-item">' +
-          '<span class="oa-typ">' + App.util.escapeHtml(typeLabel(x.data_type)) + '</span>' +
-          App.util.escapeHtml(x.item_id || '') +
-          '<div class="oa-item-body"><pre>' + App.util.escapeHtml(JSON.stringify(x.payload, null, 2)) + '</pre></div>' +
-          '<div class="oa-item-actions">' +
-          '<button class="btn btn-primary btn-sm" onclick="App.views.orgAdmin.merge(\'' + x.id + '\')">合并到我的数据</button>' +
-          '<button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.dismiss(\'' + x.id + '\')">忽略</button>' +
-          '</div></div>';
-      }).join('') + '</div>';
-    }
     return html;
+  }
+
+  // 查看子工作台内容（读其云端整档数据，展示摘要）
+  async function loadMemberView() {
+    var box = document.getElementById('oa-view-content');
+    if (!box || !_selected) return;
+    var data = await App.masterHub.fetchMemberData(_selected);
+    if (!data || !Object.keys(data).length) {
+      box.innerHTML = '<div class="oa-hint">该子工作台尚未登录云端同步，暂无数据可查看。</div>';
+      return;
+    }
+    var teachers = data.teachers || [];
+    var tasks = data.tasks || [];
+    var pendingTasks = tasks.filter(function (t) { return t.status !== 'done' && !t.archived; }).length;
+    var ms = data.teacherMilestones || [];
+    var pendingMs = ms.filter(function (m) { return m.status !== 'done'; }).length;
+    var tl = data.timeline || {};
+    var nodeCount = ((tl.fixedNodes || []).concat(tl.customNodes || [])).length;
+    var reports = data.reports || {};
+    var monthCount = Object.keys(reports.monthly || {}).length;
+
+    var html = '<div class="oa-view-stats">' +
+      stat('教师', teachers.length) + stat('待办任务', pendingTasks) + stat('待处理提醒', pendingMs) +
+      stat('时间轴节点', nodeCount) + stat('数据月份', monthCount) +
+      '</div>';
+
+    var subTasks = tasks.filter(function (t) { return t.source === 'sub'; });
+    html += '<div class="oa-section-title">子台自建任务（' + subTasks.length + '）</div>';
+    if (!subTasks.length) html += '<div class="oa-hint">暂无</div>';
+    else {
+      html += '<div class="oa-items">' + subTasks.slice(0, 20).map(function (t) {
+        return '<div class="oa-item"><span class="oa-typ">' + (t.status === 'done' ? '已完成' : '待处理') + '</span>' +
+          esc(t.title || '') + (t.dueDate ? ' <span class="muted">· ' + t.dueDate + '</span>' : '') + '</div>';
+      }).join('') + '</div>';
+    }
+
+    var pendingMsList = ms.filter(function (m) { return m.status !== 'done'; });
+    html += '<div class="oa-section-title">待处理转正/工龄提醒（' + pendingMsList.length + '）</div>';
+    if (!pendingMsList.length) html += '<div class="oa-hint">暂无</div>';
+    else {
+      html += '<div class="oa-items">' + pendingMsList.slice(0, 20).map(function (m) {
+        return '<div class="oa-item"><span class="oa-typ">' + esc(m.label || '') + '</span>' +
+          esc(m.teacherName || '') + ' ' + esc(m.title || '') + '</div>';
+      }).join('') + '</div>';
+    }
+
+    box.innerHTML = html;
+  }
+
+  function stat(label, n) {
+    return '<div class="oa-stat"><div class="oa-stat-n">' + n + '</div><div class="oa-stat-l">' + label + '</div></div>';
   }
 
   function renderLogs() {
     if (!_logs.length) return '';
     var html = '<div class="oa-section-title" style="margin-top:26px">操作日志</div><div class="oa-logs">';
     html += _logs.slice(0, 30).map(function (l) {
-      return '<div class="oa-log"><span class="oa-log-time">' + App.util.escapeHtml(fmt(l.created_at)) + '</span>' +
-        '<span class="oa-log-act">' + App.util.escapeHtml(actionLabel(l.action)) + '</span>' +
-        (l.data_type ? '<span class="oa-typ">' + App.util.escapeHtml(typeLabel(l.data_type)) + '</span>' : '') +
-        '<span class="oa-log-detail">' + App.util.escapeHtml(logDetail(l)) + '</span></div>';
+      return '<div class="oa-log"><span class="oa-log-time">' + esc(fmt(l.created_at)) + '</span>' +
+        '<span class="oa-log-act">' + esc(actionLabel(l.action)) + '</span>' +
+        '<span class="oa-log-detail">' + esc(logDetail(l)) + '</span></div>';
     }).join('');
     html += '</div>';
     return html;
   }
 
   /* ---------------- 小工具 ---------------- */
-  function permOptions(sel) {
-    return PERMISSIONS.map(function (p) {
-      return '<option value="' + p.v + '"' + (p.v === sel ? ' selected' : '') + '>' + p.label + '</option>';
-    }).join('');
-  }
-  function typeLabel(v) {
-    var t = (App.masterHub.DATA_TYPES || []).filter(function (x) { return x.v === v; })[0];
-    return t ? t.label : (v || '');
-  }
   function actionLabel(a) {
     var m = {
       org_created: '创建组织', member_added: '纳管子工作台', member_suspended: '停用/移除子工作台',
-      grant_created: '创建共享规则', grant_updated: '更新共享规则', grant_revoked: '撤销共享',
-      item_shared: '下发数据', item_read: '查看数据', item_edited: '编辑/合并',
-      item_reversed: '子工作台回传', item_revoked: '收回数据'
+      annotation_sent: '发送标注', item_read: '查看数据', item_edited: '编辑/合并'
     };
     return m[a] || a;
   }
   function logDetail(l) {
     var d = l.detail || {};
-    if (l.action === 'item_shared') return '下发 ' + (d.count || 0) + ' 条（' + (d.permission || '') + '）';
     if (l.action === 'member_added') return (d.name || '') + ' ' + (d.email || '');
-    if (l.action === 'grant_created') return (d.permission || '') + (d.allowReverse ? ' · 允许回传' : '');
-    if (l.action === 'item_reversed') return JSON.stringify(d.payload || {});
+    if (l.action === 'annotation_sent') return (d.note || '');
     return '';
   }
   function fmt(s) { return s ? String(s).slice(0, 19).replace('T', ' ') : ''; }
@@ -246,9 +228,9 @@
       content: '<div style="display:flex;flex-direction:column;gap:12px">' +
         '<div class="form-group"><label class="form-label">下属的登录邮箱</label>' +
         '<input class="form-input" id="oa-sub-email" type="email" placeholder="需先在 Supabase 建好该账号"></div>' +
-        '<div class="form-group"><label class="form-label">显示名称</label>' +
+        '<div class="form-group"><label class="form-label">显示名称（负责人姓名，用于任务归属）</label>' +
         '<input class="form-input" id="oa-sub-name" placeholder="如：泉山校区"></div>' +
-        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。</div>' +
+        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。显示名称建议填负责人姓名，子台的任务会归属到该负责人。</div>' +
         '</div>',
       confirmText: '纳管',
       onConfirm: function (close) {
@@ -262,35 +244,13 @@
 
   function select(userId) { _selected = userId; render(); }
 
-  async function saveConfig() {
+  async function sendAnno() {
     if (!_selected) return;
-    var types = App.masterHub.DATA_TYPES || [];
-    for (var i = 0; i < types.length; i++) {
-      var t = types[i].v;
-      var permEl = document.getElementById('oa-perm-' + t);
-      var revEl = document.getElementById('oa-rev-' + t);
-      var modeEl = document.getElementById('oa-revmode-' + t);
-      var perm = permEl ? permEl.value : '';
-      var allowRev = revEl ? revEl.checked : false;
-      var mode = modeEl ? modeEl.value : 'status';
-      var existing = _grants.filter(function (g) {
-        return g.to_user_id === _selected && g.data_type === t && g.active;
-      })[0];
-      if (!perm) {
-        if (existing) await App.masterHub.revokeGrant(existing.id);
-        continue;
-      }
-      var patch = { permission: perm, allow_reverse: allowRev, reverse_mode: allowRev ? mode : null, active: true };
-      if (existing) {
-        await App.masterHub.updateGrant(existing.id, patch);
-        await App.masterHub.publish(existing.id);
-      } else {
-        var g = await App.masterHub.createGrant(_selected, { dataType: t, permission: perm, allowReverse: allowRev, reverseMode: mode });
-        if (g) await App.masterHub.publish(g.id);
-      }
-    }
-    await loadAll();
-    render();
+    var noteEl = document.getElementById('oa-anno-note');
+    var note = noteEl ? noteEl.value.trim() : '';
+    if (!note) { App.util.toast('请填写标注内容', 'warn'); return; }
+    var r = await App.masterHub.sendAnnotation(_selected, 'general', '', note);
+    if (r && r.ok) { if (noteEl) noteEl.value = ''; loadAll().then(render); }
   }
 
   async function toggleSuspend(memberId, isSuspended) {
@@ -301,7 +261,7 @@
   async function removeSub(memberId) {
     App.util.modal({
       title: '移除子工作台',
-      content: '移除后该成员将不再收到你共享的数据（已下发数据会同步收回）。确定移除吗？',
+      content: '移除后该成员将不再是你的子工作台，你也不再能查看其内容。确定移除吗？',
       confirmText: '移除', confirmStyle: 'danger',
       onConfirm: function (close) {
         App.masterHub.removeSub(memberId).then(function () { close(); loadAll().then(render); });
@@ -309,24 +269,13 @@
     });
   }
 
-  async function merge(itemId) {
-    await App.masterHub.mergeReverse(itemId);
-    await loadAll(); render();
-  }
-  async function dismiss(itemId) {
-    await App.masterHub.dismissReverse(itemId);
-    await loadAll(); render();
-  }
-
   App.views = App.views || {};
   App.views.orgAdmin = {
     openCreateOrg: openCreateOrg,
     openAddSub: openAddSub,
     select: select,
-    saveConfig: saveConfig,
+    sendAnno: sendAnno,
     toggleSuspend: toggleSuspend,
-    removeSub: removeSub,
-    merge: merge,
-    dismiss: dismiss
+    removeSub: removeSub
   };
 })();

@@ -1467,6 +1467,13 @@ a:hover { color: var(--accent-hover); }
 .oa-badge.warn{background:var(--warn-soft);color:var(--warn-text)}
 .oa-badge.ok{background:var(--ok-soft);color:var(--ok-text)}
 .oa-logs{display:flex;flex-direction:column;gap:4px;max-height:280px;overflow:auto}
+.oa-view-stats{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.oa-stat{flex:1;min-width:90px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);text-align:center}
+.oa-stat-n{font-size:20px;font-weight:700;font-family:var(--font-mono),Menlo,monospace;color:var(--accent)}
+.oa-stat-l{font-size:11px;color:var(--text-muted);margin-top:2px}
+.oa-annotate{display:flex;flex-direction:column;gap:8px}
+.oa-annotate textarea{width:100%;resize:vertical}
+.oa-annotate .btn{align-self:flex-end}
 .oa-log{display:flex;gap:8px;align-items:baseline;font-size:12px;padding:5px 8px;background:var(--surface);border-radius:6px;flex-wrap:wrap}
 .oa-log-time{color:var(--text-faint);font-family:var(--font-mono),Menlo,monospace;font-size:11px;flex:0 0 auto}
 .oa-log-act{font-weight:600;color:var(--text-secondary);flex:0 0 auto}

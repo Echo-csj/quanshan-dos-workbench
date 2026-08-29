@@ -75,8 +75,17 @@
     var id = await resolveIdentity();
     if (!id) return;   // 不是子台（可能是总台或独立用户）
     identity = id;
+    applySubUI();      // 子台视角 UI：隐藏「团队」导航段
     await loadMaster();
     subscribeRealtime();
+  }
+
+  // 子台视角 UI 调整：隐藏「团队」导航段（子台不需要子工作台管理/共享数据）
+  function applySubUI() {
+    try {
+      var nav = document.getElementById('nav-team');
+      if (nav) nav.style.display = 'none';
+    } catch (e) {}
   }
 
   function notify() { listeners.forEach(function (f) { try { f(); } catch (e) {} }); }
