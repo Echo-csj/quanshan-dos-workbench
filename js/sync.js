@@ -140,7 +140,16 @@
   async function readShared() {
     if (!session) return [];
     var c = ensureClient(); if (!c) return [];
-    var r = await c.from('shared_link').select('*').eq('user_id', uid()).order('updated_at');
+    // 子工作台（科组组长 / DOST·教学校长实习生）数据源于总台：读总台 owner 推送的分析快照；
+    // 项目组负责人(project_lead)无数据看板权限，仍读自己的（为空），权限不受影响。
+    var targetUid = uid();
+    if (App.subContext && App.subContext.isSub && App.subContext.isSub()) {
+      if (App.perm && App.perm.canView && App.perm.canView('/data')) {
+        var oid = App.subContext.ownerUserId && App.subContext.ownerUserId();
+        if (oid) targetUid = oid;
+      }
+    }
+    var r = await c.from('shared_link').select('*').eq('user_id', targetUid).order('updated_at');
     if (r.error) { console.warn(r.error); return []; }
     return r.data || [];
   }

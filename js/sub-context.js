@@ -61,6 +61,11 @@
   TASK_TAGS.forEach(function (t) { TASK_TAG_LABELS[t.v] = t.label; });
 
   // 各角色在子台需要隐藏的「主功能区」路由（总台不受影响，拥有最高权限）
+  // 角色映射：学科组长(subject_lead)=科组组长/TRM；教学校长实习生(principal_intern)=DOST；
+  //          项目组负责人(project_lead)。
+  // 「数据看板 /data」下含「最佳科组排名 /data/kezu-rank」「科组生产预测 /data/kezu-forecast」两个科组模块，
+  // 随 /data 一并开放：科组组长 与 DOST(教学校长实习生) 可见，项目组负责人隐藏。
+  // 数据同步：科组模块数据来自总台 owner 的 analytics_snapshot（见 sync.js readShared 与 schema 7.14）。
   // 教学校长实习生 = 内容与 DOS 一致（全模块；教师管理隐藏三字段由 teachers.js 统一处理）
   // 项目组负责人 = 隐藏「数据看板 / 教师管理」，保留 今日指挥台 / 时间轴 / 事项看板 / 项目组中心
   var ROLE_HIDDEN_ROUTES = {
@@ -133,6 +138,9 @@
     if (!id) { fireReady(); return; }   // 不是子台（可能是总台或独立用户）
     identity = id;
     applySubUI();      // 子台视角 UI：隐藏「团队」导航段 + 按角色隐藏无权模块
+    // 子台身份就绪：刷新联动数据——此时 sync.readShared 可按角色读总台 owner 的
+    // 科组快照（科组组长 subject_lead / DOST principal_intern 可读，project_lead 不读）
+    try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {}
     try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
     await loadMaster();
     subscribeRealtime();

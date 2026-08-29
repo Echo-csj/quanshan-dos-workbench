@@ -395,6 +395,21 @@ drop policy if exists "org_member_read_owner_dw" on dos_workbench;
 create policy "org_member_read_owner_dw" on dos_workbench
   for select using (public.is_my_org_owner(dos_workbench.user_id));
 
+-- 读：子工作台可读本组织 owner（总工作台）的 shared_link 联动快照
+--     （「最佳科组排名 / 科组生产预测」向 DOST(教学校长实习生) 与科组组长(学科组长) 开放的数据源）
+drop policy if exists "org_member_read_owner_shared" on shared_link;
+create policy "org_member_read_owner_shared" on shared_link
+  for select using (public.is_my_org_owner(shared_link.user_id));
+
+-- 实时：shared_link 加入 realtime（总台推送后子台近实时刷新）
+do $$
+begin
+  if not exists (select 1 from pg_publication_tables
+                 where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'shared_link') then
+    alter publication supabase_realtime add table shared_link;
+  end if;
+end $$;
+
 -- ============================================================
 -- 7.13 权限角色系统（子工作台三级权限）
 --     在 org_member 上增加 role（角色）、project_tags（项目组标签）与 email（登录邮箱），
