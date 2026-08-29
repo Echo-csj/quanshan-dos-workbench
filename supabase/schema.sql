@@ -141,9 +141,7 @@ alter table org_member enable row level security;
 
 drop policy if exists "member_owner_all" on org_member;
 create policy "member_owner_all" on org_member
-  for all using (
-    exists (select 1 from org o where o.id = org_member.org_id and o.owner_user_id = auth.uid())
-  );
+  for all using (public.is_org_owner(org_member.org_id));
 
 drop policy if exists "member_self_read" on org_member;
 create policy "member_self_read" on org_member
@@ -152,9 +150,7 @@ create policy "member_self_read" on org_member
 -- 注意：org 的「成员可读」策略引用 org_member，必须在 org_member 建好之后再建
 drop policy if exists "org_member_read" on org;
 create policy "org_member_read" on org
-  for select using (
-    exists (select 1 from org_member m where m.org_id = org.id and m.user_id = auth.uid())
-  );
+  for select using (public.is_org_member(org.id));
 
 -- 7.3 profile：账号档案（邮箱 ↔ user_id 解析、显示名）
 create table if not exists profile (
@@ -173,10 +169,7 @@ create policy "profile_self" on profile
 -- 组织 owner 可读本组织成员档案；子工作台之间仍互不可见
 drop policy if exists "profile_org_owner_read" on profile;
 create policy "profile_org_owner_read" on profile
-  for select using (
-    exists (select 1 from org o join org_member m on m.org_id = o.id
-            where o.owner_user_id = auth.uid() and m.user_id = profile.user_id)
-  );
+  for select using (public.is_my_org_member(profile.user_id));
 
 -- 7.4 share_grant：共享规则（核心）
 create table if not exists share_grant (
@@ -202,9 +195,7 @@ alter table share_grant enable row level security;
 
 drop policy if exists "grant_owner_all" on share_grant;
 create policy "grant_owner_all" on share_grant
-  for all using (
-    exists (select 1 from org o where o.id = share_grant.org_id and o.owner_user_id = auth.uid())
-  );
+  for all using (public.is_org_owner(share_grant.org_id));
 
 drop policy if exists "grant_sub_read" on share_grant;
 create policy "grant_sub_read" on share_grant
@@ -237,9 +228,7 @@ alter table shared_item enable row level security;
 
 drop policy if exists "item_owner_all" on shared_item;
 create policy "item_owner_all" on shared_item
-  for all using (
-    exists (select 1 from org o where o.id = shared_item.org_id and o.owner_user_id = auth.uid())
-  );
+  for all using (public.is_org_owner(shared_item.org_id));
 
 drop policy if exists "item_sub_read" on shared_item;
 create policy "item_sub_read" on shared_item
@@ -281,13 +270,34 @@ create policy "log_insert_auth" on share_log
 
 drop policy if exists "log_owner_read" on share_log;
 create policy "log_owner_read" on share_log
-  for select using (
-    exists (select 1 from org o where o.id = share_log.org_id and o.owner_user_id = auth.uid())
-  );
+  for select using (public.is_org_owner(share_log.org_id));
 
 drop policy if exists "log_self_read" on share_log;
 create policy "log_self_read" on share_log
   for select using (target_user_id = auth.uid() or actor_user_id = auth.uid());
+
+-- 7.6b 辅助函数：打破 RLS 递归（security definer 以创建者权限运行，不触发目标表的 RLS）
+--     否则 org ↔ org_member 的策略会互相查对方表，造成 infinite recursion
+create or replace function public.is_org_owner(p_org_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (select 1 from org where id = p_org_id and owner_user_id = auth.uid());
+$$;
+
+create or replace function public.is_org_member(p_org_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (select 1 from org_member where org_id = p_org_id and user_id = auth.uid());
+$$;
+
+create or replace function public.is_my_org_member(p_user_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (
+    select 1 from org o join org_member m on m.org_id = o.id
+    where o.owner_user_id = auth.uid() and m.user_id = p_user_id
+  );
+$$;
 
 -- 7.7 updated_at 自动刷新（复用第 5 节的 touch_updated_at）
 drop trigger if exists trg_org on org;
