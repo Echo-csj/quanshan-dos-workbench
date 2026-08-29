@@ -86,8 +86,18 @@
   // ---------- 数据访问 ----------
   // 统一走 App.viewData()：子台返回总台镜像数据，总台返回本地数据
 
-  // 学科组归一：去除尾部「科组」后缀，使「数学」与「数学科组」视为同一组
-  function subjBase(s) { return String(s || '').trim().replace(/科组$/, ''); }
+  // 学科组归一：去除「科组/组/教研组/备课组/学科」等后缀并关键词归一，
+  // 使「数学」「数学组」「数学科组」「数学教研组」与「数学」视为同一组
+  function canonSubject(s) {
+    s = String(s || '').trim();
+    if (!s) return '';
+    s = s.replace(/科组$|教研组$|备课组$|学科组$|组$|学科$/, '');
+    if (s.indexOf('数学') >= 0) return '数学';
+    if (s.indexOf('英语') >= 0) return '英语';
+    if (s.indexOf('文综') >= 0) return '文综';
+    if (s.indexOf('理综') >= 0) return '理综';
+    return s;
+  }
 
   function getTeachers() {
     var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {});
@@ -95,7 +105,7 @@
     // 子台只看本科组（与教师管理过滤规则一致）
     if (isSub() && App.subContext && App.subContext.myName) {
       var nm = App.subContext.myName();
-      if (nm) teachers = teachers.filter(function(t) { return subjBase(t.subjectGroup) === subjBase(nm); });
+      if (nm) teachers = teachers.filter(function(t) { return canonSubject(t.subjectGroup) === canonSubject(nm); });
     }
     return teachers;
   }
@@ -105,7 +115,7 @@
     // 子台只看本科组的提醒
     if (isSub() && App.subContext && App.subContext.myName) {
       var nm = App.subContext.myName();
-      if (nm) ms = ms.filter(function(m) { return subjBase(m.subjectGroup) === subjBase(nm); });
+      if (nm) ms = ms.filter(function(m) { return canonSubject(m.subjectGroup) === canonSubject(nm); });
     }
     return ms;
   }

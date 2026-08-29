@@ -228,9 +228,9 @@
       content: '<div style="display:flex;flex-direction:column;gap:12px">' +
         '<div class="form-group"><label class="form-label">下属的登录邮箱</label>' +
         '<input class="form-input" id="oa-sub-email" type="email" placeholder="需先在 Supabase 建好该账号"></div>' +
-        '<div class="form-group"><label class="form-label">显示名称（负责人姓名，用于任务归属）</label>' +
-        '<input class="form-input" id="oa-sub-name" placeholder="如：泉山校区"></div>' +
-        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。显示名称建议填负责人姓名，子台的任务会归属到该负责人。</div>' +
+        '<div class="form-group"><label class="form-label">子工作台名称（＝学科组，须与「教师管理」科组一致）</label>' +
+        '<input class="form-input" id="oa-sub-name" placeholder="如：数学 / 英语 / 文综 / 理综"></div>' +
+        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。名称须为学科组名称（数学/英语/文综/理综，可带「科组/组」后缀），子台据此筛选本科组教师与转正提醒；同时作为任务归属标识。</div>' +
         '</div>',
       confirmText: '纳管',
       onConfirm: function (close) {
