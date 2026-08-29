@@ -178,7 +178,7 @@
     }
     role = role || 'subject_lead';   // 默认归属「学科组长」
     var r = await c.from('org_member')
-      .upsert({ org_id: orgId, user_id: targetId, name: name || email.split('@')[0], role: role, status: 'active' },
+      .upsert({ org_id: orgId, user_id: targetId, name: name || email.split('@')[0], email: email, role: role, status: 'active' },
               { onConflict: 'org_id,user_id' })
       .select().maybeSingle();
     if (r.error) { App.util.toast('纳管失败：' + (r.error.message || ''), 'warn'); return null; }

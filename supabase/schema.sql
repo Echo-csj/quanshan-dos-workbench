@@ -133,6 +133,7 @@ create table if not exists org_member (
   org_id     uuid not null references org(id) on delete cascade,
   user_id    uuid not null references auth.users(id) on delete cascade,
   name       text,
+  email      text,                               -- 子台登录邮箱（独立于 profile，保证总台始终可展示）
   status     text not null default 'active',   -- active | suspended
   created_at timestamptz not null default now(),
   unique (org_id, user_id)
@@ -396,14 +397,15 @@ create policy "org_member_read_owner_dw" on dos_workbench
 
 -- ============================================================
 -- 7.13 权限角色系统（子工作台三级权限）
---     在 org_member 上增加 role（角色）与 project_tags（项目组标签），
---     支撑「学科组长 / 教学校长实习生 / 项目组负责人」三级权限与项目组同步。
+--     在 org_member 上增加 role（角色）、project_tags（项目组标签）与 email（登录邮箱），
+--     支撑「学科组长 / 教学校长实习生 / 项目组负责人」三级权限与项目组同步，
+--     并保证子台登录邮箱在 profile 缺失时仍可显示。
 --     角色取值：subject_lead（学科组长，默认）/ principal_intern（教学校长实习生）/ project_lead（项目组负责人）
 --     注意：本段幂等，且必须在 org_member 表已存在之后执行。
 -- ============================================================
 do $$
 begin
-  if not exists (select  1 from information_schema.columns
+  if not exists (select 1 from information_schema.columns
                  where table_schema = 'public' and table_name = 'org_member' and column_name = 'role') then
     alter table org_member add column role text not null default 'subject_lead';
   end if;
@@ -411,8 +413,19 @@ begin
                  where table_schema = 'public' and table_name = 'org_member' and column_name = 'project_tags') then
     alter table org_member add column project_tags jsonb not null default '[]'::jsonb;
   end if;
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'org_member' and column_name = 'email') then
+    alter table org_member add column email text;
+  end if;
 end $$;
 
 -- 默认值兜底：历史已纳管的子工作台统一归为「学科组长」（满足「默认归属学科组长」规则）
 update org_member set role = 'subject_lead' where role is null or role = '';
 update org_member set project_tags = '[]'::jsonb where project_tags is null;
+
+-- 邮箱回填：从 auth.users 把真实登录邮箱补回 org_member（解决已纳管子台只显示 UUID 的问题）
+update org_member m
+set email = u.email
+from auth.users u
+where m.user_id = u.id
+  and (m.email is null or m.email = '');

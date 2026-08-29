@@ -86,8 +86,8 @@
     var p = _profiles[s.user_id] || {};
     var active = s.user_id === _selected ? ' active' : '';
     return '<div class="oa-sub-item' + active + '" onclick="App.views.orgAdmin.select(\'' + s.user_id + '\')">' +
-      '<div class="oa-sub-name">' + esc(s.name || (p.email || '子工作台')) + '</div>' +
-      '<div class="oa-sub-mail">' + esc(p.email || s.user_id) + '</div>' +
+      '<div class="oa-sub-name">' + esc(s.name || (s.email || p.email || '子工作台')) + '</div>' +
+      '<div class="oa-sub-mail">' + esc(s.email || p.email || s.user_id) + '</div>' +
       '<span class="oa-badge oa-badge-role">' + esc(roleLabel(s.role)) + '</span>' +
       (s.status === 'suspended' ? '<span class="oa-badge">已停用</span>' : '') +
       '</div>';
@@ -101,8 +101,8 @@
     var html = '';
 
     html += '<div class="oa-detail-head">' +
-      '<div><strong>' + esc(s.name || (p.email || '')) + '</strong>' +
-      '<div class="oa-sub-mail">' + esc(p.email || s.user_id) + '</div></div>' +
+      '<div><strong>' + esc(s.name || (s.email || p.email || '')) + '</strong>' +
+      '<div class="oa-sub-mail">' + esc(s.email || p.email || s.user_id) + '</div></div>' +
       '<div class="oa-detail-actions">' +
       '<button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.toggleSuspend(\'' + s.id + '\',' + (s.status === 'suspended') + ')">' + (s.status === 'suspended' ? '启用' : '停用') + '</button>' +
       '<button class="btn btn-danger btn-sm" onclick="App.views.orgAdmin.removeSub(\'' + s.id + '\')">移除</button>' +
