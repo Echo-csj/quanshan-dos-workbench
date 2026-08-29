@@ -13,6 +13,8 @@
   var identity = null;      // { member, org }
   var masterData = null;    // 总台整档数据
   var listeners = [];
+  var readyCbs = [];
+  var readyFired = false;
   var started = false;
 
   function client() { return App.sync && App.sync.getClient ? App.sync.getClient() : null; }
@@ -68,16 +70,28 @@
     } catch (e) {}
   }
 
+  function fireReady() {
+    if (readyFired) return;
+    readyFired = true;
+    readyCbs.forEach(function (cb) { try { cb(); } catch (e) {} });
+  }
+
   async function start() {
     if (started) return;
     started = true;
-    if (disabled()) return;
+    if (disabled()) { fireReady(); return; }
     var id = await resolveIdentity();
-    if (!id) return;   // 不是子台（可能是总台或独立用户）
+    if (!id) { fireReady(); return; }   // 不是子台（可能是总台或独立用户）
     identity = id;
     applySubUI();      // 子台视角 UI：隐藏「团队」导航段
     await loadMaster();
     subscribeRealtime();
+    fireReady();
+  }
+
+  function onReady(cb) {
+    if (readyFired) { try { cb(); } catch (e) {} return; }
+    readyCbs.push(cb);
   }
 
   // 子台视角 UI 调整：隐藏「团队」导航段（子台不需要子工作台管理/共享数据）
@@ -88,7 +102,11 @@
     } catch (e) {}
   }
 
-  function notify() { listeners.forEach(function (f) { try { f(); } catch (e) {} }); }
+  function notify() {
+    listeners.forEach(function (f) { try { f(); } catch (e) {} });
+    // 子台首次拉取到总台数据后，刷新当前视图以展示合并后的数据
+    try { if (isSub() && App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
+  }
   function onMasterChange(f) { listeners.push(f); }
 
   // 合并任务视图：团队任务 + 派给我的个人任务 + 我的自建任务
@@ -157,7 +175,8 @@
     myOwnTasks: myOwnTasks,
     masterField: masterField,
     viewData: viewData,
-    onMasterChange: onMasterChange
+    onMasterChange: onMasterChange,
+    onReady: onReady
   };
 
   // 统一视图数据入口：子台返回合并视图，否则返回本地整档

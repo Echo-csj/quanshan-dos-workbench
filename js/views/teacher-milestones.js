@@ -84,13 +84,16 @@
   }
 
   // ---------- 数据访问 ----------
-  function getTeachers() { return App.store.get('teachers') || []; }
-  function getMilestones() { return App.store.get('teacherMilestones') || []; }
+  // 统一走 App.viewData()：子台返回总台镜像数据，总台返回本地数据
+  function getTeachers() { var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {}); return d.teachers || []; }
+  function getMilestones() { var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {}); return d.teacherMilestones || []; }
   function teacherKey(t) { return t.id || (t.name + '｜' + t.subjectGroup); }
+  function isSub() { return !!(App.isSub && App.isSub()); }
 
   // ---------- 生成（幂等） ----------
   // 仅在「触发日期 <= 今天」时生成（即对应时间节点已到达），符合"在对应时间节点自动生成提示"
   function generate() {
+    if (isSub()) return 0; // 子台不自己生成，读取总台的即可
     var teachers = getTeachers();
     var existing = getMilestones();
     var byId = {};
@@ -217,6 +220,7 @@
   function ensure() {
     if (ensured) return;
     ensured = true;
+    if (isSub()) return; // 子台读取总台的里程碑，不自己生成
     generate();
     reconcile();
   }
@@ -227,6 +231,7 @@
 
   // ---------- 标记完成 ----------
   function complete(id) {
+    if (isSub()) { App.util.toast('子工作台只读，请在总工作台标记完成', 'warn'); return; }
     var ms = getMilestones();
     var m = ms.find(function (x) { return x.id === id; });
     if (!m) return;
@@ -274,7 +279,7 @@
     var html = '<div class="card ms-card">';
     html += '<div class="ms-head"><div class="ms-title">🎯 教师职业发展关键节点提醒 <span class="ms-count">' + (teamMode ? '团队汇总' : '待处理 ' + pending) + '</span></div>';
     html += '<div class="ms-tools"><div class="ms-filter">';
-    if (App.masterHub && App.masterHub.ready && App.masterHub.ready()) {
+    if (!isSub() && App.masterHub && App.masterHub.ready && App.masterHub.ready()) {
       html += '<button class="chip' + (teamMode ? ' on' : '') + '" onclick="App.views.teacherMilestones.switchMode(true)">团队汇总</button>';
     }
     html += '<button class="chip' + (!teamMode ? ' on' : '') + '" onclick="App.views.teacherMilestones.switchMode(false)">我的提醒</button>';
@@ -284,7 +289,7 @@
       });
     }
     html += '</div>';
-    if (!teamMode) html += '<button class="btn btn-secondary btn-sm" onclick="App.views.teacherMilestones.checkAndRender()">↻ 重新检查</button>';
+    if (!isSub() && !teamMode) html += '<button class="btn btn-secondary btn-sm" onclick="App.views.teacherMilestones.checkAndRender()">↻ 重新检查</button>';
     html += '</div></div>';
 
     if (teamMode) {
@@ -305,14 +310,16 @@
         html += '<td class="mono">' + m.dueDate + '</td>';
         html += '<td>' + esc(m.owner) + '</td>';
         html += '<td>' + (m.status === 'done' ? '<span class="tag status-done">已完成</span>' : '<span class="tag status-todo">待处理</span>') + '</td>';
-        html += '<td>' + (m.status === 'done' ? '<span class="muted">已同步</span>' : '<button class="btn btn-primary btn-xs" onclick="App.views.teacherMilestones.complete(\'' + escA(m.id) + '\')">标记完成</button>') + '</td>';
+        html += '<td>' + (m.status === 'done' ? '<span class="muted">已同步</span>' : (isSub() ? '<span class="muted">只读</span>' : '<button class="btn btn-primary btn-xs" onclick="App.views.teacherMilestones.complete(\'' + escA(m.id) + '\')">标记完成</button>')) + '</td>';
         html += '</tr>';
       });
       html += '</tbody></table></div>';
     }
-    html += '<p class="ms-foot muted">' + (teamMode
-      ? '团队汇总展示所有子工作台已同步到云端的转正/工龄提醒；你可点「标注」发送提示，由对应子工作台自行处理。'
-      : '每条提醒已自动同步至「时间轴」(按触发日期展示里程碑) 与「待办事项」(含负责人/截止/状态)。标记完成后三处状态保持一致，可全程追踪。') + '</p>';
+    html += '<p class="ms-foot muted">' + (isSub()
+      ? '子工作台视角：下列提醒来自总工作台，子台只读查看，请在总工作台处理。'
+      : (teamMode
+        ? '团队汇总展示所有子工作台已同步到云端的转正/工龄提醒；你可点「标注」发送提示，由对应子工作台自行处理。'
+        : '每条提醒已自动同步至「时间轴」(按触发日期展示里程碑) 与「待办事项」(含负责人/截止/状态)。标记完成后三处状态保持一致，可全程追踪。')) + '</p>';
     html += '</div>';
     return html;
   }
@@ -378,6 +385,7 @@
   }
 
   function teamAnnotate(subUserId, milestoneId) {
+    if (isSub()) { App.util.toast('子工作台不能发送标注', 'warn'); return; }
     if (!App.masterHub || !App.masterHub.sendAnnotation) return;
     App.util.modal({
       title: '发送标注提示',
@@ -395,10 +403,18 @@
   }
 
   // 应用启动后自动生成（静态前端：在打开教师视图/应用启动时幂等执行）
+  // 必须等 sub-context 完成身份识别后再执行，防止子台在「被识别出来前」就按本地数据生成
   if (typeof document !== 'undefined') {
     var boot = function () { try { ensure(); } catch (e) { console.error('[teacherMilestones] ensure failed', e); } };
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () { setTimeout(boot, 0); });
-    else setTimeout(boot, 0);
+    var deferBoot = function () {
+      if (App.subContext && App.subContext.onReady) {
+        App.subContext.onReady(boot);
+      } else {
+        setTimeout(boot, 0);
+      }
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', deferBoot);
+    else deferBoot();
   }
 
   App.views.teacherMilestones = {
