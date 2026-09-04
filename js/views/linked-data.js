@@ -215,6 +215,14 @@
 
   /* ---------- 渲染 ---------- */
   var _mounted = null;
+  var _appliedSig = null;   // 已写入 store 的快照签名，用于去重，避免重复写库触发重渲染回环
+  function snapshotSig(snap) {
+    if (!snap || !snap.latestByStream) return null;
+    var lbs = snap.latestByStream, m = lbs.monthly, w = lbs.weekly;
+    return (m && m.year ? m.year + '-' + m.month : '-') + '|' +
+           (w && w.year ? w.year + '-' + w.month : '-') + '|' +
+           (snap.generatedAt || '') + '|' + (snap.totalRecords || 0);
+  }
   function emptyState() {
     return '<div class="empty-state" style="padding:50px">' +
       '<h4>暂无联动数据</h4>' +
@@ -264,6 +272,11 @@
   // 把快照写入 App.store，使「基准值对标 / 环比·同比趋势 / 人事数据」无需手动导入即可填充
   function applySnapshotToStore(snap) {
     if (!snap || !snap.latestByStream) return;
+    // 去重：同一份快照（月份 + 生成时间 + 记录数均不变）只写一次库。
+    // 否则每次重渲染（render 内部都会调用本函数）都会写 store → 触发 sync 防抖推送
+    // → setStatus('ok') → auth-gate 重渲染当前路由 → 再次 render → 再次写库 …… 死循环（闪屏）。
+    var sig = snapshotSig(snap);
+    if (sig && sig === _appliedSig) return;
     var lbs = snap.latestByStream;
     var monthly = lbs['monthly'];
     var weekly = lbs['weekly'];
@@ -340,6 +353,7 @@
       generatedAt: snap.generatedAt || new Date().toISOString()
     };
     App.store.set('hr', hr);
+    _appliedSig = sig;   // 仅在确实写入后记录签名，供下次去重
   }
 
   function buildHTML(snap, weekly) {

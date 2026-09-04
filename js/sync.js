@@ -17,9 +17,14 @@
   var statusListeners = [];
 
   function setStatus(s, msg) {
-    status = s;
-    try { renderWidget(); } catch (e) {}   // 状态变化即重绘小组件，避免登录后残留登录框
-    statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} });
+    // 关键：仅当状态「真正变化」时才通知监听者。
+    // 否则每次 push（store 变化后防抖上传）都会触发 setStatus('ok') → auth-gate 的 onStatus → router.resolve
+    // → 联动数据视图再次渲染并写库 → 再次 push …… 形成无限重渲染（闪屏）。
+    if (s !== status) {
+      status = s;
+      statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} });
+    }
+    try { renderWidget(); } catch (e) {}   // 始终重绘小组件，保证登录态/按钮正确
   }
   function ensureClient() {
     if (disabled || client) return client;
