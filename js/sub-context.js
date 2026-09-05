@@ -17,6 +17,13 @@
   var readyFired = false;
   var started = false;
 
+  // 实时/轮询相关状态（上一版漏声明，这里补齐，严格模式下否则运行时报错）
+  var lastMasterSig = null;  // 总台整档签名（变更检测）
+  var _pollTimer = null;     // 突发轮询定时器
+  var _visHandler = null;    // 可见性变化监听
+  var _masterChannel = null; // 总台实时订阅通道
+  var _burstUntil = 0;       // 突发窗口截止时间戳
+
   function client() { return App.sync && App.sync.getClient ? App.sync.getClient() : null; }
   function uid() {
     var s = App.sync && App.sync.getSession ? App.sync.getSession() : null;
@@ -146,18 +153,25 @@
     try {
       if (_masterChannel) { try { c.removeChannel(_masterChannel); } catch (e) {} _masterChannel = null; }
       _masterChannel = c.channel('sub-master-' + id.org.owner_user_id)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'dos_workbench', filter: 'user_id=eq.' + id.org.owner_user_id }, function () { loadMaster(); })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dos_workbench', filter: 'user_id=eq.' + id.org.owner_user_id }, function () { loadMaster(); startBurstPoll(); })
         .subscribe(function (status) {
           if (status !== 'SUBSCRIBED') console.warn('[subContext] 总台实时订阅状态：', status);
         });
     } catch (e) {}
   }
 
-  // 兜底轮询：实时订阅在部分网络环境下可能不可靠，每 60 秒重拉总台数据，
-  // 并在切回页面焦点时立即重拉，确保总台更新无需手动刷新即可看到；配合 loadMaster 的变更提示。
+  // 突发轮询：仅在「收到总台实时更新事件」后的 60 秒窗口内密集重拉（每 4 秒一次），
+  // 窗口结束自动停止，平时完全不轮询；切回页面焦点时仍立即重拉（事件驱动，非轮询）。
+  function startBurstPoll() {
+    var now = Date.now();
+    _burstUntil = now + 60000;          // 收到事件 → 开启/延长 60 秒窗口
+    if (_pollTimer) return;             // 已在突发窗口内：仅延长窗口
+    _pollTimer = setInterval(function () {
+      if (Date.now() >= _burstUntil) { clearInterval(_pollTimer); _pollTimer = null; return; }
+      loadMaster();
+    }, 4000);
+  }
   function startPolling() {
-    if (_pollTimer) clearInterval(_pollTimer);
-    _pollTimer = setInterval(function () { loadMaster(); }, 60000);
     if (_visHandler) document.removeEventListener('visibilitychange', _visHandler);
     _visHandler = function () { if (!document.hidden) loadMaster(); };
     document.addEventListener('visibilitychange', _visHandler);
@@ -183,6 +197,7 @@
     try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
     await loadMaster();
     subscribeRealtime();
+    startPolling();
     fireReady();
   }
 
@@ -198,6 +213,7 @@
     started = false;
     readyFired = false;
     lastMasterSig = null;
+    _burstUntil = 0;
     if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
     if (_visHandler) { try { document.removeEventListener('visibilitychange', _visHandler); } catch (e) {} _visHandler = null; }
     if (_masterChannel && client()) { try { client().removeChannel(_masterChannel); } catch (e) {} _masterChannel = null; }

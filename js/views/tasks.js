@@ -31,6 +31,10 @@
     var container = document.getElementById('view-container');
     if (!container) return;
     container.innerHTML = renderBoard();
+    if (!isSubView()) {            // 主工作台：开启成员实时订阅 + 立即聚合子台任务
+      ensureOwnerPolling();
+      refreshOwnerSubTasks();
+    }
   });
 
   /* ---------------- 数据访问 ---------------- */
@@ -88,11 +92,48 @@
       if (c) c.innerHTML = renderBoard();
     }
   }
-  // 主工作台：开启 60 秒兜底轮询 + 焦点重拉，保证子台新任务不需手动刷新即出现
+  // 主工作台：仅在「收到成员 dos_workbench 行变更事件」后的 60 秒窗口内密集聚合（每 4 秒一次），
+  // 窗口结束自动停止，平时完全不轮询；切回页面焦点时仍立即聚合（事件驱动，非轮询）。
+  var _ownerChannel = null;     // 成员行实时订阅通道
+  var _ownerBurstTimer = null;
+  var _ownerBurstUntil = 0;
+
+  // 总台实时订阅：监听本组织成员（与本人）的 dos_workbench 行变更。
+  // RLS 保证总台只能收到本人 + 成员行；过滤掉本人行（由本地编辑处理），成员变更即触发突发聚合。
+  function setupOwnerRealtime() {
+    if (disabledSync() || !(App.sync && App.sync.getClient)) return;
+    var c = App.sync.getClient();
+    if (!c) return;
+    try {
+      if (_ownerChannel) { try { c.removeChannel(_ownerChannel); } catch (e) {} _ownerChannel = null; }
+      _ownerChannel = c.channel('owner-members-realtime')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'dos_workbench' }, onMemberRowChange)
+        .subscribe(function (status) {
+          if (status !== 'SUBSCRIBED') console.warn('[tasks] 主台成员实时订阅状态：', status);
+        });
+    } catch (e) {}
+  }
+  function onMemberRowChange(payload) {
+    var row = (payload && (payload.new || payload.old)) || {};
+    var uid = row.user_id;
+    var me = (App.sync.getSession && App.sync.getSession() && App.sync.getSession().user) ? App.sync.getSession().user.id : null;
+    if (uid && uid === me) return;   // 本人行变更由本地编辑处理，不触发聚合
+    startOwnerBurst();
+  }
+  function startOwnerBurst() {
+    refreshOwnerSubTasks();          // 立即聚合一次
+    var now = Date.now();
+    _ownerBurstUntil = now + 60000;  // 收到事件 → 开启/延长 60 秒窗口
+    if (_ownerBurstTimer) return;    // 已在突发窗口内：仅延长窗口
+    _ownerBurstTimer = setInterval(function () {
+      if (Date.now() >= _ownerBurstUntil) { clearInterval(_ownerBurstTimer); _ownerBurstTimer = null; return; }
+      refreshOwnerSubTasks();
+    }, 4000);
+  }
   function ensureOwnerPolling() {
     if (isSubView() || _ownerPollStarted) return;
     _ownerPollStarted = true;
-    setInterval(function () { refreshOwnerSubTasks(); }, 60000);
+    setupOwnerRealtime();
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden && !isSubView()) refreshOwnerSubTasks();
     });
