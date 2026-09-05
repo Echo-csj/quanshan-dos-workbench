@@ -33,6 +33,18 @@
     }
     return client;
   }
+  // 确保 Supabase 客户端库已加载：jsdelivr 是首选，若被网络/代理拦截则回退 unpkg。
+  // 否则 global.supabase 为 undefined → ensureClient 返回 null → 登录静默失败（“无反应”）。
+  function loadSupabaseLib() {
+    if (global.supabase && global.supabase.createClient) return Promise.resolve(true);
+    return new Promise(function (resolve) {
+      var s = document.createElement('script');
+      s.src = 'https://unpkg.com/@supabase/supabase-js@2';
+      s.onload = function () { resolve(!!(global.supabase && global.supabase.createClient)); };
+      s.onerror = function () { resolve(false); };
+      document.head.appendChild(s);
+    });
+  }
   function toast(msg) {
     var c = document.getElementById('toast-container'); if (!c) return;
     var t = document.createElement('div'); t.className = 'toast'; t.textContent = msg;
@@ -85,7 +97,13 @@
     return false;
   }
   async function signIn(email, password) {
-    var c = ensureClient(); if (!c) return;
+    var c = ensureClient();
+    if (!c) {
+      // 首选 CDN 未生效，尝试兜底加载一次，避免“点击登录毫无反应”
+      var loaded = await loadSupabaseLib();
+      c = loaded ? ensureClient() : null;
+    }
+    if (!c) { setStatus('error', '同步服务加载失败：无法连接云端。请检查网络 / 代理后刷新重试。'); return; }
     setStatus('signingin');
     try {
       var r = await c.auth.signInWithPassword({ email: email, password: password });
