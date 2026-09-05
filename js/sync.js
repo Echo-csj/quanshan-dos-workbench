@@ -33,17 +33,29 @@
     }
     return client;
   }
-  // 确保 Supabase 客户端库已加载：jsdelivr 是首选，若被网络/代理拦截则回退 unpkg。
-  // 否则 global.supabase 为 undefined → ensureClient 返回 null → 登录静默失败（“无反应”）。
+  // 确保 Supabase 客户端库已加载：先试 jsdelivr，被网络/代理拦截则回退 unpkg。
+  // 自行动态加载（非阻塞），避免 index.html 里同步 <script> 在 CDN 卡顿时阻塞整页、导致“登录无反应”。
+  var libLoadPromise = null;
   function loadSupabaseLib() {
     if (global.supabase && global.supabase.createClient) return Promise.resolve(true);
-    return new Promise(function (resolve) {
-      var s = document.createElement('script');
-      s.src = 'https://unpkg.com/@supabase/supabase-js@2';
-      s.onload = function () { resolve(!!(global.supabase && global.supabase.createClient)); };
-      s.onerror = function () { resolve(false); };
-      document.head.appendChild(s);
-    });
+    if (libLoadPromise) return libLoadPromise;
+    var CDNS = [
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
+      'https://unpkg.com/@supabase/supabase-js@2'
+    ];
+    function tryLoad(i) {
+      if (i >= CDNS.length) return Promise.resolve(false);
+      return new Promise(function (resolve) {
+        var s = document.createElement('script');
+        s.src = CDNS[i];
+        s.async = true;
+        s.onload = function () { resolve(!!(global.supabase && global.supabase.createClient)); };
+        s.onerror = function () { resolve(false); };
+        document.head.appendChild(s);
+      }).then(function (ok) { return ok ? true : tryLoad(i + 1); });
+    }
+    libLoadPromise = tryLoad(0);
+    return libLoadPromise;
   }
   function toast(msg) {
     var c = document.getElementById('toast-container'); if (!c) return;
