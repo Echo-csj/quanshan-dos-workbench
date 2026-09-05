@@ -135,13 +135,18 @@ window.App = window.App || {};
       // 教师花名册（主键 = name + subjectGroup；positionCode 全英文编码；certificates 为数组；工龄动态算不入库）
       teachers: defaultTeachers(),
 
-      // 课程表（方案A：多截图 + DeepSeek 视觉识别导入）
-      // grid = { days:[周一..周日], periods:[第1节..], cells:{ "周一-第1节":{course,teacher,room} } }
+      // 课程表（方案B：教师 × 周分组）
+      // teachers = [{ name, code, subject, summary, classes:{ "周一-08:00-10:00":"A班[13:00-20:00]"|"休息"|"" } }]
       schedule: {
         updatedAt: null,
-        source: '',           // 'screenshot' | ''
+        source: '',                 // 'screenshot' | 'manual' | 'fetch'(未来接入)
+        sourceUrl: '',              // 预留：抓取源地址（未来 fetch 接入）
+        fetchedAt: null,            // 预留：抓取时间（未来 fetch 接入）
         screenshotsCount: 0,
-        grid: null
+        weekStartDate: null,        // 本周一 (YYYY-MM-DD)
+        weekEndDate: null,          // 本周日 (YYYY-MM-DD)
+        periods: ['08:00-10:00','10:10-12:10','12:50-14:50','15:00-17:00','17:30-19:30','19:40-21:40'],
+        teachers: []
       }
     };
   }
