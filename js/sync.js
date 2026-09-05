@@ -267,6 +267,8 @@
   // ---- 启动 ----
   async function start() {
     if (disabled) { setStatus('disabled'); renderWidget(); return; }
+    // 启动即确保 Supabase 库就绪（jsdelivr→unpkg 回退），否则刷新后无法恢复会话、登录无反应
+    await loadSupabaseLib();
     var ok = await handleRedirect();
     if (ok) { setStatus('ok'); subscribeStore(); await applyRemote(); try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {} subscribeRealtime(); upsertProfile(); try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {} }
     else { setStatus('signedout'); }
