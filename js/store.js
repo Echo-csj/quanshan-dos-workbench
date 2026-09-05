@@ -133,7 +133,16 @@ window.App = window.App || {};
         baseDate: null
       },
       // 教师花名册（主键 = name + subjectGroup；positionCode 全英文编码；certificates 为数组；工龄动态算不入库）
-      teachers: defaultTeachers()
+      teachers: defaultTeachers(),
+
+      // 课程表（方案A：多截图 + DeepSeek 视觉识别导入）
+      // grid = { days:[周一..周日], periods:[第1节..], cells:{ "周一-第1节":{course,teacher,room} } }
+      schedule: {
+        updatedAt: null,
+        source: '',           // 'screenshot' | ''
+        screenshotsCount: 0,
+        grid: null
+      }
     };
   }
 

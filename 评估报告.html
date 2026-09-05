@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台实用性评估报告 · 状元港·泉山</title>
+<style>
+  :root{
+    --bg:#ffffff; --surface:#fafafa; --surface-2:#f4f4f5; --border:#e4e4e7;
+    --text:#18181b; --text-2:#52525b; --text-3:#a1a1aa;
+    --accent:#4F46E5; --accent-soft:#eef2ff; --accent-text:#4338ca;
+    --ok:#16a34a; --warn:#d97706; --bad:#dc2626;
+    --radius:12px; --radius-sm:8px;
+    --font:'Inter','PingFang SC','Microsoft YaHei',system-ui,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.65;-webkit-font-smoothing:antialiased;padding:0 0 80px}
+  .wrap{max-width:920px;margin:0 auto;padding:0 24px}
+  header.top{padding:48px 0 28px;border-bottom:1px solid var(--border);margin-bottom:32px}
+  .kicker{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:600}
+  h1{font-size:30px;font-weight:700;margin:10px 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--text-2);font-size:14px}
+  h2{font-size:20px;font-weight:700;margin:40px 0 6px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+  h2 .pill{font-size:12px;font-weight:600;padding:2px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent-text)}
+  .lead{color:var(--text-2);font-size:14px;margin-bottom:8px}
+  .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+  .chip{font-size:12px;padding:5px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;color:var(--text-2)}
+  .note{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-sm);padding:14px 16px;font-size:13px;color:var(--text-2);margin:16px 0}
+  .card{background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:16px 0;transition:box-shadow .2s,transform .2s}
+  .card:hover{box-shadow:0 6px 24px rgba(24,24,27,.06);transform:translateY(-2px)}
+  .card h3{font-size:16px;font-weight:650;display:flex;align-items:center;gap:8px}
+  .card .idx{font-family:var(--mono);font-size:12px;color:#fff;background:var(--accent);border-radius:6px;padding:2px 7px;font-weight:600}
+  .grid3{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+  .blk{border-top:1px solid var(--border);padding-top:12px}
+  .blk .lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:5px}
+  .blk .val{font-size:13.5px;color:var(--text)}
+  .blk .val b{color:var(--accent-text)}
+  .tag{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;margin-left:8px;vertical-align:middle}
+  .t-low{background:#dcfce7;color:var(--ok)} .t-mid{background:#fef3c7;color:var(--warn)} .t-high{background:#fee2e2;color:var(--bad)}
+  .tag-safe{background:var(--surface-2);color:var(--text-2)}
+  .prio-bar{display:flex;gap:6px;margin:6px 0 0}
+  .prio-bar span{height:4px;flex:1;border-radius:2px;background:var(--surface-2)}
+  .prio-bar span.on{background:var(--accent)}
+  ul.clean{margin:6px 0 0;padding-left:18px;font-size:13.5px;color:var(--text-2)}
+  ul.clean li{margin:3px 0}
+  .section-intro{color:var(--text-2);font-size:13.5px;margin:4px 0 4px}
+  footer{margin-top:56px;padding-top:24px;border-top:1px solid var(--border);color:var(--text-3);font-size:12px}
+  @media(max-width:640px){.grid3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="kicker">实用性评估 · Evaluation Report</div>
+    <h1>主工作台实用性评估报告</h1>
+    <div class="sub">状元港·泉山校区 DOS 教学管理工作台 · 运行模式与体验审视</div>
+    <div class="meta">
+      <span class="chip">评估日期：2026-08-29</span>
+      <span class="chip">形态：纯静态前端 + localStorage + Supabase 同步 + DeepSeek AI</span>
+      <span class="chip">范围：仅报告，不改代码</span>
+      <span class="chip">权重：导航/视觉 · 每日操作繁琐</span>
+    </div>
+  </header>
+
+  <div class="note">
+    <b>评估口径：</b>基于工作台当前运行模式（布局结构、交互方式、功能组织）与现有内容（模块功能、信息展示、操作路径），重点审视「导航/视觉」与「每日操作繁琐」两类痛点。每条建议含【存在问题 · 改进方案 · 预期收益】，按实施优先级 P0–P3 排列。<b>已按您的要求移除「联动数据扩展」相关建议。</b>
+  </div>
+
+  <!-- ============ 现状概述 ============ -->
+  <h2>一、现状概述</h2>
+  <p class="lead">工作台为纯静态前端（GitHub Pages 托管），数据存于浏览器 <code>localStorage</code>，登录与跨设备同步经 Supabase，AI 能力经 DeepSeek。当前模块：今日指挥台 / 时间轴 / 事项看板 / 数据看板 / 教师管理 / 项目组中心 / 子工作台管理 / 设置。</p>
+  <div class="grid3" style="grid-template-columns:repeat(4,1fr)">
+    <div class="blk"><div class="lbl">架构</div><div class="val">静态前端 + 本地库</div></div>
+    <div class="blk"><div class="lbl">同步</div><div class="val">Supabase（登录/Realtime）</div></div>
+    <div class="blk"><div class="lbl">AI</div><div class="val">DeepSeek（Key 本地）</div></div>
+    <div class="blk"><div class="lbl">部署</div><div class="val">GitHub Pages</div></div>
+  </div>
+
+  <!-- ============ P0 ============ -->
+  <h2>二、P0 · 高优先级 <span class="pill">导航 / 视觉 / 每日操作</span></h2>
+  <p class="section-intro">这一类直接决定"每天打开工作台顺不顺手"，投入小、见效快，建议优先做。</p>
+
+  <div class="card">
+    <h3><span class="idx">P0-1</span> 登录/同步状态不可见</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">曾出现"刷新后登录无反应"（根因是 Supabase CDN 被墙导致脚本未加载）。即便已修复，系统仍缺乏<b>常态化的状态反馈</b>：同步中、同步失败、最后同步时间均无提示，用户无法判断当前状态。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">顶部或侧栏底部增加<b>全局状态条</b>：同步中 / 成功（显示最后同步时间）/ 失败（红色）；登录失败给出明确文案而非静默无反应。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">用户随时知道系统状态，减少"以为坏了"的焦虑与重复刷新/误操作。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-low">低成本</span><span class="tag tag-safe">不影响数据</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P0-2</span> 每日首屏操作路径过长</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">今日指挥台聚合了信息，但"快捷操作"分散在卡片底部，常用动作（记一笔 / 新建事项 / 看预警 / 写周报）需多次跳转或滚动，开屏不能立即行动。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">今日指挥台<b>顶部固定"今日快捷栏"</b>：一键 新建事项 / 记一笔 / 周报草稿 / 查看预警；将"今日聚焦建议"设为默认可见（现已在下方，可上提）。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">每日高频操作步数明显下降，开屏即可行动。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-low">低成本</span><span class="tag tag-safe">不影响数据</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P0-3</span> 导航冗长、移动端缺项</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">侧栏 8 个入口 + 多分组；移动端底部 tab 同样偏多，模块一多就拥挤；个别入口（如联动数据）对用户意义不直观。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">按角色<b>精简导航、常用置顶</b>；移动端用"更多"收纳低频入口；隐藏或合并冗余入口（如将"联动数据"等低频项收进"更多"）。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">找功能更快，移动端不再拥挤，整体更克制。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span><span class="tag tag-safe">不影响数据</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P0-4</span> 视觉一致性 / 可读性不足</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">不同模块卡片间距、空状态、数字层级不统一；数据看板数字密集无分级，涨跌配色未按<b>中国习惯（红涨绿跌）</b>统一，跨模块观感割裂。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">统一设计 token（间距 / 圆角 / 字号 / 空状态插画）；数字"大数突出、小数弱化"；涨跌统一<b>红涨绿跌</b>；统一空状态样式。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">阅读疲劳降低，关键数据一眼可见，整体更显专业。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span><span class="tag tag-safe">不影响数据</span></div></div>
+    </div>
+  </div>
+
+  <!-- ============ P1 ============ -->
+  <h2>三、P1 · 中高优先级 <span class="pill">打通 · 透明 · 能力恢复</span></h2>
+
+  <div class="card">
+    <h3><span class="idx">P1-5</span> 粘贴模板未与事项看板打通</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">粘贴任务表格模板已具备解析能力，但解析结果未直接入库，仍需手动再录入，批量效率打了折扣。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">粘贴即解析 → <b>预览校验 → 一键导入事项看板</b>（复用现有 parseTasks + 字段校验）。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">群消息/表格批量转事项效率显著提升。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P1-6</span> 周报 / 月报口径不透明</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">核心看板公式依赖 sheet1 第一列字段名，源表一旦变动易错位；用户不清楚口径从何而来，出错难定位。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">提供<b>口径可视化</b>面板（字段映射可配置）+ 导入时的字段校验与缺失提示。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">数据可信度提升，错位可自查自纠。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P1-7</span> AI 模型可能已停用（含本课表能力前置）</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">设置中默认 <code>deepseek-chat</code> / <code>deepseek-reasoner</code>，而 DeepSeek 已于 <b>2026-07-24 计划停用旧模型</b>，现行为可能已失效；且视觉能力（本次课程表所需）尚未启用。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">模型下拉升级为 V4：<b>deepseek-v4-flash（默认）/ deepseek-v4-pro / deepseek-v4-flash-vision-exp</b>；增加"测试连接"与新增的"测试视觉识别"自检；课程表将复用同一把密钥实现截图识图，<b>零额外账号成本</b>。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">恢复并扩展 AI（周报/红绿灯/粘贴解析），并为课程表识图铺路。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-low">低成本</span></div></div>
+    </div>
+  </div>
+
+  <!-- ============ P2 ============ -->
+  <h2>四、P2 · 中优先级 <span class="pill">规范 · 效率 · 引导</span></h2>
+
+  <div class="card">
+    <h3><span class="idx">P2-8</span> 教师字段不规范</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">教师姓名在各模块可能写法不一（含/不含学科组等），关联统计易错。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">落地字段规范 + <b>下拉选择 / 自动补全</b>（规范草案已有基础）。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">跨模块关联统计准确，AI 脱敏也更稳。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P2-9</span> 缺少 ⌘K 全局搜索 / 命令面板</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">找不到历史事项 / 教师 / 数据，只能逐模块翻。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">⌘K 唤起命令面板，搜索事项 / 教师 / 路由，并支持快捷跳转。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">老用户检索效率明显提升。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P2-10</span> 空状态 / 引导缺失</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">新模块（如项目组中心）首次进入无引导，新用户不知从哪下手。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">统一的<b>空状态插画 + "下一步"指引</b>。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">上手成本降低，首次体验更友好。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-low">低成本</span></div></div>
+    </div>
+  </div>
+
+  <!-- ============ P3 ============ -->
+  <h2>五、P3 · 低优先级 <span class="pill">可选增强</span></h2>
+
+  <div class="card">
+    <h3><span class="idx">P3-11</span> 深色模式</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">目前未提供深色主题，夜间使用偏刺眼。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">基于现有 CSS 变量做主题切换（跟随系统或手动）。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">夜间使用更舒适。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-mid">中成本</span></div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><span class="idx">P3-12</span> 数据备份可发现性</h3>
+    <div class="grid3">
+      <div class="blk"><div class="lbl">存在问题</div><div class="val">备份功能存在，但用户未必记得何时导出，存在丢失风险。</div></div>
+      <div class="blk"><div class="lbl">改进方案</div><div class="val">保留每月提醒并增强为<b>可一键点击导出</b>，关键操作后轻提示。</div></div>
+      <div class="blk"><div class="lbl">预期收益</div><div class="val">降低数据丢失风险。</div></div>
+      <div class="blk"><div class="lbl">成本 / 影响</div><div class="val"><span class="tag t-low">低成本</span></div></div>
+    </div>
+  </div>
+
+  <!-- ============ 明确不做 ============ -->
+  <h2>六、本次明确不做</h2>
+  <ul class="clean">
+    <li><b>联动数据扩展</b>：按您的要求，已不在本次范围内。</li>
+    <li><b>课程表自动拉取</b>：课表源站为登录墙（验证码）+ HTTP + 无 CORS，静态前端无法自动抓取，方案已否，改为"方案A 多截图 + 视觉识别"手动导入（见附录）。</li>
+  </ul>
+
+  <!-- ============ 附录 ============ -->
+  <h2>附录 · 课程表模块（方案A，随本次一并实现）</h2>
+  <p class="section-intro">作为报告建议之外本次一并交付的新模块：</p>
+  <ul class="clean">
+    <li><b>入口</b>：侧栏"主功能区"新增「课程表」，移动端底部 tab 同步增加。</li>
+    <li><b>导入</b>：多选课表截图 → 调用同一把 DeepSeek 密钥的视觉模型（deepseek-v4-flash-vision-exp）识别 → 渲染为可编辑周网格 → 您核对修正后保存。</li>
+    <li><b>存储</b>：结构化网格（周一–周日 × 节次，每格含 课程/教师/教室）存于本地 <code>localStorage</code>，显示"上次更新时间"，支持"重新导入 / 清空"。</li>
+    <li><b>兜底</b>：无密钥 / 网络失败 / 识别异常时，回退到"手动填表"，不阻断使用。</li>
+  </ul>
+
+  <footer>
+    本报告仅作评估，不改变工作台现有代码。建议按 P0 → P1 → P2 → P3 顺序推进；课程表（方案A）作为独立模块随本次交付。
+  </footer>
+
+</div>
+</body>
+</html>

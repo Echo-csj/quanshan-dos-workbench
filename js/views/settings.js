@@ -105,6 +105,21 @@
     container.innerHTML = html;
   });
 
+  // --- 模型下拉构建（保留当前值，避免切换时丢失自定义名）---
+  function buildModelSelect(id, current, options) {
+    var html = '<select id="' + id + '" class="form-input">';
+    var has = {};
+    options.forEach(function (o) {
+      has[o[0]] = true;
+      html += '<option value="' + App.util.escapeAttr(o[0]) + '"' + (o[0] === current ? ' selected' : '') + '>' + App.util.escapeHtml(o[1]) + '</option>';
+    });
+    if (current && !has[current]) {
+      html += '<option value="' + App.util.escapeAttr(current) + '" selected>' + App.util.escapeHtml(current) + '（当前）</option>';
+    }
+    html += '</select>';
+    return html;
+  }
+
   // --- AI 智能设置卡 ---
   function renderAICard() {
     var A = App.ai;
@@ -119,9 +134,23 @@
     html += '<div class="form-group"><label class="form-label">DeepSeek API Key（' + keyHint + '）</label>';
     html += '<input type="password" id="ai-key" class="form-input" placeholder="sk-..." value="' + App.util.escapeAttr(s.apiKey) + '" autocomplete="off"></div>';
 
-    html += '<div class="form-group"><label class="form-label">模型名</label>';
-    html += '<input type="text" id="ai-model" class="form-input" value="' + App.util.escapeAttr(s.model) + '" placeholder="deepseek-chat">';
-    html += '<p class="form-hint">默认 deepseek-chat（V3 通用）；推理用 deepseek-reasoner。若官方模型名变更，直接改这里即可。</p></div>';
+    html += '<div class="form-group"><label class="form-label">文本模型（V4 推荐）</label>';
+    html += buildModelSelect('ai-model', s.model, [
+      ['deepseek-v4-flash', 'deepseek-v4-flash（推荐·通用）'],
+      ['deepseek-v4-pro', 'deepseek-v4-pro（更强·推理）'],
+      ['deepseek-v4-flash-vision-exp', 'deepseek-v4-flash-vision-exp（视觉·亦可作文本）'],
+      ['deepseek-chat', 'deepseek-chat（旧·可能已停用）'],
+      ['deepseek-reasoner', 'deepseek-reasoner（旧·推理·可能已停用）']
+    ]);
+    html += '<p class="form-hint">DeepSeek 旧模型（deepseek-chat / deepseek-reasoner）已于 2026-07-24 计划停用，建议切换到 V4；若你的 Key 仍支持旧名可保留。</p></div>';
+
+    html += '<div class="form-group"><label class="form-label">视觉识别模型（课程表截图识别用）</label>';
+    html += buildModelSelect('ai-vision-model', s.visionModel, [
+      ['deepseek-v4-flash-vision-exp', 'deepseek-v4-flash-vision-exp（默认·支持图片）'],
+      ['deepseek-v4-flash', 'deepseek-v4-flash'],
+      ['deepseek-v4-pro', 'deepseek-v4-pro']
+    ]);
+    html += '<p class="form-hint">课程表导入依赖此视觉模型，复用同一把 DeepSeek Key，无需新账号。</p></div>';
 
     html += '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">';
     html += '<label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px"><input type="checkbox" id="ai-mask" style="width:16px;height:16px"' + (s.mask ? ' checked' : '') + '> 发送前脱敏教师姓名（替换为代号）</label>';
@@ -131,6 +160,7 @@
     html += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
     html += '<button class="btn btn-primary btn-sm" onclick="App.views.settings.saveAI()">' + App.util.svgIcon('check', 14) + '保存设置</button>';
     html += '<button class="btn btn-secondary btn-sm" onclick="App.views.settings.testAI()">' + App.util.svgIcon('refresh-cw', 14) + '测试连接</button>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="App.views.settings.testVisionAI()">' + App.util.svgIcon('camera', 14) + '测试视觉识别</button>';
     html += '</div>';
     html += '<div id="ai-status" style="margin-top:10px;font-size:12px"></div>';
     html += '</div>';
@@ -242,7 +272,10 @@
       if (!App.ai) return;
       var s = App.ai.getSettings();
       s.apiKey = (document.getElementById('ai-key') || {}).value.trim();
-      s.model = ((document.getElementById('ai-model') || {}).value || 'deepseek-chat').trim();
+      var mSel = document.getElementById('ai-model');
+      s.model = (mSel && mSel.value) ? mSel.value.trim() : 'deepseek-v4-flash';
+      var vSel = document.getElementById('ai-vision-model');
+      s.visionModel = (vSel && vSel.value) ? vSel.value.trim() : 'deepseek-v4-flash-vision-exp';
       s.mask = document.getElementById('ai-mask') ? document.getElementById('ai-mask').checked : true;
       s.enabled = document.getElementById('ai-enabled') ? document.getElementById('ai-enabled').checked : true;
       App.ai.saveSettings(s);
@@ -260,6 +293,32 @@
           ? '<span style="color:var(--ok)">✓ 连接成功：' + App.util.escapeHtml(r.text) + '</span>'
           : '<span style="color:var(--bad)">✗ ' + App.util.escapeHtml(r.error || '失败') + '</span>';
       });
+    },
+
+    testVisionAI: function() {
+      if (!App.ai) return;
+      App.views.settings.saveAI();
+      var statusEl = document.getElementById('ai-status');
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted)">请选择一张图片以测试视觉识别…</span>';
+      var input = document.createElement('input');
+      input.type = 'file'; input.accept = 'image/*';
+      input.onchange = function() {
+        var file = input.files && input.files[0];
+        if (!file) return;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-muted)">正在测试视觉识别…</span>';
+        var rd = new FileReader();
+        rd.onload = function() {
+          App.ai.parseImages('你是一个测试助手，请只回复两个字：正常', [rd.result], { temperature: 0, timeout: 60000 }).then(function(r) {
+            if (!statusEl) return;
+            statusEl.innerHTML = r.ok
+              ? '<span style="color:var(--ok)">✓ 视觉识别正常：' + App.util.escapeHtml(String(r.text).slice(0, 40)) + '</span>'
+              : '<span style="color:var(--bad)">✗ ' + App.util.escapeHtml(r.error || '失败') + '</span>';
+          });
+        };
+        rd.onerror = function() { if (statusEl) statusEl.innerHTML = '<span style="color:var(--bad)">✗ 图片读取失败</span>'; };
+        rd.readAsDataURL(file);
+      };
+      input.click();
     }
   };
 

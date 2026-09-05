@@ -18,7 +18,8 @@
   function defaultSettings() {
     return {
       apiKey: '',
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-flash',                  // 文本模型（V4；旧 deepseek-chat/reasoner 已于 2026-07-24 计划停用）
+      visionModel: 'deepseek-v4-flash-vision-exp', // 视觉模型（支持图片输入，同一把密钥）
       mask: true,          // 脱敏开关：发送前把教师姓名替换为代号
       enabled: true
     };
@@ -86,29 +87,16 @@
   }
 
   /* ---------------- 核心调用 ---------------- */
-  function _call(messages, opts) {
+  // 底层 POST：所有调用共用，便于文本与视觉统一错误处理
+  function _fetch(model, messages, opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
       var s = getSettings();
-      if (!s.enabled) { resolve({ ok: false, error: 'AI 功能未启用，请在「设置 → AI」开启' }); return; }
-      if (!s.apiKey || s.apiKey.trim().length <= 4) { resolve({ ok: false, error: '尚未配置 DeepSeek API Key，请在「设置 → AI」填写' }); return; }
-
-      // 脱敏：把 messages 里所有 user/system 内容中的教师姓名替换为代号
-      var revMap = null;
-      if (s.mask) {
-        var names = teacherNames();
-        if (names.length) {
-          var masked = maskText(JSON.stringify(messages), names);
-          messages = JSON.parse(masked.text);
-          revMap = masked.rev;
-        }
-      }
-
       var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-      var timer = setTimeout(function () { if (controller) controller.abort(); }, TIMEOUT_MS);
+      var timer = setTimeout(function () { if (controller) controller.abort(); }, opts.timeout || TIMEOUT_MS);
 
       var body = {
-        model: s.model || 'deepseek-chat',
+        model: model,
         messages: messages,
         temperature: (opts.temperature != null) ? opts.temperature : 0.3,
         stream: false,
@@ -131,13 +119,57 @@
           return;
         }
         var content = r.data && r.data.choices && r.data.choices[0] && r.data.choices[0].message ? r.data.choices[0].message.content : '';
-        resolve({ ok: true, text: revMap ? unmaskText(content, revMap) : content, revMap: revMap });
+        resolve({ ok: true, text: content });
       }).catch(function (e) {
         clearTimeout(timer);
-        var msg = (e && e.name === 'AbortError') ? '请求超时（' + (TIMEOUT_MS / 1000) + 's）' : (e && e.message ? e.message : String(e));
+        var msg = (e && e.name === 'AbortError') ? '请求超时（' + ((opts.timeout || TIMEOUT_MS) / 1000) + 's）' : (e && e.message ? e.message : String(e));
         resolve({ ok: false, error: '网络错误：' + msg });
       });
     });
+  }
+
+  // 文本调用（含脱敏）
+  function _call(messages, opts) {
+    opts = opts || {};
+    var s = getSettings();
+    if (!s.enabled) return Promise.resolve({ ok: false, error: 'AI 功能未启用，请在「设置 → AI」开启' });
+    if (!s.apiKey || s.apiKey.trim().length <= 4) return Promise.resolve({ ok: false, error: '尚未配置 DeepSeek API Key，请在「设置 → AI」填写' });
+
+    // 脱敏：把 messages 里所有 user/system 内容中的教师姓名替换为代号
+    var revMap = null;
+    if (s.mask) {
+      var names = teacherNames();
+      if (names.length) {
+        var masked = maskText(JSON.stringify(messages), names);
+        messages = JSON.parse(masked.text);
+        revMap = masked.rev;
+      }
+    }
+
+    return _fetch(s.model || 'deepseek-v4-flash', messages, opts).then(function (r) {
+      if (!r.ok) return r;
+      return { ok: true, text: revMap ? unmaskText(r.text, revMap) : r.text, revMap: revMap };
+    });
+  }
+
+  // 视觉调用：多张图片 + 文本 prompt → 模型返回文本（课程表识图用）
+  function parseImages(system, dataURLs, opts) {
+    opts = opts || {};
+    var s = getSettings();
+    if (!s.enabled) return Promise.resolve({ ok: false, error: 'AI 功能未启用，请在「设置 → AI」开启' });
+    if (!s.apiKey || s.apiKey.trim().length <= 4) return Promise.resolve({ ok: false, error: '尚未配置 DeepSeek API Key，请在「设置 → AI」填写' });
+    if (!dataURLs || !dataURLs.length) return Promise.resolve({ ok: false, error: '未提供图片' });
+
+    // 多模态 content：先文本指令，再逐张图片
+    var content = [{ type: 'text', text: system }];
+    dataURLs.forEach(function (u) {
+      var url = (typeof u === 'string') ? u : (u && u.url) ? u.url : '';
+      if (url) content.push({ type: 'image_url', image_url: { url: url } });
+    });
+    if (content.length < 2) return Promise.resolve({ ok: false, error: '图片为空或格式不支持' });
+
+    var messages = [{ role: 'user', content: content }];
+    return _fetch(s.visionModel || 'deepseek-v4-flash-vision-exp', messages, opts);
   }
 
   function chat(system, user, opts) {
@@ -232,6 +264,7 @@
     unmask: unmaskText,
     chat: chat,
     chatJSON: chatJSON,
+    parseImages: parseImages,
     generateWeeklyReport: generateWeeklyReport,
     explainBaseline: explainBaseline,
     parseTasks: parseTasks
