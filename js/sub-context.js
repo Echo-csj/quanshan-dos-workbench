@@ -117,19 +117,50 @@
     try {
       var r = await c.from('dos_workbench').select('data,updated_at').eq('user_id', id.org.owner_user_id).maybeSingle();
       if (r.error) { console.warn('[subContext] loadMaster', r.error); return; }
-      if (r.data) { masterData = r.data.data || {}; }
-      notify();
+      if (r.data) {
+        var newData = r.data.data || {};
+        var rowTs = r.data.updated_at || '';
+        var sig = rowTs + '|' + taskSig(newData.tasks);
+        var changed = (lastMasterSig !== null && sig !== lastMasterSig);
+        var first = (lastMasterSig === null);
+        masterData = newData;
+        lastMasterSig = sig;
+        if (changed) {
+          try { if (App.util && App.util.toast) App.util.toast('收到总工作台更新', 'ok'); } catch (e) {}
+          notify();   // 重渲染当前视图，子台无需手动刷新即可看到总台新任务
+        } else if (first) {
+          notify();   // 首次加载也要渲染一次
+        }
+      }
     } catch (e) { console.warn('[subContext] loadMaster', e); }
+  }
+  function taskSig(tasks) {
+    return JSON.stringify((tasks || []).map(function (t) {
+      return [t.id, t.status, t.updatedAt, t.title];
+    }));
   }
 
   function subscribeRealtime() {
     var id = identity; var c = client();
     if (!id || !id.org.owner_user_id || !c) return;
     try {
-      c.channel('sub-master-' + id.org.owner_user_id)
+      if (_masterChannel) { try { c.removeChannel(_masterChannel); } catch (e) {} _masterChannel = null; }
+      _masterChannel = c.channel('sub-master-' + id.org.owner_user_id)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'dos_workbench', filter: 'user_id=eq.' + id.org.owner_user_id }, function () { loadMaster(); })
-        .subscribe();
+        .subscribe(function (status) {
+          if (status !== 'SUBSCRIBED') console.warn('[subContext] 总台实时订阅状态：', status);
+        });
     } catch (e) {}
+  }
+
+  // 兜底轮询：实时订阅在部分网络环境下可能不可靠，每 60 秒重拉总台数据，
+  // 并在切回页面焦点时立即重拉，确保总台更新无需手动刷新即可看到；配合 loadMaster 的变更提示。
+  function startPolling() {
+    if (_pollTimer) clearInterval(_pollTimer);
+    _pollTimer = setInterval(function () { loadMaster(); }, 60000);
+    if (_visHandler) document.removeEventListener('visibilitychange', _visHandler);
+    _visHandler = function () { if (!document.hidden) loadMaster(); };
+    document.addEventListener('visibilitychange', _visHandler);
   }
 
   function fireReady() {
@@ -166,6 +197,10 @@
     masterData = null;
     started = false;
     readyFired = false;
+    lastMasterSig = null;
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    if (_visHandler) { try { document.removeEventListener('visibilitychange', _visHandler); } catch (e) {} _visHandler = null; }
+    if (_masterChannel && client()) { try { client().removeChannel(_masterChannel); } catch (e) {} _masterChannel = null; }
     restoreNavUI();   // 恢复导航，避免总台残留子台视角的隐藏
   }
 

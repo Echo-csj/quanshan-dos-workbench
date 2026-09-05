@@ -34,20 +34,68 @@
   });
 
   /* ---------------- 数据访问 ---------------- */
-  // 渲染用：子台视角返回「团队任务 + 派给我的个人任务 + 我的自建任务」；否则返回本地全部
+  // 主工作台聚合子工作台任务（只读缓存）：key 同源，避免与子台视角混淆
+  var _subTasksCache = [];
+  var _ownerPollStarted = false;
+
+  function disabledSync() {
+    var cfg = (window.APP_CONFIG || {});
+    return !cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY ||
+      /YOUR_/.test(cfg.SUPABASE_URL || '') || /YOUR_/.test(cfg.SUPABASE_ANON_KEY || '');
+  }
+
+  // 渲染用：子台视角返回「团队任务 + 派给我的个人任务 + 我的自建任务」；主台返回「本地全部 + 子台聚合（只读）」
   function getTasks() {
-    if (App.subContext && App.subContext.isSub && App.subContext.isSub()) {
+    if (isSubView()) {
       return App.subContext.mergedTasks();
     }
-    return App.store.get('tasks') || [];
+    return localTasks().concat(_subTasksCache);
   }
   // 写入用：总是操作本地 store（子台自建任务存这里）
   function localTasks() { return App.store.get('tasks') || []; }
   function isSubView() { return !!(App.subContext && App.subContext.isSub && App.subContext.isSub()); }
-  // 该任务当前账号是否可编辑：总台可编辑全部；子台只能编辑自建任务（source='sub'）
+  // 该任务当前账号是否可编辑：主台可编辑本地全部；子台只读任务（_readOnly）不可编辑；子台只能编辑自建任务（source='sub'）
   function isEditable(t) {
+    if (t && t._readOnly) return false;
     if (!isSubView()) return true;
     return !!(t && t.source === 'sub');
+  }
+
+  // 主工作台：拉取所有子工作台整档，聚合其自建任务（用于总台统一查看，只读）
+  async function refreshOwnerSubTasks() {
+    if (isSubView()) return;
+    if (disabledSync() || !(App.masterHub && App.masterHub.getMyOrgId)) { _subTasksCache = []; return; }
+    var orgId;
+    try { orgId = await App.masterHub.getMyOrgId(); } catch (e) { orgId = null; }
+    if (!orgId) { _subTasksCache = []; rerenderIfOnBoard(); return; }
+    var members;
+    try { members = await App.masterHub.fetchAllMembersData(); } catch (e) { members = []; }
+    var out = [];
+    (members || []).forEach(function (m) {
+      if (!m || !m.data || !m.data.tasks) return;
+      var name = m.name || '子工作台';
+      (m.data.tasks || []).forEach(function (t) {
+        if (!t || !t.id) return;
+        out.push(Object.assign({}, t, { _readOnly: true, _subName: name }));
+      });
+    });
+    _subTasksCache = out;
+    rerenderIfOnBoard();
+  }
+  function rerenderIfOnBoard() {
+    if (App.router && App.router.getCurrentRoute && App.router.getCurrentRoute() === '/tasks') {
+      var c = document.getElementById('view-container');
+      if (c) c.innerHTML = renderBoard();
+    }
+  }
+  // 主工作台：开启 60 秒兜底轮询 + 焦点重拉，保证子台新任务不需手动刷新即出现
+  function ensureOwnerPolling() {
+    if (isSubView() || _ownerPollStarted) return;
+    _ownerPollStarted = true;
+    setInterval(function () { refreshOwnerSubTasks(); }, 60000);
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden && !isSubView()) refreshOwnerSubTasks();
+    });
   }
 
   /* 同级互发任务开关（config.js TASK_SHARE）：关闭时不显示「📤 发送」入口 */
@@ -187,7 +235,7 @@
       : (view.mode === 'date' ? '按截止日折叠分组：逾期 / 今日 / 未来 7 天 / 更远 / 无截止'
       : '按优先级分组：紧急 / 高 / 普通'));
     html += '<div class="page-head"><h1 class="page-title">事项看板</h1>';
-    html += '<p class="page-sub">' + modeHint + '</p></div>';
+    html += '<p class="page-sub">' + modeHint + (_subTasksCache.length ? ' · 已汇总 ' + _subTasksCache.length + ' 条子工作台任务（只读）' : '') + '</p></div>';
 
     // 工具条
     html += renderToolbar(view, filtered, archivedCount, doneVisible);
@@ -387,9 +435,10 @@
 
   function renderListRow(t) {
     var overdue = t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate);
-    var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : (t.source === 'teacher-milestone' ? '🎯 里程碑' : '手动'));
+    var readonly = !!t._readOnly;
+    var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : (t.source === 'teacher-milestone' ? '🎯 里程碑' : (readonly ? '子台' : '手动')));
     var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
-    html += '<td class="list-title" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.escapeHtml(t.title || '未命名任务');
+    html += '<td class="list-title"' + (readonly ? '' : ' onclick="App.views.tasks.editTask(\'' + t.id + '\')"') + '>' + App.util.escapeHtml(t.title || '未命名任务');
     if (t.permTags && t.permTags.length) {
       t.permTags.forEach(function (g) {
         var lbl = (App.perm && App.perm.TASK_TAG_LABELS && App.perm.TASK_TAG_LABELS[g]) || g;
@@ -399,6 +448,7 @@
     }
     if (t.scope === 'team') html += '<span class="scope-tag">团队</span>';
     else if (!t.scope) html += '<span class="scope-tag scope-tag-unassigned">未分配</span>';
+    if (readonly && t._subName) html += '<span class="scope-tag">👥 ' + App.util.escapeHtml(t._subName) + '</span>';
     if (t.note) html += '<div class="list-note">' + App.util.escapeHtml(t.note) + '</div>';
     html += '</td>';
     html += '<td><span class="tag status-' + t.status + '">' + App.util.statusLabel(t.status) + '</span></td>';
@@ -407,10 +457,14 @@
     html += '<td style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">' + (t.dueDate || '<span style="color:var(--text-faint)">—</span>') + '</td>';
     html += '<td><span style="font-size:11px;color:var(--text-muted)">' + srcLabel + '</span></td>';
     html += '<td class="list-actions">';
-    html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
-    if (taskShareOn()) html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
-    if (t.status === 'done') html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
-    html += '<button class="btn-icon btn-icon-danger" title="删除" onclick="App.views.tasks.deleteTask(\'' + t.id + '\')">' + App.util.svgIcon('trash-2', 14) + '</button>';
+    if (readonly) {
+      html += '<span class="tag scope-tag-unassigned">只读</span>';
+    } else {
+      html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
+      if (taskShareOn()) html += '<button class="btn-icon" title="发送给同事" onclick="App.views.tasks.sendTask(\'' + t.id + '\')">📤</button>';
+      if (t.status === 'done') html += '<button class="btn-icon" title="归档" onclick="App.views.tasks.archiveTask(\'' + t.id + '\')">📦</button>';
+      html += '<button class="btn-icon btn-icon-danger" title="删除" onclick="App.views.tasks.deleteTask(\'' + t.id + '\')">' + App.util.svgIcon('trash-2', 14) + '</button>';
+    }
     html += '</td>';
     html += '</tr>';
     return html;
@@ -766,6 +820,8 @@
   }
 
   function deleteTask(id) {
+    var all = getTasks().filter(function(x) { return x.id === id; })[0];
+    if (all && all._readOnly) { App.util.toast('子工作台任务不可在主台删除', 'warn'); return; }
     var t = localTasks().filter(function(x) { return x.id === id; })[0];
     if (!t || !isEditable(t)) { App.util.toast('总台任务不可删除', 'warn'); return; }
     App.util.modal({

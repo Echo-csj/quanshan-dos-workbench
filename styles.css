@@ -1632,3 +1632,7 @@ body.auth-locked .sync-widget{display:none}
 .pg-health-alerts{margin-top:8px;display:flex;flex-direction:column;gap:4px}
 .pg-health-alert{font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .ai-insight-advice{padding:10px 12px;background:var(--accent-soft);border:1px solid #C7D2FE;border-radius:var(--radius-sm);font-size:12px;color:var(--accent-text);line-height:1.7}
+
+/* 主工作台中来自子工作台的任务：只读标识 */
+.kanban-card.read-only{border-left:3px solid var(--accent,#4F46E5);background:var(--bg-subtle,#fafafa)}
+.kanban-card.read-only .kanban-card-note{color:var(--accent-text,#4338ca)}
