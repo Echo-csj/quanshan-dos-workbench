@@ -1,0 +1,6 @@
+# Supabase 项目配置（用于 functions 部署）
+project_id = "zxemcyngesgxpbevdxsu"
+
+[functions.fetch-schedule]
+# 函数内部自行鉴权（用户 JWT 或 service-role/cron），故关闭网关层 JWT 校验
+verify_jwt = false

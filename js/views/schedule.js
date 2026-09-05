@@ -11,6 +11,11 @@
   var DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
   var DEFAULT_PERIODS = ['08:00-10:00', '10:10-12:10', '12:50-14:50', '15:00-17:00', '17:30-19:30', '19:40-21:40'];
 
+  // 自动抓取相关状态
+  var lastFetched = null;     // 最近一次从 shared_link(kind='schedule_fetch') 读到的抓取结果
+  var _dismissedKey = null;   // 已忽略的抓取时间戳，避免重复弹横幅
+  var _fetchChannel = null;   // 抓取结果共享行的实时订阅
+
   // 把常见星期写法归一到 周一..周日
   function normDay(d) {
     var map = {
@@ -55,7 +60,10 @@
   App.router.register('/schedule', function() {
     var container = document.getElementById('view-container');
     if (!container) return;
+    teardownFetchRealtime();
     renderShell(container, getSchedule());
+    setupFetchRealtime();
+    refreshFetchBanner();
   });
 
   function renderShell(container, data) {
@@ -74,7 +82,11 @@
     html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.addTeacher()">' + U.svgIcon('user-plus', 14) + '添加教师</button>';
     html += '<button class="btn btn-primary btn-sm" onclick="App.views.schedule.saveGrid()">' + U.svgIcon('check', 14) + '保存课程表</button>';
     html += '<button class="btn btn-danger btn-ghost btn-sm" onclick="App.views.schedule.clearGrid()">' + U.svgIcon('trash-2', 14) + '清空</button>';
+    if (syncEnabled()) {
+      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.syncNow()">' + U.svgIcon('refresh-cw', 14) + '同步抓取</button>';
+    }
     html += '</div></div>';
+    html += '<div id="schedule-fetch-banner"></div>';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:6px">上次更新：' + U.escapeHtml(updatedAt) + U.escapeHtml(srcInfo) + '</p>';
     html += '<p class="form-hint" style="margin-bottom:14px">按教师分块排布（每位教师一行组，周一至周日 7 列、时间节次为行）。导入：选择多张课表截图，由 AI（DeepSeek 视觉模型，复用现有密钥）识别为可编辑课程表；识别后请在网页里核对修正，再点「保存课程表」。无密钥或识别异常时，可直接手动添加教师与节次填写。</p>';
 
@@ -370,6 +382,122 @@
     };
   }
 
+  /* ---------------- 自动抓取（后端 Edge Function → shared_link → 前端拉取） ---------------- */
+  function syncEnabled() {
+    var s = (App.sync && App.sync.getStatus) ? App.sync.getStatus() : 'disabled';
+    return s === 'ok';
+  }
+
+  // 从 shared_link(kind='schedule_fetch') 读取最近一次抓取结果
+  async function pullFetched() {
+    if (!App.sync || !App.sync.readShared) return null;
+    try {
+      var rows = await App.sync.readShared();
+      var row = (rows || []).filter(function (r) { return r && r.kind === 'schedule_fetch'; })[0];
+      if (!row) return null;
+      var p = row.payload || {};
+      var sched = p.schedule;
+      if (!sched || !sched.teachers) return null;
+      sched._fetchedAt = p.fetchedAt || row.updated_at;
+      return sched;
+    } catch (e) { return null; }
+  }
+
+  async function refreshFetchBanner() {
+    var fetched = await pullFetched();
+    lastFetched = fetched;
+    renderFetchBanner(fetched);
+  }
+
+  function renderFetchBanner(fetched) {
+    var wrap = document.getElementById('schedule-fetch-banner');
+    if (!wrap) return;
+    if (!fetched) { wrap.innerHTML = ''; return; }
+    var local = App.store.get('schedule') || {};
+    var localTs = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+    var fetchedTs = fetched._fetchedAt ? new Date(fetched._fetchedAt).getTime() : 0;
+    // 已是最新抓取版本 → 不重复弹
+    if (fetchedTs && localTs && fetchedTs <= localTs && local.source === 'fetch') { wrap.innerHTML = ''; return; }
+    if (fetched._fetchedAt && fetched._fetchedAt === _dismissedKey) { wrap.innerHTML = ''; return; }
+
+    var U = App.util;
+    var when = fetched._fetchedAt ? new Date(fetched._fetchedAt).toLocaleString('zh-CN') : '未知时间';
+    var n = (fetched.teachers || []).length;
+    wrap.innerHTML = '<div class="card" style="margin-bottom:14px;border:1px solid var(--indigo,#4F46E5);background:color-mix(in srgb,var(--indigo,#4F46E5) 7%,var(--surface))">'
+      + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      + '<div style="flex:1;min-width:200px"><div style="font-weight:600">检测到自动抓取的课程表</div>'
+      + '<div style="font-size:12px;color:var(--text-muted)">抓取于 ' + U.escapeHtml(when) + ' · ' + n + ' 位教师'
+      + (fetched.sourceUrl ? (' · 来源：' + U.escapeHtml(fetched.sourceUrl)) : '') + '</div></div>'
+      + '<button class="btn btn-primary btn-sm" onclick="App.views.schedule.applyFetchedFromBanner()">应用抓取结果</button>'
+      + '<button class="btn btn-ghost btn-sm" onclick="App.views.schedule.dismissFetchBanner()">忽略</button>'
+      + '</div></div>';
+  }
+
+  function applyFetched(sched) {
+    var data = {
+      updatedAt: new Date().toISOString(),
+      source: 'fetch',
+      sourceUrl: sched.sourceUrl || '',
+      fetchedAt: sched._fetchedAt || null,
+      screenshotsCount: 0,
+      weekStartDate: sched.weekStartDate || null,
+      weekEndDate: sched.weekEndDate || null,
+      periods: sched.periods || DEFAULT_PERIODS.slice(),
+      teachers: sched.teachers || []
+    };
+    App.store.set('schedule', data);
+    renderShell(document.getElementById('view-container'), data);
+    App.util.toast('已应用抓取的课程表', 'ok');
+    var banner = document.getElementById('schedule-fetch-banner');
+    if (banner) banner.innerHTML = '';
+  }
+
+  function applyFetchedFromBanner() {
+    if (lastFetched) applyFetched(lastFetched);
+  }
+  function dismissFetchBanner() {
+    if (lastFetched && lastFetched._fetchedAt) _dismissedKey = lastFetched._fetchedAt;
+    var banner = document.getElementById('schedule-fetch-banner');
+    if (banner) banner.innerHTML = '';
+  }
+
+  // 触发后端 Edge Function（fetch-schedule）立即抓取一次
+  async function syncNow() {
+    var c = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
+    if (!c || !c.functions || !c.functions.invoke) { App.util.toast('同步服务未启用，无法触发抓取', 'warn'); return; }
+    App.util.toast('正在从源站抓取课程表…');
+    try {
+      var r = await c.functions.invoke('fetch-schedule', { body: {} });
+      if (r && r.error) { App.util.toast('抓取失败：' + ((r.error && r.error.message) || r.error), 'bad'); return; }
+      await refreshFetchBanner();
+      App.util.toast('抓取完成，请核对后点「应用抓取结果」', 'ok');
+    } catch (e) {
+      App.util.toast('抓取出错：' + ((e && e.message) || e), 'bad');
+    }
+  }
+
+  // 订阅抓取结果共享行：抓取落地后近实时刷新横幅
+  function setupFetchRealtime() {
+    if (!syncEnabled()) return;
+    var c = App.sync.getClient(); if (!c) return;
+    var s = App.sync.getSession && App.sync.getSession();
+    var uid = s && s.user ? s.user.id : null;
+    if (!uid) return;
+    teardownFetchRealtime();
+    try {
+      _fetchChannel = c.channel('schedule-fetch-realtime:' + uid)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'shared_link', filter: 'user_id=eq.' + uid }, function () { refreshFetchBanner(); })
+        .subscribe();
+    } catch (e) {}
+  }
+  function teardownFetchRealtime() {
+    if (_fetchChannel) {
+      try { _fetchChannel.unsubscribe(); } catch (e) {}
+      try { var c = App.sync.getClient(); if (c && c.removeChannel) c.removeChannel(_fetchChannel); } catch (e) {}
+      _fetchChannel = null;
+    }
+  }
+
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.schedule = {
@@ -381,6 +509,10 @@
     addPeriod: addPeriod,
     removePeriod: removePeriod,
     clearGrid: clearGrid,
+    // 自动抓取
+    syncNow: syncNow,
+    applyFetchedFromBanner: applyFetchedFromBanner,
+    dismissFetchBanner: dismissFetchBanner,
     // 供未来「自动抓取」接入：把抓取/视觉模型返回的 JSON 归一到标准结构
     normalizeImport: normalizeData
   };
