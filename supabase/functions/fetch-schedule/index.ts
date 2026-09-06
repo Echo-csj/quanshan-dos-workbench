@@ -46,7 +46,8 @@ interface TeacherRow {
   code: string;
   subject: string;
   summary: string;
-  classes: Record<string, string>; // "周一-08:00-10:00": "A班"
+  classes: Record<string, string>; // "周一-08:00-10:00": "泉山八年级英语2班 · 初二 英语"
+  dayArrange: Record<string, string>; // "周二": "A班 [13:00-20:00]"  当天班制（来自 .arrange），与时间段正交
 }
 interface ScheduleData {
   weekStartDate: string | null;
@@ -153,12 +154,19 @@ function normalizeSchedule(parsed: any): ScheduleData {
       const v = String(src[k] == null ? '' : src[k]).trim();
       if (v) classes[normDay(ad) + '-' + ap] = v;
     });
+    const dayArrange: Record<string, string> = {};
+    const da = t.dayArrange || {};
+    Object.keys(da).forEach((k) => {
+      const v = String(da[k] == null ? '' : da[k]).trim();
+      if (v) dayArrange[normDay(k)] = v;
+    });
     return {
       name: String(t.name || '').trim(),
       code: String(t.code || '').trim(),
       subject: String(t.subject || '').trim(),
       summary: String(t.summary || '').trim(),
       classes,
+      dayArrange,
     };
   });
 
@@ -253,23 +261,22 @@ function parse91paikeSchedule(html: string): ScheduleData {
     const tid = tidM ? tidM[1] : '';
     const meta = teacherMeta.get(tid) || { name: '教师' + (idx + 1), code: '', subject: '', summary: '' };
     const classes: Record<string, string> = {};
+    const dayArrange: Record<string, string> = {};
 
-    // ---- 解析 .arrange：日级计划块（仅作占位回退：.calendar 没真实课时用）----
+    // ---- 解析 .arrange：当天班制（计划块/休息），与时间段正交，存到 dayArrange ----
     //   例：<li class='Monday first'>休息</li>  或  <li class='Tuesday'>A班&nbsp;[13:00-20:00]</li>
-    const arrangeMap: Record<string, { label: string; start?: string; end?: string }> = {};
+    //   存为："周二": "A班 [13:00-20:00]"  或  "周一": "休息"
     const liRe = /<li class='([A-Za-z]+)([^']*)'>([\s\S]*?)<\/li>/g;
     let lm: RegExpExecArray | null;
     while ((lm = liRe.exec(ablock)) !== null) {
       const day = dayMap[lm[1]];
       if (!day) continue;
       const raw = cellText(lm[3]).replace(/\u00a0/g, ' ').trim();
-      const rm = raw.match(/^(.+?)\s*\[(\d{1,2}:\d{2})\s*[-~]\s*(\d{1,2}:\d{2})\]\s*$/);
-      if (rm) arrangeMap[day] = { label: rm[1].trim(), start: rm[2], end: rm[3] };
-      else if (raw === '休息' || raw === '') arrangeMap[day] = { label: '' };
-      else arrangeMap[day] = { label: raw };
+      if (!raw) continue; // 空白不写
+      dayArrange[day] = raw;
     }
 
-    // ---- 解析 .calendar：每格真实课程 ----
+    // ---- 解析 .calendar：每格真实课程（只取 <a class='cose'>；空格子保持空） ----
     //   外层：<li class='Monday' ...>；内层 3 个 <div class='period time_periodN'>，每个含 2 个 <div id='..._span_...' class='span ...'>；
     //   每 span 内有 <a class='schedule'>（时段文本，点击加课），有课时再加 <a class='cose'>（含 class/sbj）和 lesson-mini-pop。
     const dayRe = /<li class='([A-Za-z]+)([^']*)'>([\s\S]*?)<\/li>/g;
@@ -287,7 +294,7 @@ function parse91paikeSchedule(html: string): ScheduleData {
         if (!FIXED_PERIODS.includes(period)) continue;
         const inner = sm[0];
 
-        // 1) 优先取 <a class='cose'> 整块内容：班级名 + 科目 + 学员ID 等
+        // 只取 <a class='cose'> 真实课程；空格子保持空（班制见 dayArrange）
         //    cose 内 class 属性值是 'class '（尾空格），lesson-mini-pop 的是 'class'（无空格）。
         //    关键：\s* 必须在 'class'/'sbj' 和收尾 ' 之间，否则匹配不上 cose 会跑去匹配后面的 pop。
         //    用非贪婪 + 排除 </a> 防止跨过本 cose。
@@ -305,19 +312,12 @@ function parse91paikeSchedule(html: string): ScheduleData {
           const val = cnRaw + (sbRaw ? ' · ' + sbRaw : '');
           if (classes[key]) classes[key] += '\n' + val;
           else classes[key] = val;
-          continue;
         }
-
-        // 2) 兜底：.arrange 计划块（如 A班 [13:00-20:00]）
-        const arr = arrangeMap[day];
-        if (arr && arr.start && arr.end && isInRange(start, arr.start, arr.end)) {
-          classes[day + '-' + period] = arr.label;
-        }
-        // 3) 否则留空
+        // 空格子：不写入 classes，UI 渲染"—"或空格
       }
     }
 
-    teachers.push({ name: meta.name, code: meta.code, subject: meta.subject, summary: meta.summary, classes, } as TeacherRow);
+    teachers.push({ name: meta.name, code: meta.code, subject: meta.subject, summary: meta.summary, classes, dayArrange, } as TeacherRow);
   });
 
   if (!teachers.length) {

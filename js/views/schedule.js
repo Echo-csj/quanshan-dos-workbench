@@ -143,9 +143,23 @@
     html += '<button class="btn btn-danger btn-ghost btn-sm" onclick="App.views.schedule.removeTeacher(' + index + ')">' + U.svgIcon('trash-2', 14) + '删除</button>';
     html += '</div>';
     // 课表
-    html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:760px"><thead><tr><th style="position:sticky;left:0;background:var(--surface);z-index:1;min-width:92px">时间</th>';
+    html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:760px"><thead>';
+    // 第一行：星期
+    html += '<tr><th style="position:sticky;left:0;background:var(--surface);z-index:1;min-width:92px">时间</th>';
     DAYS.forEach(function (d) { html += '<th>' + d + '</th>'; });
-    html += '</tr></thead><tbody>';
+    html += '</tr>';
+    // 第二行：当天班制（来自源站 .arrange，与时间段正交，不占用格内显示空间）
+    html += '<tr style="font-size:11px;color:var(--text-muted)"><th style="position:sticky;left:0;background:var(--surface);font-weight:500;z-index:1">班制</th>';
+    DAYS.forEach(function (d) {
+      var shift = (t.dayArrange && t.dayArrange[d]) || '';
+      if (shift) {
+        html += '<td style="text-align:center;padding:3px 4px;white-space:nowrap"><span style="display:inline-block;background:color-mix(in srgb,var(--indigo,#4F46E5) 12%,var(--surface));color:var(--indigo,#4F46E5);border-radius:999px;padding:1px 8px;font-size:11px;font-weight:500">' + U.escapeHtml(shift) + '</span></td>';
+      } else {
+        html += '<td style="text-align:center;padding:3px 4px;color:var(--text-muted);opacity:.4">—</td>';
+      }
+    });
+    html += '</tr>';
+    html += '</thead><tbody>';
     periods.forEach(function (p) {
       html += '<tr><td class="mono" style="position:sticky;left:0;background:var(--surface);font-size:12px;white-space:nowrap">' + U.escapeHtml(p) + '</td>';
       DAYS.forEach(function (d) {
@@ -184,9 +198,12 @@
     data.periods = periods.length ? periods : DEFAULT_PERIODS.slice();
 
     var teachers = [];
-    root.querySelectorAll('.schedule-teacher').forEach(function (block) {
+    root.querySelectorAll('[data-teacher-index]').forEach(function (block) {
       var get = function (f) { var el = block.querySelector('[data-field="' + f + '"]'); return el ? el.value : ''; };
-      var t = { name: get('name').trim(), code: get('code').trim(), subject: get('subject').trim(), summary: get('summary').trim(), classes: {} };
+      var idxAttr = block.getAttribute('data-teacher-index');
+      var idx = idxAttr ? parseInt(idxAttr, 10) : NaN;
+      var prev = (!isNaN(idx) && data.teachers && data.teachers[idx]) ? data.teachers[idx] : {};
+      var t = { name: get('name').trim(), code: get('code').trim(), subject: get('subject').trim(), summary: get('summary').trim(), classes: {}, dayArrange: prev.dayArrange || {} };
       block.querySelectorAll('.schedule-cell').forEach(function (cell) {
         var d = cell.getAttribute('data-day');
         var p = cell.getAttribute('data-period');
