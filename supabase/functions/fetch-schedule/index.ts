@@ -243,26 +243,80 @@ function parse91paikeSchedule(html: string): ScheduleData {
 
   const teachers: TeacherRow[] = [];
   const allPeriods = new Set<string>();
+  // 固定 6 时段（按 .calendar 里 time_period1/2/3 各含 2 个 span 推导）
+  const FIXED_PERIODS = ['08:00-10:00', '10:10-12:10', '12:50-14:50', '15:00-17:00', '17:30-19:30', '19:40-21:40'];
+  FIXED_PERIODS.forEach((p) => allPeriods.add(p));
+
   arrBlocks.forEach((ablock, idx) => {
     const cal = calBlocks[idx] || '';
     const tidM = cal.match(/tchid=(\d+)/);
     const tid = tidM ? tidM[1] : '';
     const meta = teacherMeta.get(tid) || { name: '教师' + (idx + 1), code: '', subject: '', summary: '' };
     const classes: Record<string, string> = {};
-    const liRe = /<li class='([A-Za-z]+)[^']*'>([\s\S]*?)<\/li>/g;
+
+    // ---- 解析 .arrange：日级计划块（仅作占位回退：.calendar 没真实课时用）----
+    //   例：<li class='Monday first'>休息</li>  或  <li class='Tuesday'>A班&nbsp;[13:00-20:00]</li>
+    const arrangeMap: Record<string, { label: string; start?: string; end?: string }> = {};
+    const liRe = /<li class='([A-Za-z]+)([^']*)'>([\s\S]*?)<\/li>/g;
     let lm: RegExpExecArray | null;
     while ((lm = liRe.exec(ablock)) !== null) {
       const day = dayMap[lm[1]];
       if (!day) continue;
-      const label = cellText(lm[2]);
-      let period = '全天';
-      let value = label;
-      const rm = label.match(/^(.*?)\s*\[(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\]\s*$/);
-      if (rm) { value = rm[1].trim(); period = rm[2] + '-' + rm[3]; }
-      else if (label === '休息') { period = '全天'; value = '休息'; }
-      else { period = '全天'; value = label; }
-      if (value) { classes[day + '-' + period] = value; allPeriods.add(period); }
+      const raw = cellText(lm[3]).replace(/\u00a0/g, ' ').trim();
+      const rm = raw.match(/^(.+?)\s*\[(\d{1,2}:\d{2})\s*[-~]\s*(\d{1,2}:\d{2})\]\s*$/);
+      if (rm) arrangeMap[day] = { label: rm[1].trim(), start: rm[2], end: rm[3] };
+      else if (raw === '休息' || raw === '') arrangeMap[day] = { label: '' };
+      else arrangeMap[day] = { label: raw };
     }
+
+    // ---- 解析 .calendar：每格真实课程 ----
+    //   外层：<li class='Monday' ...>；内层 3 个 <div class='period time_periodN'>，每个含 2 个 <div id='..._span_...' class='span ...'>；
+    //   每 span 内有 <a class='schedule'>（时段文本，点击加课），有课时再加 <a class='cose'>（含 class/sbj）和 lesson-mini-pop。
+    const dayRe = /<li class='([A-Za-z]+)([^']*)'>([\s\S]*?)<\/li>/g;
+    let dm: RegExpExecArray | null;
+    while ((dm = dayRe.exec(cal)) !== null) {
+      const day = dayMap[dm[1]];
+      if (!day) continue;
+      const dayInner = dm[3];
+      // 每个 span 含 id='YYYY_MM_DD_HH_MM_span_TCHID'；用 HH_MM 映射到固定 period
+      const spanRe = /<div id='(\d{4})_(\d{2})_(\d{2})_(\d{2})_(\d{2})_span_\d+'[\s\S]*?<\/div>/g;
+      let sm: RegExpExecArray | null;
+      while ((sm = spanRe.exec(dayInner)) !== null) {
+        const start = `${sm[4]}:${sm[5]}`;
+        const period = `${start}-${endOfPeriod(start)}`;
+        if (!FIXED_PERIODS.includes(period)) continue;
+        const inner = sm[0];
+
+        // 1) 优先取 <a class='cose'> 整块内容：班级名 + 科目 + 学员ID 等
+        //    cose 内 class 属性值是 'class '（尾空格），lesson-mini-pop 的是 'class'（无空格）。
+        //    关键：\s* 必须在 'class'/'sbj' 和收尾 ' 之间，否则匹配不上 cose 会跑去匹配后面的 pop。
+        //    用非贪婪 + 排除 </a> 防止跨过本 cose。
+        const coseAll = inner.match(/<a class='cose'(?:(?!<\/a>)[\s\S])*?<\/a>/);
+        const cose = coseAll && coseAll[0].match(/<span class='class\s*'>([\s\S]*?)<\/span>(?:(?!<\/a>)[\s\S])*?<span class='sbj\s*'>([\s\S]*?)<\/span>/);
+        if (coseAll && cose) {
+          // 直接对 cose 整块先剥 hint 嵌套（状态字 正/确/寒/待/常），再去标签
+          const stripHint = (s: string) => s.replace(/<span class='hint[^']*'>(?:(?!<\/span>)[\s\S])*?<\/span>/g, '');
+          const cnInner = coseAll[0].match(/<span class='class\s*'>(?:(?!<\/a>)[\s\S])*?<\/span>/);
+          let cnRaw = cnInner ? stripHint(cnInner[0]).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim() : '';
+          const sbInner = coseAll[0].match(/<span class='sbj\s*'>(?:(?!<\/a>)[\s\S])*?<\/span>/);
+          let sbRaw = sbInner ? stripHint(sbInner[0]).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim() : '';
+          // 多个 cose 同行用换行拼接（一天中同一时段多班）
+          const key = day + '-' + period;
+          const val = cnRaw + (sbRaw ? ' · ' + sbRaw : '');
+          if (classes[key]) classes[key] += '\n' + val;
+          else classes[key] = val;
+          continue;
+        }
+
+        // 2) 兜底：.arrange 计划块（如 A班 [13:00-20:00]）
+        const arr = arrangeMap[day];
+        if (arr && arr.start && arr.end && isInRange(start, arr.start, arr.end)) {
+          classes[day + '-' + period] = arr.label;
+        }
+        // 3) 否则留空
+      }
+    }
+
     teachers.push({ name: meta.name, code: meta.code, subject: meta.subject, summary: meta.summary, classes, } as TeacherRow);
   });
 
@@ -276,22 +330,32 @@ function parse91paikeSchedule(html: string): ScheduleData {
   const navHtml = navIdx >= 0 ? html.slice(navIdx, navEnd >= 0 ? navEnd : navIdx + 4000) : '';
   const dateRe = /y=(\d+)&m=(\d+)&d=(\d+)/g;
   const dates: string[] = [];
-  let dm: RegExpExecArray | null;
-  while ((dm = dateRe.exec(navHtml)) !== null) {
-    dates.push(`${dm[1]}-${dm[2].padStart(2, '0')}-${dm[3].padStart(2, '0')}`);
+  let dm2: RegExpExecArray | null;
+  while ((dm2 = dateRe.exec(navHtml)) !== null) {
+    dates.push(`${dm2[1]}-${dm2[2].padStart(2, '0')}-${dm2[3].padStart(2, '0')}`);
   }
   const ws = dates[0] || null;
   const we = dates[dates.length - 1] || null;
 
-  // 4) 节次排序：全天优先，其余按开始时间
-  const periods = [...allPeriods].sort((a, b) => {
-    if (a === '全天') return -1;
-    if (b === '全天') return 1;
-    return a.split('-')[0].localeCompare(b.split('-')[0]);
-  });
+  // 4) 节次排序：固定 6 时段按开始时间
+  const periods = FIXED_PERIODS;
 
   const sourceUrl = `${SOURCE_BASE_URL}/schedules.aspx?module=${SOURCE_MODULE}`;
   return normalizeSchedule({ teachers, periods, weekStartDate: ws, weekEndDate: we, sourceUrl });
+}
+
+// 把 "08:00" 这类开始时间映射到完整 period 字符串
+function endOfPeriod(start: string): string {
+  const m: Record<string, string> = {
+    '08:00': '10:00', '10:10': '12:10', '12:50': '14:50',
+    '15:00': '17:00', '17:30': '19:30', '19:40': '21:40',
+  };
+  return m[start] || start;
+}
+
+// 判断 period 开始时间是否落在 [start, end) 区间（.arrange 的占位块覆盖范围）
+function isInRange(periodStart: string, rangeStart: string, rangeEnd: string): boolean {
+  return periodStart >= rangeStart && periodStart < rangeEnd;
 }
 
 // ---------- 登录并抓取（ASP.NET WebForms） ----------
