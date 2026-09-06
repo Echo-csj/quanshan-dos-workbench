@@ -3,13 +3,13 @@
 ## 架构
 
 ```
-内部排课系统(登录无验证码)
-        │  (服务端抓取，绕开浏览器 CORS)
+内部排课系统 zyg.91paike.com（ASP.NET WebForms，登录无验证码）
+        │  (Edge Function 服务端登录抓取，绕开浏览器 CORS)
         ▼
 Supabase Edge Function: fetch-schedule
-  1. 用源站账号登录
-  2. 抓取课表页面 / JSON 接口
-  3. 归一为 teacher×week 结构
+  1. GET login.aspx → 取 __VIEWSTATE / __EVENTVALIDATION 等隐藏字段 + 会话 cookie
+  2. POST 登录（账号/密码 + btn_submit=登 录）
+  3. GET schedules.aspx?module=400002 → 解析为 teacher×week 结构
   4. upsert 到 shared_link(kind='schedule_fetch')
         │
         ▼
@@ -20,35 +20,45 @@ Supabase Edge Function: fetch-schedule
   - 点「应用」→ 写入本地课程表(source='fetch')
 ```
 
-源站是登录墙 + 无 CORS，纯静态前端无法直接抓，因此必须有这个后端中转。
+> 源站为登录墙 + 无 CORS，纯静态前端无法直接抓，因此必须有这个后端中转。
+
+## 源站 specifics（已逆向并验证）
+
+| 项 | 值 |
+|---|---|
+| 根地址 | `http://zyg.91paike.com`（**仅 HTTP，无 HTTPS**） |
+| 登录页 | `/login.aspx?return=schedules.aspx%3fmodule%3d400002` |
+| 课表页 | `/schedules.aspx?module=400002`（默认显示当前周） |
+| 登录字段 | `tb_account`（账号）、`tb_password`（密码）、`btn_submit`（值 `登 录`，含全角空格） |
+| 隐藏字段 | `__VIEWSTATE`、`__EVENTVALIDATION`、`__VIEWSTATEGENERATOR`、`HIDDENFIELDACCESSID` 等（函数自动回传） |
+| 课表结构 | 每位教师一个块：侧栏 `course-nav` 含 姓名/工号/学科/统计；`.arrange` 为 7 天日级标签（如 `A班 [13:00-20:00]` / `休息`），`.calendar` 含 `tchid` 绑定；`day-nav` 给出周范围 |
+
+解析逻辑已用真实登录后的 HTML 样张在本地验证：26 位教师、周 `2026-08-31 → 2026-09-06`、节次自动合并排序，全部通过。
 
 ## 一、需在 Supabase 设置的 Secrets
 
-在 Supabase Dashboard → Project Settings → Edge Functions / Secrets 设置（函数内部通过 `Deno.env.get` 读取）：
+函数内通过 `Deno.env.get` 读取。当前代码实际用到的：
 
-| Secret | 说明 | 示例 |
-|---|---|---|
-| `SUPABASE_URL` | 项目 URL | `https://zxemcyngesgxpbevdxsu.supabase.co` |
-| `SUPABASE_ANON_KEY` | 项目 anon key（与前端 config.js 同值） | `sb_publishable_...` |
-| `SUPABASE_SERVICE_ROLE_KEY` | service-role key（用于定时任务写入） | `eyJ...` |
-| `SOURCE_BASE_URL` | 源站根地址 | `https://keshi.example.com` |
-| `SOURCE_LOGIN_URL` | 登录接口/页面（缺省 = BASE/login） | `https://keshi.example.com/login` |
-| `SOURCE_TABLE_URL` | 课表页面地址（缺省 = BASE/schedule） | `https://keshi.example.com/schedule` |
-| `SOURCE_API_URL` | 如源站有 JSON 接口则填（优先走 JSON 模式） | `https://keshi.example.com/api/schedule` |
-| `SOURCE_USER` | 源站登录账号 | `xxxx` |
-| `SOURCE_PASS` | 源站登录密码 | `xxxx` |
-| `SOURCE_USER_FIELD` | 登录表单「账号」字段名（缺省 username） | `username` |
-| `SOURCE_PASS_FIELD` | 登录表单「密码」字段名（缺省 password） | `password` |
-| `SOURCE_CSRF_FIELD` | 如源站有 CSRF，填其字段名；否则留空 | ` _csrf` |
-| `SOURCE_PARSE_MODE` | `json` 或 `html`（缺省 html） | `html` |
-| `OWNER_USER_ID` | 课程表归属者（DOS）的 auth.users.id，用于定时任务写入 | `a1b2c3...` |
-| `CRON_SECRET` | 手动 cron 调用的共享密钥（可选） | `随机串` |
+| Secret | 必填 | 说明 | 示例 |
+|---|---|---|---|
+| `SUPABASE_URL` | ✅ | 项目 URL | `https://zxemcyngesgxpbevdxsu.supabase.co` |
+| `SUPABASE_ANON_KEY` | ✅ | anon key（与前端 config.js 同值） | `sb_publishable_...` |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | service-role key（定时任务写入用） | `eyJ...` |
+| `SOURCE_BASE_URL` | ✅ | 源站根地址（**用 http:// 不是 https://**） | `http://zyg.91paike.com` |
+| `SOURCE_MODULE` | ✅ | 课表 module 参数 | `400002` |
+| `SOURCE_USER` | ✅ | 源站登录账号 | `<你的源站账号>` |
+| `SOURCE_PASS` | ✅ | 源站登录密码 | `<你的源站密码>` |
+| `SOURCE_PARSE_MODE` | ⬜ | `html`（默认）或 `json` | `html` |
+| `SOURCE_API_URL` | ⬜ | 仅当源站有 JSON 接口时填（设后改 `SOURCE_PARSE_MODE=json`） | `` |
+| `OWNER_USER_ID` | ✅ | 课程表归属者(DOS)的 `auth.users.id`，定时写入用 | `a1b2c3...` |
+| `CRON_SECRET` | ⬜ | 手动 cron 调用共享密钥（可选） | `随机串` |
 
 > ⚠️ 不要把真实账号/密码/密钥写进仓库文件。Secrets 只在 Supabase 后台设置。
+> ⚠️ **HTTP-only 风险**：源站无 HTTPS。Supabase Edge Function(Deno) 对明文 `http://` 出站抓取可能受限；
+> 若部署后报网络错误（如 `error sending request` / `403` from Deno），请改用下方「备选方案」。
 
 获取 `OWNER_USER_ID`：前端登录后，浏览器控制台执行
-`await (await window.App.sync.getClient().auth.getUser()).data.user.id`，或在 SQL 里
-`select id from auth.users where email = '你的登录邮箱';`
+`await (await window.App.sync.getClient().auth.getUser()).data.user.id`；或 SQL `select id from auth.users where email = '你的登录邮箱';`
 
 ## 二、部署命令（macOS）
 
@@ -64,9 +74,12 @@ supabase --version
 supabase login
 supabase link --project-ref zxemcyngesgxpbevdxsu
 
-# 3) 设置 Secrets（请替换为你自己的值；可一次设多个）
-supabase secrets set SUPABASE_URL="https://zxemcyngesgxpbevdxsu.supabase.co" SUPABASE_ANON_KEY="sb_publishable_..." SUPABASE_SERVICE_ROLE_KEY="eyJ..."
-supabase secrets set SOURCE_BASE_URL="https://keshi.example.com" SOURCE_USER="xxxx" SOURCE_PASS="xxxx" OWNER_USER_ID="a1b2c3..." CRON_SECRET="随机串"
+# 3) 设置 Secrets（替换为你的真实值；可一次设多个）
+supabase secrets set SUPABASE_URL="https://zxemcyngesgxpbevdxsu.supabase.co" \
+  SUPABASE_ANON_KEY="sb_publishable_..." SUPABASE_SERVICE_ROLE_KEY="eyJ..." \
+  SOURCE_BASE_URL="http://zyg.91paike.com" SOURCE_MODULE="400002" \
+  SOURCE_USER="<你的源站账号>" SOURCE_PASS="<你的源站密码>" \
+  OWNER_USER_ID="a1b2c3..." CRON_SECRET="随机串"
 
 # 4) 部署函数
 supabase functions deploy fetch-schedule
@@ -75,27 +88,31 @@ supabase functions deploy fetch-schedule
 ## 三、每日定时
 
 **推荐**：Supabase Dashboard → Edge Functions → `fetch-schedule` → Add cron schedule → 每天 06:00。
-Dashboard 会以 service-role 调用，函数自动按 `OWNER_USER_ID` 写入，无需额外密钥。
+Dashboard 以 service-role 调用，函数按 `OWNER_USER_ID` 写入，无需额外密钥。
 
 （高级替代：执行 `supabase/schedule_fetch_cron.sql`，见文件内说明。）
 
-## 四、前端如何使用
+## 四、手动触发 / 调试
 
-1. 部署后，前端登录 → 打开「课程表」。
+- 前端「课程表」页的「同步抓取」按钮：以当前用户身份立即触发一次（结果落地后弹「应用抓取结果」横幅）。
+- 命令行直接触发（需已 `supabase link`）：
+  ```bash
+  supabase functions invoke fetch-schedule --no-verify-jwt
+  ```
+  返回 `{"ok":true,"teachers":26,"fetchedAt":"..."}` 即成功。
+
+## 五、HTTP-only 备选方案（若 Deno 拦截明文 HTTP）
+
+若部署后 `fetch` 报网络错误，二选一：
+
+1. **Cloudflare Worker 抓取**：把 `fetch-schedule` 的抓取逻辑迁到 CF Worker（Worker 出站支持 `http://`），
+   结果仍写 Supabase `shared_link`（用 service-role + anon 客户端）。前端无需改。
+2. **HTTPS 反代**：用任意支持 HTTPS 的反向代理（如 Cloudflare Tunnel / nginx）把源站暴露为 `https://`，
+   再设 `SOURCE_BASE_URL=https://你的反代域名`，其余不变。
+
+## 六、前端使用
+
+1. 部署并设置 Secrets 后，前端登录 → 打开「课程表」。
 2. 顶部出现「同步抓取」按钮 → 点一下立即触发一次抓取（结果落地后弹「应用抓取结果」横幅）。
-3. 每日定时任务会在后台抓取；下次打开课程表页即提示「应用」。
+3. 每日定时任务在后台抓取；下次打开课程表页即提示「应用」。
 4. 点「应用抓取结果」→ 写入本地课程表（标记 source='fetch'、记录 sourceUrl/fetchedAt）。
-
-## 五、还需补完的事项（需你提供源站信息）
-
-`fetch-schedule/index.ts` 的**登录字段、CSRF、HTML 解析选择器**是站点特定的，目前是通用启发式：
-
-- 若源站提供 **JSON 接口**：把 `SOURCE_API_URL` 指向它、设 `SOURCE_PARSE_MODE=json`，解析即生效（最稳）。
-- 若为 **HTML 页面**：当前 `parseHtmlSchedule` 能处理「表头含星期、首列为时间节次」的扁平表格。若你的源站是「按教师分块」布局（每位教师一个子表），需要按真实页面微调选择器。
-
-**请帮我提供以下任一，我即可补全 HTML 解析：**
-1. 登录后课表页面的 **HTML 另存**（浏览器右键「另存为」网页，或 DevTools 复制 `<table>` 片段）；或
-2. 一张登录后课表页面的**截图**（像之前那张浮引截屏）；并说明
-3. 登录页的**账号/密码字段名**（或登录页截图）。
-
-拿到样张后，我把 `parseHtmlSchedule` 精确化，自动抓取即可端到端跑通。
