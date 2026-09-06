@@ -40,11 +40,12 @@
   function num(x) { return (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0); }
 
   /* ---------- 人工月 / 周 日期助手（移植 aggregate.js + app.js） ---------- */
+  // 口径必须与分析台(aggregate.js)完全一致：人工月最后一天 = 自然月内「最后一个周日」（≤ 自然月最后一天）。
+  // 此前实现：自然月最后一天为周三~周六时前进到下月首个周日（跨月溢出），会多算一周（如 2026-09 被算成 5 周），与「科组生产预测」图片不一致。已废弃该口径。
   function manualLastDay(Y, m) {
-    var L = new Date(Y, m, 0);
-    var dw = L.getDay() === 0 ? 7 : L.getDay();
-    if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw);
-    return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw));
+    var L = new Date(Y, m, 0); // 自然月最后一天（m 月：取 m 月第 0 天）
+    var dow = L.getDay();      // 0=周日..6=周六
+    return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dow); // 回退到 ≤L 的最后一个周日
   }
   function manualMonthOf(date) {
     var Y = date.getFullYear(), m = date.getMonth() + 1;
