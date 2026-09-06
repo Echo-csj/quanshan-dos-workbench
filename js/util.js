@@ -72,22 +72,6 @@ window.App = window.App || {};
     return diff < 7;
   }
 
-  // 判断当前是否在寒暑假（简化：7-8月+1-2月）
-  function isSummerWinter(month) {
-    return month >= 6 && month <= 8; // 7-8月暑假（month从0开始）
-  }
-  function isWinterBreak(month) {
-    return month === 0 || month === 1; // 1-2月寒假
-  }
-
-  // 获取当前季节标识
-  function getSeasonTag() {
-    var m = new Date().getMonth();
-    if (isSummerWinter(m)) return '寒暑假';
-    if (isWinterBreak(m)) return '寒暑假';
-    return '常规';
-  }
-
   // --- Traffic Light Judgment (红绿灯判定) ---
   function judge(actual, baselineItem) {
     if (!baselineItem) return { level: 'neutral', label: '无基准', color: 'var(--text-faint)' };
@@ -121,57 +105,13 @@ window.App = window.App || {};
     return { level: 'neutral', label: '未知', color: 'var(--text-faint)' };
   }
 
-  // 获取带季节调整的基准值
-  function getSeasonalBaseline(baselineItem) {
-    if (!baselineItem || !baselineItem.seasonal) return baselineItem ? baselineItem.value : null;
-    var season = getSeasonTag();
-    var seasonalMap = baselineItem.seasonal;
-    if (seasonalMap[season] !== undefined) return seasonalMap[season];
-
-    // 检查月份匹配
-    var m = new Date().getMonth() + 1;
-    var monthKeys = Object.keys(seasonalMap).filter(function(k) {
-      return k.split(',').map(Number).includes(m);
-    });
-    if (monthKeys.length > 0) return seasonalMap[monthKeys[0]];
-
-    return baselineItem.value;
-  }
-
   // --- Formatting Helpers ---
-
-  // 百分比格式化
-  function pct(val, decimals) {
-    decimals = decimals || 1;
-    if (val == null) return '-';
-    return (val * 100).toFixed(decimals) + '%';
-  }
-
-  // 数字格式化（千分位）
-  function num(n) {
-    if (n == null) return '-';
-    return Number(n).toLocaleString('zh-CN');
-  }
 
   // 截断文本
   function truncate(text, maxLen) {
     maxLen = maxLen || 20;
     if (!text) return '';
     return text.length > maxLen ? text.slice(0, maxLen) + '…' : text;
-  }
-
-  // 相对时间描述
-  function timeAgo(dateStr) {
-    if (!dateStr) return '';
-    var diff = Date.now() - new Date(dateStr).getTime();
-    var mins = Math.floor(diff / 60000);
-    if (mins < 1) return '刚刚';
-    if (mins < 60) return mins + '分钟前';
-    var hours = Math.floor(mins / 60);
-    if (hours < 24) return hours + '小时前';
-    var days = Math.floor(hours / 24);
-    if (days < 7) return days + '天前';
-    return formatDate(new Date(dateStr), 'MM-DD');
   }
 
   // --- DOM Helpers ---
@@ -351,11 +291,6 @@ window.App = window.App || {};
     return map[s] || s;
   }
 
-  function statusColor(s) {
-    var map = { todo: 'neutral', doing: 'accent', following: 'warn', done: 'ok', overdue: 'bad' };
-    return map[s] || 'neutral';
-  }
-
   // 是否逾期（截止日当天 23:59:59 前未完成即逾期）
   function isOverdue(dateStr) {
     if (!dateStr) return false;
@@ -458,20 +393,13 @@ window.App = window.App || {};
     getMonthName: getMonthName,
     daysUntilSunday: daysUntilSunday,
     isLastWeekOfMonth: isLastWeekOfMonth,
-    getSeasonTag: getSeasonTag,
     judge: judge,
-    getSeasonalBaseline: getSeasonalBaseline,
-    pct: pct,
-    num: num,
     truncate: truncate,
-    timeAgo: timeAgo,
-    el: el,
     toast: toast,
     modal: modal,
     svgIcon: svgIcon,
     priorityLabel: priorityLabel,
     statusLabel: statusLabel,
-    statusColor: statusColor,
     isOverdue: isOverdue,
     lineChart: lineChart,
     chartFmt: chartFmt,

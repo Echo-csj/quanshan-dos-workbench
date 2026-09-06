@@ -34,8 +34,6 @@ const SOURCE_BASE_URL = (Deno.env.get('SOURCE_BASE_URL') || 'http://zyg.91paike.
 const SOURCE_MODULE = (Deno.env.get('SOURCE_MODULE') || '400002').trim();
 const SOURCE_USER = (Deno.env.get('SOURCE_USER') || '').trim();
 const SOURCE_PASS = (Deno.env.get('SOURCE_PASS') || '').trim();
-const SOURCE_PARSE_MODE = (Deno.env.get('SOURCE_PARSE_MODE') || 'html').toLowerCase().trim();
-const SOURCE_API_URL = (Deno.env.get('SOURCE_API_URL') || '').trim(); // 若源站提供 JSON 接口，设此项并 SOURCE_PARSE_MODE=json
 
 const KIND = 'schedule_fetch';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -181,17 +179,6 @@ function normalizeSchedule(parsed: any): ScheduleData {
     sourceUrl: parsed.sourceUrl || SOURCE_BASE_URL,
     fetchedAt: new Date().toISOString(),
   };
-}
-
-// ---------- 解析：JSON 模式（若源站提供 JSON 接口） ----------
-async function parseJsonSchedule(fetchJson: () => Promise<string>): Promise<ScheduleData> {
-  const raw = await fetchJson();
-  const data = JSON.parse(raw);
-  const parsed = data.teachers ? data : (data.data && data.data.teachers) ? data.data : { teachers: [] };
-  if (!parsed.teachers || !parsed.teachers.length) {
-    throw new Error('JSON 解析：未找到 teachers 数组，请确认 SOURCE_API_URL 返回结构');
-  }
-  return normalizeSchedule(parsed);
 }
 
 // ---------- 解析：91paike HTML（已用真实抓取样张验证） ----------
@@ -380,11 +367,6 @@ function endOfPeriod(start: string): string {
   return m[start] || start;
 }
 
-// 判断 period 开始时间是否落在 [start, end) 区间（.arrange 的占位块覆盖范围）
-function isInRange(periodStart: string, rangeStart: string, rangeEnd: string): boolean {
-  return periodStart >= rangeStart && periodStart < rangeEnd;
-}
-
 // ---------- 登录并抓取（ASP.NET WebForms） ----------
 // 登录 + GET 课表页面，仅返回原始 HTML（不解析）。供 DEBUG_HINT_ALL 等诊断用。
 async function fetchRawHtml(): Promise<string> {
@@ -426,33 +408,15 @@ async function fetchRawHtml(): Promise<string> {
   return schedHtml;
 }
 
+// 登录源站并抓取课表，解析为标准化结构（当前仅 91paike HTML 模式）
 async function loginAndFetch(): Promise<ScheduleData> {
   const schedHtml = await fetchRawHtml();
-  if (SOURCE_PARSE_MODE === 'json') {
-    const loginUrl = `${SOURCE_BASE_URL}/login.aspx?return=schedules.aspx%3fmodule%3d${SOURCE_MODULE}`;
-    const schedUrl = `${SOURCE_BASE_URL}/schedules.aspx?module=${SOURCE_MODULE}`;
-    const jar = makeCookieJar();
-    return parseJsonSchedule(async () => {
-      const loginPageRes = await fetchC(loginUrl, { headers: { referer: loginUrl } }, jar);
-      const loginPageHtml = await loginPageRes.text();
-      const fields = extractInputFields(loginPageHtml);
-      fields['tb_account'] = SOURCE_USER;
-      fields['tb_password'] = SOURCE_PASS;
-      fields['btn_submit'] = '登 录';
-      const body = Object.keys(fields).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k] ?? '')}`).join('&');
-      const loginRes = await fetchC(loginUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded', referer: loginUrl },
-        body,
-        redirect: 'manual',
-      }, jar);
-      const schedRes = loginRes.status >= 300 && loginRes.status < 400
-        ? await fetchC(loginRes.headers.get('location') || schedUrl, { headers: { referer: loginUrl } }, jar)
-        : loginRes;
-      return schedRes.text();
-    });
-  }
   return parse91paikeSchedule(schedHtml);
+}
+
+// 登录抓取 + 解析（供主流程与调试接口复用，避免重复登录逻辑）
+async function fetchAndParse(): Promise<ScheduleData> {
+  return parse91paikeSchedule(await fetchRawHtml());
 }
 
 // ---------- 主入口 ----------
@@ -511,15 +475,13 @@ Deno.serve(async (req: Request) => {
 
     // DEBUG_FIRST_TEACHER：返回首位教师的 classes/dayArrange（用于验证请假等状态解析，不入数据库）
     if (req.headers.get('x-debug') === 'first_teacher') {
-      const html = await fetchRawHtml();
-      const parsed = parse91paikeSchedule(html);
+      const parsed = await fetchAndParse();
       return json({ ok: true, teacher: parsed.teachers[0] }, 200, cors);
     }
 
     // DEBUG_STATS：返回所有教师各状态课数统计（不入数据库）
     if (req.headers.get('x-debug') === 'stats') {
-      const html = await fetchRawHtml();
-      const parsed = parse91paikeSchedule(html);
+      const parsed = await fetchAndParse();
       const stats: Record<string, { total: number; 请假: number; 寒假: number; 暑假: number; 调课: number; 待定: number }> = {};
       for (const t of parsed.teachers) {
         const s = { total: 0, 请假: 0, 寒假: 0, 暑假: 0, 调课: 0, 待定: 0 };
