@@ -298,20 +298,47 @@ function parse91paikeSchedule(html: string): ScheduleData {
         //    cose 内 class 属性值是 'class '（尾空格），lesson-mini-pop 的是 'class'（无空格）。
         //    关键：\s* 必须在 'class'/'sbj' 和收尾 ' 之间，否则匹配不上 cose 会跑去匹配后面的 pop。
         //    用非贪婪 + 排除 </a> 防止跨过本 cose。
+        // cose 内 <span class='class ...'> 属性值有两类：
+        //   - 'class' / 'class '（普通课）
+        //   - 'class leave'（请假课，多一个 leave class）—— 之前正则不兼容会被静默丢弃
+        // hint 状态字：svac=学(学生请假)/tvac=师(教师请假)/hj=寒(寒假)/cj=暑(暑假)/no=待(待定)/调(调课)
         const coseAll = inner.match(/<a class='cose'(?:(?!<\/a>)[\s\S])*?<\/a>/);
-        const cose = coseAll && coseAll[0].match(/<span class='class\s*'>([\s\S]*?)<\/span>(?:(?!<\/a>)[\s\S])*?<span class='sbj\s*'>([\s\S]*?)<\/span>/);
-        if (coseAll && cose) {
-          // 直接对 cose 整块先剥 hint 嵌套（状态字 正/确/寒/待/常），再去标签
-          const stripHint = (s: string) => s.replace(/<span class='hint[^']*'>(?:(?!<\/span>)[\s\S])*?<\/span>/g, '');
-          const cnInner = coseAll[0].match(/<span class='class\s*'>(?:(?!<\/a>)[\s\S])*?<\/span>/);
-          let cnRaw = cnInner ? stripHint(cnInner[0]).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim() : '';
-          const sbInner = coseAll[0].match(/<span class='sbj\s*'>(?:(?!<\/a>)[\s\S])*?<\/span>/);
-          let sbRaw = sbInner ? stripHint(sbInner[0]).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim() : '';
-          // 多个 cose 同行用换行拼接（一天中同一时段多班）
-          const key = day + '-' + period;
-          const val = cnRaw + (sbRaw ? ' · ' + sbRaw : '');
-          if (classes[key]) classes[key] += '\n' + val;
-          else classes[key] = val;
+        if (coseAll) {
+          // 兼容 'class' 与 'class leave' 两种属性
+          const cnMatch = coseAll[0].match(/<span class='class(?:\s+leave)?\s*'>(?:(?!<\/a>)[\s\S])*?<\/span>/);
+          const sbMatch = coseAll[0].match(/<span class='sbj\s*'>(?:(?!<\/a>)[\s\S])*?<\/span>/);
+          if (cnMatch && sbMatch) {
+            const cnInner = cnMatch[0];
+            const sbInner = sbMatch[0];
+            const isLeave = /class\s*=\s*'class\s+leave'/.test(cnInner.slice(0, 100));
+            const extractChars = (s: string): string[] => {
+              const re = /<span class='hint[^']*'>([^<]+)<\/span>/g;
+              const out: string[] = [];
+              let hm: RegExpExecArray | null;
+              while ((hm = re.exec(s)) !== null) {
+                const ch = hm[1].trim();
+                if (ch) out.push(ch);
+              }
+              return out;
+            };
+            let cnRaw = cnInner.replace(/<span class='hint[^']*'>[^<]*<\/span>/g, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+            let sbRaw = sbInner.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
+            const allChars = [...extractChars(cnInner), ...extractChars(sbInner)];
+            // 状态标签前缀：请假 > 寒暑假 > 调课 > 待定
+            let prefix = '';
+            if (isLeave) {
+              if (allChars.includes('学')) prefix = '[请假·学生] ';
+              else if (allChars.includes('师')) prefix = '[请假·教师] ';
+              else prefix = '[请假] ';
+            } else if (allChars.includes('寒')) prefix = '[寒假] ';
+            else if (allChars.includes('暑')) prefix = '[暑假] ';
+            else if (allChars.includes('调')) prefix = '[调课] ';
+            else if (allChars.includes('待')) prefix = '[待定] ';
+            const key = day + '-' + period;
+            const val = prefix + cnRaw + (sbRaw ? ' · ' + sbRaw : '');
+            if (classes[key]) classes[key] += '\n' + val;
+            else classes[key] = val;
+          }
         }
         // 空格子：不写入 classes，UI 渲染"—"或空格
       }
@@ -359,18 +386,16 @@ function isInRange(periodStart: string, rangeStart: string, rangeEnd: string): b
 }
 
 // ---------- 登录并抓取（ASP.NET WebForms） ----------
-async function loginAndFetch(): Promise<ScheduleData> {
+// 登录 + GET 课表页面，仅返回原始 HTML（不解析）。供 DEBUG_HINT_ALL 等诊断用。
+async function fetchRawHtml(): Promise<string> {
   const loginUrl = `${SOURCE_BASE_URL}/login.aspx?return=schedules.aspx%3fmodule%3d${SOURCE_MODULE}`;
   const schedUrl = `${SOURCE_BASE_URL}/schedules.aspx?module=${SOURCE_MODULE}`;
   const jar = makeCookieJar();
 
-  // 1) GET 登录页（拿到 __VIEWSTATE / __EVENTVALIDATION 等隐藏字段 + 会话 cookie）
   const loginPageRes = await fetchC(loginUrl, { headers: { referer: loginUrl } }, jar);
   if (!loginPageRes.ok) throw new Error(`源站登录页访问失败：HTTP ${loginPageRes.status}`);
   const loginPageHtml = await loginPageRes.text();
   const fields = extractInputFields(loginPageHtml);
-
-  // 2) 填账号密码 + 提交按钮（值含全角空格「登 录」）
   fields['tb_account'] = SOURCE_USER;
   fields['tb_password'] = SOURCE_PASS;
   fields['btn_submit'] = '登 录';
@@ -378,7 +403,6 @@ async function loginAndFetch(): Promise<ScheduleData> {
     .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k] ?? '')}`)
     .join('&');
 
-  // 3) POST 登录（手动处理重定向以保留认证 cookie）
   const loginRes = await fetchC(loginUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded', referer: loginUrl },
@@ -399,12 +423,33 @@ async function loginAndFetch(): Promise<ScheduleData> {
   if (!schedHtml || schedHtml.length < 1000) {
     throw new Error('登录后未取到课表页面（可能账号/密码错误、需要验证码，或会话已失效）');
   }
+  return schedHtml;
+}
 
-  // 4) 解析
+async function loginAndFetch(): Promise<ScheduleData> {
+  const schedHtml = await fetchRawHtml();
   if (SOURCE_PARSE_MODE === 'json') {
+    const loginUrl = `${SOURCE_BASE_URL}/login.aspx?return=schedules.aspx%3fmodule%3d${SOURCE_MODULE}`;
+    const schedUrl = `${SOURCE_BASE_URL}/schedules.aspx?module=${SOURCE_MODULE}`;
+    const jar = makeCookieJar();
     return parseJsonSchedule(async () => {
-      const r = await fetchC(SOURCE_API_URL || schedUrl, { headers: { referer: loginUrl } }, jar);
-      return r.text();
+      const loginPageRes = await fetchC(loginUrl, { headers: { referer: loginUrl } }, jar);
+      const loginPageHtml = await loginPageRes.text();
+      const fields = extractInputFields(loginPageHtml);
+      fields['tb_account'] = SOURCE_USER;
+      fields['tb_password'] = SOURCE_PASS;
+      fields['btn_submit'] = '登 录';
+      const body = Object.keys(fields).map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k] ?? '')}`).join('&');
+      const loginRes = await fetchC(loginUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', referer: loginUrl },
+        body,
+        redirect: 'manual',
+      }, jar);
+      const schedRes = loginRes.status >= 300 && loginRes.status < 400
+        ? await fetchC(loginRes.headers.get('location') || schedUrl, { headers: { referer: loginUrl } }, jar)
+        : loginRes;
+      return schedRes.text();
     });
   }
   return parse91paikeSchedule(schedHtml);
@@ -441,6 +486,59 @@ Deno.serve(async (req: Request) => {
 
     if (!SOURCE_USER || !SOURCE_PASS) {
       return json({ error: '源站账号未配置（SOURCE_USER / SOURCE_PASS）' }, 500, cors);
+    }
+
+    // DEBUG_HINT_ALL：扫描 HTML 中所有 <span class='hint...'> 状态字，按 (class, char) 统计
+    // 触发方式：请求头 x-debug: hint_all（比 env 更可靠，CLI 偶尔 hash 显示导致 secret 值难确认）
+    if (req.headers.get('x-debug') === 'hint_all') {
+      const html = await fetchRawHtml();
+      const hintRe = /<span class='hint([^']*)'>([^<]+)<\/span>/g;
+      const counts: Record<string, number> = {};
+      const samples: Record<string, string> = {};
+      let hm: RegExpExecArray | null;
+      while ((hm = hintRe.exec(html)) !== null) {
+        const cls = hm[1].trim();
+        const ch = hm[2].trim();
+        const key = `hint[${cls || ''}]=${ch}`;
+        counts[key] = (counts[key] || 0) + 1;
+        if (!samples[key]) {
+          const ctxStart = Math.max(0, hm.index - 80);
+          samples[key] = html.slice(ctxStart, hm.index + hm[0].length + 40).replace(/\s+/g, ' ').trim();
+        }
+      }
+      return json({ ok: true, hintCounts: counts, hintSamples: samples, htmlLen: html.length }, 200, cors);
+    }
+
+    // DEBUG_FIRST_TEACHER：返回首位教师的 classes/dayArrange（用于验证请假等状态解析，不入数据库）
+    if (req.headers.get('x-debug') === 'first_teacher') {
+      const html = await fetchRawHtml();
+      const parsed = parse91paikeSchedule(html);
+      return json({ ok: true, teacher: parsed.teachers[0] }, 200, cors);
+    }
+
+    // DEBUG_STATS：返回所有教师各状态课数统计（不入数据库）
+    if (req.headers.get('x-debug') === 'stats') {
+      const html = await fetchRawHtml();
+      const parsed = parse91paikeSchedule(html);
+      const stats: Record<string, { total: number; 请假: number; 寒假: number; 暑假: number; 调课: number; 待定: number }> = {};
+      for (const t of parsed.teachers) {
+        const s = { total: 0, 请假: 0, 寒假: 0, 暑假: 0, 调课: 0, 待定: 0 };
+        for (const k of Object.keys(t.classes || {})) {
+          const v = t.classes[k];
+          s.total++;
+          if (v.includes('[请假')) s.请假++;
+          else if (v.includes('[寒假]')) s.寒假++;
+          else if (v.includes('[暑假]')) s.暑假++;
+          else if (v.includes('[调课]')) s.调课++;
+          else if (v.includes('[待定]')) s.待定++;
+        }
+        stats[t.name] = s;
+      }
+      const totals = Object.values(stats).reduce((a, b) => ({
+        total: a.total + b.total, 请假: a.请假 + b.请假, 寒假: a.寒假 + b.寒假,
+        暑假: a.暑假 + b.暑假, 调课: a.调课 + b.调课, 待定: a.待定 + b.待定,
+      }), { total: 0, 请假: 0, 寒假: 0, 暑假: 0, 调课: 0, 待定: 0 });
+      return json({ ok: true, totals, perTeacher: stats }, 200, cors);
     }
 
     const schedule = await loginAndFetch();
