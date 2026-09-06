@@ -1,17 +1,16 @@
 /* ============================================
    linked-kezu.js — 联动数据·最佳科组排名 / 科组生产预测（仅个人工作台）
-   数据来源：analytics_snapshot.kezu（数据分析工作台「推送分析到个人台」下发）
-   口径与数据分析台「核心看板」完全一致：
-     · 排名：bestkezu_score（评比汇总·季度/全年排名）+ bestkezu（科组月度明细横向对比）
-     · 预测：bestkezu（参考月单科数/课时/周数）+ kezuActual（周度实际达成）
-            + weekly（1V1人数/1v1月生产课时，已在快照）+ C（云端同步，本地可调）
-   刷新：与现有联动数据共用同一快照、同一 dos:linked-update 事件
+   设计原则：个人工作台是数据工作台的「纯展示端」，不二次推导任何业务指标。
+   所有计算（周数、预测算法、按周汇总、一致性校验、统计卡、季度聚合）均由
+   数据分析工作台 js/kezu-compute.js 在「推送分析到个人台」时一次性算好，
+   打包进快照 snap.kezu.linked；本文件只把下发的数值/数据填进模板。
+   —— 可以算错，但不可以与数据工作台不一致。
    ============================================ */
 (function () {
   var App = window.App || (window.App = {});
   App.views = App.views || {};
 
-  /* ---------- 工具（移植自 campus-analytics，保持口径一致） ---------- */
+  /* ---------- 格式化助手（纯展示，不改业务口径） ---------- */
   function fmt(v, digits) {
     if (v == null || v === '' || (typeof v === 'number' && !isFinite(v))) return '—';
     if (typeof v === 'number') {
@@ -28,6 +27,7 @@
     return s + '%';
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+  function num(x) { return (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0); }
   function isNum(v) { return typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && /^[-\d.]+$/.test(v.trim()) && !isNaN(+v)); }
   var RATE_COL = /^(结课率|停课率|退费率|续费率|离职率|合格率|优秀率|进步率)$/;
   function scoreCell(v, header) {
@@ -37,115 +37,8 @@
     if (isNum(s)) { var n = +s; if (RATE_COL.test(header) && n > 0 && n <= 1) return pct(n); return fmt(n); }
     return esc(s);
   }
-  function num(x) { return (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0); }
 
-  /* ---------- 人工月 / 周 日期助手（移植 aggregate.js + app.js） ---------- */
-  // 口径必须与分析台(aggregate.js)完全一致：人工月最后一天 = 自然月内「最后一个周日」（≤ 自然月最后一天）。
-  // 此前实现：自然月最后一天为周三~周六时前进到下月首个周日（跨月溢出），会多算一周（如 2026-09 被算成 5 周），与「科组生产预测」图片不一致。已废弃该口径。
-  function manualLastDay(Y, m) {
-    var L = new Date(Y, m, 0); // 自然月最后一天（m 月：取 m 月第 0 天）
-    var dow = L.getDay();      // 0=周日..6=周六
-    return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dow); // 回退到 ≤L 的最后一个周日
-  }
-  function manualMonthOf(date) {
-    var Y = date.getFullYear(), m = date.getMonth() + 1;
-    var ML = manualLastDay(Y, m);
-    if (date <= ML) {
-      var pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
-      var prevML = manualLastDay(pY, pm0);
-      if (date > prevML) return { year: Y, month: m };
-      return { year: pY, month: pm0 };
-    }
-    var nY = Y, nm = m + 1; if (nm > 12) { nm = 1; nY = Y + 1; }
-    return { year: nY, month: nm };
-  }
-  function manualMonthWeekCount(Y, m) {
-    var pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
-    var prevML = manualLastDay(pY, pm0);
-    var MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1);
-    var ML = manualLastDay(Y, m);
-    var diff = Math.round((ML - MS) / 86400000);
-    return (diff + 1) / 7;
-  }
-  function currentManualWeek(date) {
-    var mm = manualMonthOf(date);
-    var pY = mm.year, pm0 = mm.month - 1; if (pm0 < 1) { pm0 = 12; pY = mm.year - 1; }
-    var prevML = manualLastDay(pY, pm0);
-    var MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1);
-    var dayDiff = Math.round((date - MS) / 86400000);
-    return { year: mm.year, month: mm.month, week: Math.floor(dayDiff / 7) + 1 };
-  }
-  function predMonth(y, m) { var mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
-
-  /* ---------- 快照数据访问 ---------- */
-  function kezuDetail(snap) { return (snap.kezu && snap.kezu.detail) || []; }
-  function kezuScoreRecs(snap) { return (snap.kezu && snap.kezu.score) || []; }
-  function kezuActualRecs(snap) { return (snap.kezu && snap.kezu.actual) || []; }
-  function kezuFlat(rec) { return Object.assign({ year: rec.year, month: rec.month, subject: rec.dimension }, rec.values || {}); }
-
-  function kezuMonths(snap) {
-    var set = {};
-    kezuDetail(snap).forEach(function (r) { if (r.year && r.month) set[r.year * 12 + r.month] = { year: r.year, month: r.month }; });
-    return Object.values(set).sort(function (a, b) { return (a.year - b.year) || (a.month - b.month); });
-  }
-  function loadMonth(snap, y, m) {
-    var recs = kezuDetail(snap).filter(function (r) { return r.year === y && r.month === m; });
-    if (!recs.length) return null;
-    return recs.map(function (r) { var v = r.values || {}; return { name: r.dimension || '未命名', s: num(v.subjects), h: num(v.hours), w: num(v.weeks) || 4 }; });
-  }
-  function dataSourceProd(snap, y, m) {
-    var hist = snap.monthlyHistory || [];
-    var rec = hist.find(function (r) { return r.year === y && r.month === m; });
-    if (!rec) { var mo = snap.latestByStream && snap.latestByStream.monthly; if (mo && mo.year === y && mo.month === m) rec = mo; }
-    if (!rec) return null;
-    var v = rec.values && rec.values.v1MonthProduced;
-    return (typeof v === 'number' && isFinite(v)) ? v : null;
-  }
-
-  /* ---------- 科组生产指标核心算法（与核心看板 computeKezuTarget 一致） ---------- */
-  function computeKezuTarget(depts, C) {
-    var S = depts.reduce(function (a, d) { return a + (d.s || 0); }, 0);
-    var H = depts.reduce(function (a, d) { return a + (d.h || 0); }, 0);
-    var rows = depts.map(function (d) {
-      var w = d.w > 0 ? d.w : 4;
-      var a = S > 0 ? d.s / S : 0;
-      var b = H > 0 ? d.h / H : 0;
-      var predA = a * C;
-      var predB = b * C;
-      var avg = (predA + predB) / 2;
-      var wAvg = d.s > 0 ? avg / d.s / w : 0;
-      return { name: d.name, s: d.s, h: d.h, w: w, a: a, b: b, predA: predA, predB: predB, avg: avg, wAvg: wAvg };
-    });
-    var denom = rows.reduce(function (a, r) { return a + (r.s || 0) * r.w; }, 0);
-    var meanW = rows.reduce(function (x, r) { return x + r.wAvg; }, 0) / (rows.length || 1);
-    var sum0 = meanW * denom;
-    var lower = denom > 0 ? C / denom : 0;
-    var upper = denom > 0 ? (C + 30) / denom : 0;
-    var commonW = meanW;
-    var adjNote;
-    if (denom <= 0) adjNote = '单科数×周数合计为 0，无法计算。';
-    else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
-    else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
-    else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
-    var sumFinal = commonW * denom;
-    var completion = C > 0 ? sumFinal / C : 0;
-    var achieved = '未达标';
-    if (completion >= 1.25) achieved = 'G3';
-    else if (completion >= 1.10) achieved = 'G2';
-    else if (completion >= 1.00) achieved = 'G1';
-    var Gcfg = { G1: 1.00, G2: 1.10, G3: 1.25 };
-    rows.forEach(function (r) {
-      r.final = commonW * r.s * r.w;
-      r.weekly = r.w > 0 ? r.final / r.w : 0;
-      var share = (r.s * r.w) / (denom || 1);
-      r.G1 = (C * Gcfg.G1) * share;
-      r.G2 = (C * Gcfg.G2) * share;
-      r.G3 = (C * Gcfg.G3) * share;
-    });
-    return { S: S, H: H, rows: rows, meanW: meanW, sum0: sum0, lower: lower, upper: upper, commonW: commonW, adjNote: adjNote, sumFinal: sumFinal, completion: completion, achieved: achieved, Gcfg: Gcfg };
-  }
-
-  /* ---------- 评分块 / 最佳科组 banner（移植） ---------- */
+  /* ---------- 评分块 / 最佳科组 banner（纯模板：排序 + 转义，不重算业务指标） ---------- */
   function kezuScoreBlockHTML(block, rank) {
     var header = block.header || [];
     if (!header.length) return '';
@@ -186,153 +79,136 @@
     return '<div class="bk-best-banner"><span class="badge-best">年度最佳科组</span> <b>' + esc(best.name) + '</b>　全年总分 ' + fmt(best.score) + (best.rank !== '' && best.rank != null ? '　名次 ' + esc(best.rank) : '') + '</div>';
   }
 
-  /* ---------- 科组季度聚合（横向对比·季度模式用） ---------- */
-  function kezuQuarter(rs) {
-    var byKey = {};
-    rs.forEach(function (r) {
-      var key = r.subject + '|' + r.quarter;
-      (byKey[key] = byKey[key] || []).push(r);
-    });
-    var out = [];
-    Object.keys(byKey).forEach(function (key) {
-      var g = byKey[key];
-      var parts = key.split('|');
-      var subj = parts[0], q = parts[1];
-      var sum = function (k) { return g.reduce(function (a, r) { return a + (r[k] || 0); }, 0); };
-      var n = g.length;
-      var totalHours = sum('hours'), totalWeeks = sum('weeks');
-      var avgSubjects = n ? sum('subjects') / n : 0;
-      var xf = sum('xufei'), jk = sum('jieke'), tf = sum('tuifei'), tk = sum('tingke'), qt = sum('quit');
-      var last = g.slice().sort(function (a, b) { return b.month - a.month; })[0];
-      var lastTeachers = last.teachers || 0;
-      out.push({
-        subject: subj, quarter: +q, totalHours: totalHours, totalWeeks: totalWeeks,
-        avgSubjects: Math.round(avgSubjects * 10) / 10,
-        quarterWeekAvg: (totalWeeks && avgSubjects) ? totalHours / totalWeeks / avgSubjects : null,
-        xf: xf, jk: jk, tf: tf, tk: tk, qt: qt,
-        xufeiRate: avgSubjects ? xf / avgSubjects : null,
-        jiekeRate: avgSubjects ? jk / avgSubjects : null,
-        tuifeiRate: (tf + avgSubjects) ? tf / (tf + avgSubjects) : null,
-        tingkeRate: (tk + avgSubjects) ? tk / (tk + avgSubjects) : null,
-        quitRate: (qt + lastTeachers) ? qt / (qt + lastTeachers) : null,
-        teachers: lastTeachers
-      });
-    });
-    return out.sort(function (a, b) { return a.subject.localeCompare(b.subject) || (a.quarter - b.quarter); });
+  /* ---------- 数据访问（只读原始快照；业务计算已在数据工作台完成） ---------- */
+  function kezuDetail(snap) { return (snap.kezu && snap.kezu.detail) || []; }
+  function kezuScoreRecs(snap) { return (snap.kezu && snap.kezu.score) || []; }
+  function kezuActualRecs(snap) { return (snap.kezu && snap.kezu.actual) || []; }
+  function kezuFlat(rec) { return Object.assign({ year: rec.year, month: rec.month, subject: rec.dimension }, rec.values || {}); }
+  function linked(snap) { return (snap.kezu && snap.kezu.linked) || null; }
+
+  function noModelHTML(kind) {
+    return '<div class="lk-empty">当前联动快照未包含「' + (kind || '科组') + '」预计算模型。请在<b>数据分析工作台</b>重新点击「推送分析到个人台」（需部署含 kezu-compute.js 的版本），本工作台登录同一账号后自动同步。</div>';
   }
 
-  /* ---------- 横向对比 ---------- */
-  var KEZU_CMP_DIMS = [
-    { k: 'hours', l: '课时', kind: 'num', d: 0 },
-    { k: 'subjects', l: '单科数', kind: 'num', d: 1 },
-    { k: 'weekAvg', l: '周平均', kind: 'num', d: 2 },
-    { k: 'xufeiRate', l: '续费率', kind: 'rate' },
-    { k: 'jiekeRate', l: '结课率', kind: 'rate' },
-    { k: 'tuifeiRate', l: '退费率', kind: 'rate' },
-    { k: 'tingkeRate', l: '停课率', kind: 'rate' },
-    { k: 'quitRate', l: '离职率', kind: 'rate' }
-  ];
-  function kezuCmpVal(rec, dim, isQuarter) {
-    if (!rec) return null;
-    if (isQuarter) {
-      if (dim === 'hours') return rec.totalHours != null ? rec.totalHours : null;
-      if (dim === 'subjects') return rec.avgSubjects != null ? rec.avgSubjects : null;
-      if (dim === 'weekAvg') return rec.quarterWeekAvg != null ? rec.quarterWeekAvg : null;
-    } else {
-      if (dim === 'hours') return rec.hours != null ? rec.hours : null;
-      if (dim === 'subjects') return rec.subjects != null ? rec.subjects : null;
-      if (dim === 'weekAvg') return rec.weekAvg != null ? rec.weekAvg : null;
-    }
-    if (['xufeiRate', 'jiekeRate', 'tuifeiRate', 'tingkeRate', 'quitRate'].indexOf(dim) >= 0) return rec[dim] != null ? rec[dim] : null;
-    return null;
+  /* ============================================================
+     科组生产预测（纯模板：消费数据工作台算好的 forecast 模型）
+     ============================================================ */
+  // 把数据工作台算好的「按月汇总宽表模型」（纯数值）渲染成 HTML，不重算任何数值
+  function renderWideTable(wide) {
+    if (!wide || !wide.maxW) return '<div class="preview-note">最佳科组缺少周数数据，无法生成周度汇总表。</div>';
+    var rows = wide.rows;
+    var head = '<tr><th rowspan="2">科组</th>';
+    for (var i = 1; i <= wide.maxW; i++) head += '<th class="num" colspan="4">W' + i + '</th>';
+    head += '<th class="num" rowspan="2">月度预排</th><th class="num" rowspan="2">月度实际</th><th class="num" rowspan="2">月度预排<br>完成率</th><th class="num" rowspan="2">月度实际<br>完成率</th></tr>';
+    var sub = '<tr>';
+    for (var k = 1; k <= wide.maxW; k++) sub += '<th class="num">指标</th><th class="num">预排</th><th class="num">实际</th><th class="num">完成率</th>';
+    sub += '</tr>';
+    var h = '<div class="lk-table-wrap"><table><thead>' + head + sub + '</thead><tbody>';
+    rows.forEach(function (r) {
+      var tr = '<tr><td>' + esc(r.name) + '</td>';
+      r.perWeek.forEach(function (pw) {
+        var tgtF = pw.hasWeek ? fmt(pw.tgt, 1) : '<span class="lk-muted">—</span>';
+        var schedF = pw.sched > 0 ? fmt(pw.sched, 1) : '<span class="lk-muted">—</span>';
+        var prodF = pw.prod > 0 ? fmt(pw.prod, 1) : '<span class="lk-muted">—</span>';
+        var rateF = pw.rate == null ? '<span class="lk-muted">—</span>' : pct(pw.rate);
+        tr += '<td class="num">' + tgtF + '</td><td class="num">' + schedF + '</td><td class="num" style="font-weight:600">' + prodF + '</td><td class="num">' + rateF + '</td>';
+      });
+      var preF = r.preRate == null ? '<span class="lk-muted">—</span>' : pct(r.preRate);
+      var actF = r.actRate == null ? '<span class="lk-muted">—</span>' : pct(r.actRate);
+      tr += '<td class="num">' + (r.sched > 0 ? fmt(r.sched, 1) : '<span class="lk-muted">—</span>') + '</td>' +
+        '<td class="num" style="font-weight:600">' + (r.prod > 0 ? fmt(r.prod, 1) : '<span class="lk-muted">—</span>') + '</td>' +
+        '<td class="num">' + preF + '</td><td class="num">' + actF + '</td></tr>';
+      h += tr;
+    });
+    var tfoot = '<tr><td class="total-label">校区总计</td>';
+    wide.wkIdx.forEach(function (wi) {
+      var wkRate = wi.weekTgt > 0 ? wi.weekProd / wi.weekTgt : null;
+      tfoot += '<td class="num">' + fmt(wi.weekTgt, 1) + '</td><td class="num">' + fmt(wi.weekSched, 1) + '</td><td class="num" style="font-weight:600">' + fmt(wi.weekProd, 1) + '</td><td class="num">' + (wkRate == null ? '<span class="lk-muted">—</span>' : pct(wkRate)) + '</td>';
+    });
+    var cPre = wide.campusPreRate == null ? '<span class="lk-muted">—</span>' : pct(wide.campusPreRate);
+    var cAct = wide.campusActRate == null ? '<span class="lk-muted">—</span>' : pct(wide.campusActRate);
+    tfoot += '<td class="num" style="font-weight:600">' + (wide.campusSched > 0 ? fmt(wide.campusSched, 1) : '<span class="lk-muted">—</span>') + '</td>' +
+      '<td class="num" style="font-weight:600">' + (wide.campusProd > 0 ? fmt(wide.campusProd, 1) : '<span class="lk-muted">—</span>') + '</td>' +
+      '<td class="num">' + cPre + '</td><td class="num">' + cAct + '</td></tr>';
+    h += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
+    h += '<div class="preview-note">月度预排完成率 = 月度预排 ÷ 月度生产指标；校区总计 = 校区月度预排 ÷ 校区生产指标 C。</div>';
+    return h;
   }
-  function renderCompare(snap, rootId) {
-    var stored = kezuDetail(snap).map(kezuFlat);
-    var wrap = document.getElementById(rootId);
-    if (!wrap) return;
-    if (!stored.length) { wrap.innerHTML = '<div class="lk-empty">还没有最佳科组月度数据（需在数据分析台上传含科组明细的文件并推送）。</div>'; return; }
-    var years = Array.from(new Set(stored.map(function (r) { return r.year; }))).sort(function (a, b) { return b - a; });
-    var h = '<div class="lk-cmp-toolbar">';
-    h += '<label>年份</label><select id="cmpYear">' + years.map(function (y) { return '<option value="' + y + '">' + y + ' 年</option>'; }).join('') + '</select>';
-    h += '<label>对比模式</label><div class="seg" id="cmpMode"><button type="button" data-m="month" class="active">月度横向对比</button><button type="button" data-m="quarter">季度横向对比</button></div>';
-    h += '<label>对比维度</label><select id="cmpDim">' + KEZU_CMP_DIMS.map(function (d) { return '<option value="' + d.k + '">' + d.l + '</option>'; }).join('') + '</select>';
+
+  function statCardsHTML(st) {
+    var gapText = function (v) { return v <= 0 ? '<span class="lk-tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>'; };
+    return '<div class="lk-stat-grid" style="margin:6px 0 14px">' +
+      '<div class="lk-stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(st.C) + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">当前1V1人数</div><div class="v">' + (st.v1 != null ? fmt(st.v1) + ' 人' : '<span class="lk-muted">—</span>') + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(st.G2) + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:var(--accent)">' + fmt(st.G3) + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">' + esc(st.weekLabel) + '</div><div class="v" style="color:var(--accent)">' + (st.hasData ? pct(st.actRate) : '<span class="lk-muted">—</span>') + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + gapText(st.gapG1) + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + gapText(st.gapG2) + '</div></div>' +
+      '<div class="lk-stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + gapText(st.gapG3) + '</div></div>' +
+      '</div>';
+  }
+
+  function renderForecast(snap) {
+    var L = linked(snap);
+    var h = '<div class="lk-section"><div class="lk-section-head"><div class="lk-section-title">📊 科组生产预测（下月指标）</div>' +
+      '<div class="lk-section-sub">底层逻辑：用已完成月份（参考月）的最佳科组数据，预测下个月的生产指标 · 口径与核心看板一致（计算由数据分析工作台统一完成）</div></div>';
+    if (!L) { h += noModelHTML('科组生产预测'); return { html: h }; }
+    if (!L.months.length) { h += '<div class="lk-empty">暂无最佳科组月度明细。请在数据分析工作台上传科组月度数据并推送后查看预测。</div></div>'; return { html: h }; }
+    var C0 = L.C;
+    var defY = L.months[L.months.length - 1].year, defM = L.months[L.months.length - 1].month;
+    var defKey = defY + '-' + defM;
+    h += '<div class="lk-cmp-toolbar" style="margin-bottom:12px">' +
+      '<label>校区生产指标（总盘 C）</label><span id="dtC" class="lk-input lk-readonly mono" style="display:inline-flex;align-items:center;min-width:96px;background:var(--surface-2);cursor:default">' +
+      (C0 != null ? fmt(C0) : '<span class="lk-muted">未同步</span>') + '</span>' +
+      '<span class="lk-tag ok">自动同步</span>' +
+      '<label>参考月份（已完成月）</label><select id="dtMonthSel" class="lk-input">' +
+      L.months.map(function (m) { return '<option value="' + m.year + '-' + m.month + '"' + (m.year === defY && m.month === defM ? ' selected' : '') + '>' + m.year + ' 年 ' + m.month + ' 月</option>'; }).join('') +
+      '</select>' +
+      '<label>预测月份</label><input type="text" id="dtPred" class="lk-input" readonly>' +
+      '</div>';
+    h += '<div id="dtConsist" class="preview-note"></div>';
+    h += '<div id="dtResult"></div>';
     h += '</div>';
-    h += '<div id="cmpTableWrap"></div>';
-    wrap.innerHTML = h;
-
-    function draw() {
-      var year = +document.getElementById('cmpYear').value;
-      var mode = document.getElementById('cmpMode').dataset.m;
-      var dim = document.getElementById('cmpDim').value;
-      var dimMeta = KEZU_CMP_DIMS.find(function (d) { return d.k === dim; });
-      var recs = stored.filter(function (r) { return r.year === year; });
-      var subjects = Array.from(new Set(recs.map(function (r) { return r.subject; }))).sort(function (a, b) { return a.localeCompare(b); });
-      var isQuarter = mode === 'quarter';
-      var periods, pLabel, matrix;
-      if (!isQuarter) {
-        periods = Array.from(new Set(recs.map(function (r) { return r.month; }))).sort(function (a, b) { return a - b; });
-        pLabel = function (m) { return m + '月'; };
-        var mMap = {};
-        recs.forEach(function (r) { (mMap[r.subject] = mMap[r.subject] || {})[r.month] = r; });
-        matrix = {};
-        subjects.forEach(function (s) { matrix[s] = {}; periods.forEach(function (m) { matrix[s][m] = mMap[s] ? mMap[s][m] : null; }); });
-      } else {
-        var qAgg = kezuQuarter(recs);
-        periods = Array.from(new Set(qAgg.map(function (q) { return q.quarter; }))).sort(function (a, b) { return a - b; });
-        pLabel = function (q) { return 'Q' + q; };
-        var qMap = {};
-        qAgg.forEach(function (q) { (qMap[q.subject] = qMap[q.subject] || {})[q.quarter] = q; });
-        matrix = {};
-        subjects.forEach(function (s) { matrix[s] = {}; periods.forEach(function (q) { matrix[s][q] = qMap[s] ? qMap[s][q] : null; }); });
-      }
-      var avgLabel = isQuarter ? '季均' : '月均';
-      var unit = dimMeta.kind === 'rate' ? '（%）' : '';
-      var th = '<div class="lk-table-wrap"><table><thead><tr>';
-      th += '<th>' + (isQuarter ? '科组 \\ 季度' : '科组 \\ 月份') + '</th>';
-      periods.forEach(function (p) { th += '<th class="num">' + pLabel(p) + '</th>'; });
-      th += '<th class="num">' + avgLabel + '</th>';
-      th += '</tr></thead><tbody>';
-      if (!subjects.length) {
-        th += '<tr><td colspan="' + (periods.length + 2) + '" class="lk-empty">该年暂无科组数据</td></tr>';
-      } else {
-        subjects.forEach(function (subj) {
-          th += '<tr><td>' + esc(subj) + '</td>';
-          var sumV = 0, cnt = 0;
-          periods.forEach(function (p) {
-            var rec = matrix[subj][p];
-            var v = kezuCmpVal(rec, dim, isQuarter);
-            if (v != null) { sumV += v; cnt++; }
-            if (v == null) th += '<td class="num lk-muted">—</td>';
-            else if (dimMeta.kind === 'rate') th += '<td class="num">' + pct(v) + '</td>';
-            else th += '<td class="num">' + fmt(v, dimMeta.d) + '</td>';
-          });
-          var avg = cnt ? sumV / cnt : null;
-          th += '<td class="num" style="font-weight:600">' + (avg == null ? '—' : (dimMeta.kind === 'rate' ? pct(avg) : fmt(avg, dimMeta.d))) + '</td>';
-          th += '</tr>';
-        });
-      }
-      th += '</tbody></table></div>';
-      th += '<div class="preview-note">' + (isQuarter
-        ? '季度横向对比：同一科组跨各季度的「' + dimMeta.l + unit + '」对比，数据来自季度聚合（课时累加、单科数取月均、周平均/各率按口径重算），<b>不含任何月度明细</b>。末列「' + avgLabel + '」为该年所列各季度的算术平均。'
-        : '月度横向对比：同一科组跨各月份的「' + dimMeta.l + unit + '」对比，数据来自科组月度明细，<b>不含任何季度汇总</b>。末列「' + avgLabel + '」为该年所列各月份的算术平均。') + '</div>';
-      document.getElementById('cmpTableWrap').innerHTML = th;
+    return { html: h, defKey: defKey };
+  }
+  function drawForecast(snap) {
+    var L = linked(snap); if (!L) return;
+    var mEl = document.getElementById('dtMonthSel');
+    var pEl = document.getElementById('dtPred');
+    var consEl = document.getElementById('dtConsist');
+    var resEl = document.getElementById('dtResult');
+    if (!mEl || !pEl || !resEl) return;
+    var f = L.forecast[mEl.value];
+    if (!f) { pEl.value = ''; if (consEl) consEl.innerHTML = ''; resEl.innerHTML = '<div class="lk-empty">该参考月份暂无预测数据。</div>'; return; }
+    if (f.noC) {
+      pEl.value = ''; if (consEl) consEl.innerHTML = '';
+      resEl.innerHTML = '<div class="lk-empty">' +
+        '<p><b>校区生产指标 C 尚未从数据分析台同步。</b></p>' +
+        '<p>请按以下顺序排查：</p>' +
+        '<ol style="text-align:left;display:inline-block;margin:8px 0;line-height:1.8">' +
+        '<li>在「数据分析台 → 核心看板 → 科组生产预测」的<b>校区生产指标（总盘 C）</b>输入框中填写数字；</li>' +
+        '<li>点击数据分析台右下角的<b>「推送分析到个人台」</b>（需含 kezu-compute.js 的版本）；</li>' +
+        '<li>在本页点击右上角的<b>「查看联动数据」</b>确认快照已更新，或刷新本页面。</li>' +
+        '</ol></div>';
+      return;
     }
-
-    document.getElementById('cmpYear').addEventListener('change', draw);
-    document.getElementById('cmpDim').addEventListener('change', draw);
-    Array.prototype.forEach.call(document.querySelectorAll('#cmpMode button'), function (b) {
-      b.addEventListener('click', function () {
-        Array.prototype.forEach.call(document.querySelectorAll('#cmpMode button'), function (x) { x.classList.remove('active'); });
-        b.classList.add('active');
-        document.getElementById('cmpMode').dataset.m = b.dataset.m;
-        draw();
-      });
-    });
-    document.getElementById('cmpMode').dataset.m = 'month';
-    draw();
+    pEl.value = f.predYear + ' 年 ' + f.predMonth + ' 月';
+    if (consEl) consEl.innerHTML = f.consistHTML || '';
+    var h = statCardsHTML(f.stat);
+    var maxW = f.wide ? f.wide.maxW : 0;
+    var actuals = kezuActualRecs(snap).filter(function (r) { return r.year === f.predYear && r.month === f.predMonth; });
+    var trackTable = maxW > 0 ? renderWideTable(f.wide) : '<div class="preview-note">最佳科组缺少周数数据，无法生成周度汇总表。</div>';
+    var hasTrack = maxW > 0 && actuals.length > 0;
+    h += '<div class="lk-section-h-flex"><div class="lk-sub-h">科组月度汇总（按周展开）</div>' +
+      (hasTrack ? '<span class="preview-note">含周度实际达成跟踪（来自联动快照 kezuActual）</span>' : '') + '</div>';
+    h += trackTable;
+    resEl.innerHTML = h;
   }
 
-  /* ---------- 排名板块 ---------- */
+  /* ============================================================
+     最佳科组排名（消费原始 score 数据做纯模板，不重算业务指标）
+     ============================================================ */
   function renderRank(snap) {
     var scoreRecs = kezuScoreRecs(snap);
     var detail = kezuDetail(snap);
@@ -391,222 +267,124 @@
     if (resEl) resEl.innerHTML = h;
   }
 
-  /* ---------- 科组生产预测 ---------- */
-  function actualSummary(snap, py, pm, uptoWeek) {
-    var actuals = kezuActualRecs(snap).filter(function (r) { return r.year === py && r.month === pm; });
-    var campusActual = 0, campusSched = 0, hasData = false;
-    actuals.forEach(function (r) {
-      var w = +r.week || 0;
-      if (uptoWeek == null || w <= uptoWeek) {
-        campusActual += num(r.values && r.values.produced);
-        campusSched += num(r.values && r.values.scheduled);
-        hasData = true;
-      }
-    });
-    return { campusActual: campusActual, campusSched: campusSched, hasData: hasData };
-  }
-  function kezuTargetWideTableHTML(res, actuals, campusC) {
-    var rows = res.rows.map(function (r) { return { name: r.name, s: r.s, w: r.w || 0, weekly: r.weekly || 0, final: r.final || 0 }; });
-    var bySubj = {};
-    actuals.forEach(function (r) { (bySubj[r.dimension] = bySubj[r.dimension] || []).push(r); });
-    rows.forEach(function (r) {
-      var list = (bySubj[r.name] || []).slice().sort(function (a, b) { return (a.week - b.week); });
-      r._list = list; r._sched = 0; r._prod = 0;
-      list.forEach(function (rec) { r._sched += num(rec.values && rec.values.scheduled); r._prod += num(rec.values && rec.values.produced); });
-    });
-    var maxW = Math.max.apply(null, rows.map(function (r) { return r.w; }).concat([0]));
-    if (!maxW) return '<div class="preview-note">最佳科组缺少周数数据，无法生成周度汇总表。</div>';
-    var wkIdx = [];
-    for (var i = 1; i <= maxW; i++) {
-      var weekTgt = 0, weekSched = 0, weekProd = 0;
-      rows.forEach(function (r) {
-        var rec = (r._list || []).find(function (x) { return x.week === i; });
-        if (i <= r.w) weekTgt += r.weekly;
-        weekSched += rec ? num(rec.values.scheduled) : 0;
-        weekProd += rec ? num(rec.values.produced) : 0;
-      });
-      wkIdx.push({ weekTgt: weekTgt, weekSched: weekSched, weekProd: weekProd });
-    }
-    var campusSched = 0, campusProd = 0;
-    rows.forEach(function (r) { campusSched += r._sched; campusProd += r._prod; });
-    var campusFinal = res.sumFinal || 0;
-    var campusCVal = (typeof campusC === 'number' && isFinite(campusC)) ? campusC : campusFinal;
-    var campusPreRate = campusCVal > 0 ? campusSched / campusCVal : null;
-    var campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
-    var h = '<div class="lk-table-wrap"><table><thead>';
-    var head = '<tr><th rowspan="2">科组</th>';
-    for (var j = 1; j <= maxW; j++) head += '<th class="num" colspan="4">W' + j + '</th>';
-    head += '<th class="num" rowspan="2">月度预排</th><th class="num" rowspan="2">月度实际</th><th class="num" rowspan="2">月度预排<br>完成率</th><th class="num" rowspan="2">月度实际<br>完成率</th></tr>';
-    var sub = '<tr>';
-    for (var k = 1; k <= maxW; k++) sub += '<th class="num">指标</th><th class="num">预排</th><th class="num">实际</th><th class="num">完成率</th>';
-    sub += '</tr>';
-    h += head + sub + '</thead><tbody>';
-    rows.forEach(function (r) {
-      var tr = '<tr><td>' + esc(r.name) + '</td>';
-      for (var i2 = 1; i2 <= maxW; i2++) {
-        var rec = (r._list || []).find(function (x) { return x.week === i2; });
-        var hasWeek = i2 <= r.w;
-        var tgt = hasWeek ? r.weekly : 0;
-        var sched = rec ? num(rec.values.scheduled) : 0;
-        var prod = rec ? num(rec.values.produced) : 0;
-        var wkRate = tgt > 0 ? prod / tgt : null;
-        tr += '<td class="num">' + (hasWeek ? fmt(tgt, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-          '<td class="num">' + (sched > 0 ? fmt(sched, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-          '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-          '<td class="num">' + (wkRate == null ? '<span class="lk-muted">—</span>' : pct(wkRate)) + '</td>';
-      }
-      var preRate = r.final > 0 ? r._sched / r.final : null;
-      var actRate = r.final > 0 ? r._prod / r.final : null;
-      tr += '<td class="num">' + (r._sched > 0 ? fmt(r._sched, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-        '<td class="num" style="font-weight:600">' + (r._prod > 0 ? fmt(r._prod, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-        '<td class="num">' + (preRate == null ? '<span class="lk-muted">—</span>' : pct(preRate)) + '</td>' +
-        '<td class="num">' + (actRate == null ? '<span class="lk-muted">—</span>' : pct(actRate)) + '</td></tr>';
-      h += tr;
-    });
-    var tfoot = '<tr><td class="total-label">校区总计</td>';
-    for (var i3 = 1; i3 <= maxW; i3++) {
-      var wi = wkIdx[i3 - 1];
-      var wkRate2 = wi.weekTgt > 0 ? wi.weekProd / wi.weekTgt : null;
-      tfoot += '<td class="num">' + fmt(wi.weekTgt, 1) + '</td>' +
-        '<td class="num">' + fmt(wi.weekSched, 1) + '</td>' +
-        '<td class="num" style="font-weight:600">' + fmt(wi.weekProd, 1) + '</td>' +
-        '<td class="num">' + (wkRate2 == null ? '<span class="lk-muted">—</span>' : pct(wkRate2)) + '</td>';
-    }
-    tfoot += '<td class="num" style="font-weight:600">' + (campusSched > 0 ? fmt(campusSched, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-      '<td class="num" style="font-weight:600">' + (campusProd > 0 ? fmt(campusProd, 1) : '<span class="lk-muted">—</span>') + '</td>' +
-      '<td class="num">' + (campusPreRate == null ? '<span class="lk-muted">—</span>' : pct(campusPreRate)) + '</td>' +
-      '<td class="num">' + (campusActRate == null ? '<span class="lk-muted">—</span>' : pct(campusActRate)) + '</td></tr>';
-    h += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
-    h += '<div class="preview-note">月度预排完成率 = 月度预排 ÷ 月度生产指标；校区总计 = 校区月度预排 ÷ 校区生产指标 C。</div>';
-    return h;
-  }
-
-  function renderForecast(snap, weekly) {
-    var months = kezuMonths(snap);
-    var h = '<div class="lk-section"><div class="lk-section-head"><div class="lk-section-title">📊 科组生产预测（下月指标）</div>' +
-      '<div class="lk-section-sub">底层逻辑：用已完成月份（参考月）的最佳科组数据，预测下个月的生产指标 · 口径与核心看板一致</div></div>';
-    if (!months.length) {
-      h += '<div class="lk-empty">暂无最佳科组月度明细。请在数据分析工作台上传科组月度数据并推送后查看预测。</div></div>';
-      return { html: h };
-    }
-    // C 值：直接从数据分析台快照同步（snap.kezu.C），不再手动输入；无值时提示去数据分析台填写
-    var C0 = (snap.kezu && typeof snap.kezu.C === 'number' && isFinite(snap.kezu.C)) ? snap.kezu.C : null;
-    var defY = months[months.length - 1].year, defM = months[months.length - 1].month;
-    var ys = Array.from(new Set(months.map(function (m) { return m.year; })));
-    h += '<div class="lk-cmp-toolbar" style="margin-bottom:12px">' +
-      '<label>校区生产指标（总盘 C）</label><span id="dtC" class="lk-input lk-readonly mono" style="display:inline-flex;align-items:center;min-width:96px;background:var(--surface-2);cursor:default">' +
-      (C0 != null ? fmt(C0) : '<span class="lk-muted">未同步</span>') + '</span>' +
-      '<span class="lk-tag ok">自动同步</span>' +
-      '<label>参考月份（已完成月）</label><select id="dtMonthSel" class="lk-input">' +
-      months.map(function (m) { return '<option value="' + m.year + '-' + m.month + '"' + (m.year === defY && m.month === defM ? ' selected' : '') + '>' + m.year + ' 年 ' + m.month + ' 月</option>'; }).join('') +
-      '</select>' +
-      '<label>预测月份</label><input type="text" id="dtPred" class="lk-input" readonly>' +
-      '</div>';
-    h += '<div id="dtConsist" class="preview-note"></div>';
-    h += '<div id="dtResult"></div>';
-    h += '</div>';
-    return { html: h };
-  }
-  function drawForecast(snap, weekly) {
-    var mEl = document.getElementById('dtMonthSel');
-    var pEl = document.getElementById('dtPred');
-    var consEl = document.getElementById('dtConsist');
-    var resEl = document.getElementById('dtResult');
-    if (!mEl || !pEl || !resEl) return;
-    // C 值：直接从数据分析台快照同步，不再手动输入（无值则无法预测）
-    var C = (snap.kezu && typeof snap.kezu.C === 'number' && isFinite(snap.kezu.C)) ? snap.kezu.C : null;
-    if (C == null) {
-      if (consEl) consEl.innerHTML = '';
-      if (pEl) pEl.value = '';
-      resEl.innerHTML = '<div class="lk-empty">' +
-        '<p><b>校区生产指标 C 尚未从数据分析台同步。</b></p>' +
-        '<p>请按以下顺序排查：</p>' +
-        '<ol style="text-align:left;display:inline-block;margin:8px 0;line-height:1.8">' +
-        '<li>在「数据分析台 → 核心看板 → 科组生产预测」的<b>校区生产指标（总盘 C）</b>输入框中填写数字；</li>' +
-        '<li>点击数据分析台右下角的<b>「推送分析到个人台」</b>；</li>' +
-        '<li>在本页点击右上角的<b>「查看联动数据」</b>确认快照已更新，或刷新本页面。</li>' +
-        '</ol>' +
-        '<p style="font-size:12px;color:var(--text-faint)">提示：如果在数据分析台输入 C 后未触发自动保存，请任意修改一次 C 值（如先删后写）再推送。</p>' +
-        '</div>';
-      return;
-    }
-    var parts = mEl.value.split('-');
-    var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
-    var depts = loadMonth(snap, y, m);
-    if (!depts) {
-      pEl.value = ''; consEl.innerHTML = '';
-      resEl.innerHTML = '<div class="lk-empty">「最佳科组」' + y + ' 年 ' + m + ' 月 暂无数据，无法预测。请切换到有数据的参考月份。</div>';
-      return;
-    }
-    var pm = predMonth(y, m);
-    var predWeeks = manualMonthWeekCount(pm.year, pm.month);
-    depts.forEach(function (d) { d.w = predWeeks; });
-    pEl.value = pm.year + ' 年 ' + pm.month + ' 月';
-    var res = computeKezuTarget(depts, C);
-    var latestV1 = (function () {
-      var rs = (snap.latestByStream && snap.latestByStream.weekly && snap.latestByStream.weekly.values) || null;
-      return rs && rs.v1Students != null ? num(rs.v1Students) : null;
-    })();
-    var src = dataSourceProd(snap, y, m);
-    var consistHtml;
-    if (src == null) consistHtml = '<span class="lk-tag warn">数据源无该月周报</span> <span class="preview-note">「1v1 月生产课时」校验需上传该月 DOS 周报。</span>';
-    else { var diff = res.H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(res.H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="lk-tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
-    // 本地智能：C 值合理性参考（对比参考月实际生产，纯统计，数据不出本机）
-    if (src != null && src > 0) {
-      var ratio = C / src;
-      var cTone = ratio >= 0.9 && ratio <= 1.1 ? '≈ 参考月水平' : (ratio > 1.1 ? '高于参考月 ' + Math.round((ratio - 1) * 100) + '%' : '低于参考月 ' + Math.round((1 - ratio) * 100) + '%');
-      consistHtml += '<div class="ai-insight-advice" style="margin-top:8px"><span class="ai-tag-local">本地智能参考</span> 参考月实际生产 <b>' + fmt(src) + '</b>，当前 C <b>' + fmt(Math.round(C)) + '</b>（' + cTone + '）。如需调整 C，请在数据分析台「科组生产预测」修改后重新推送。</div>';
-    }
-    consEl.innerHTML = consistHtml;
-
-    var today = new Date();
-    var cw = currentManualWeek(today);
-    var reportWeek = 0;
-    if (cw.year === pm.year && cw.month === pm.month) {
-      reportWeek = (today.getDay() === 0) ? cw.week : Math.max(1, cw.week - 1);
+  /* ============================================================
+     科组横向对比（消费原始 detail + 数据工作台预算的季度聚合，纯模板）
+     ============================================================ */
+  var KEZU_CMP_DIMS = [
+    { k: 'hours', l: '课时', kind: 'num', d: 0 },
+    { k: 'subjects', l: '单科数', kind: 'num', d: 1 },
+    { k: 'weekAvg', l: '周平均', kind: 'num', d: 2 },
+    { k: 'xufeiRate', l: '续费率', kind: 'rate' },
+    { k: 'jiekeRate', l: '结课率', kind: 'rate' },
+    { k: 'tuifeiRate', l: '退费率', kind: 'rate' },
+    { k: 'tingkeRate', l: '停课率', kind: 'rate' },
+    { k: 'quitRate', l: '离职率', kind: 'rate' }
+  ];
+  function kezuCmpVal(rec, dim, isQuarter) {
+    if (!rec) return null;
+    if (isQuarter) {
+      if (dim === 'hours') return rec.totalHours != null ? rec.totalHours : null;
+      if (dim === 'subjects') return rec.avgSubjects != null ? rec.avgSubjects : null;
+      if (dim === 'weekAvg') return rec.quarterWeekAvg != null ? rec.quarterWeekAvg : null;
     } else {
-      var pmEnd = manualLastDay(pm.year, pm.month);
-      if (today > pmEnd) reportWeek = currentManualWeek(pmEnd).week;
+      if (dim === 'hours') return rec.hours != null ? rec.hours : null;
+      if (dim === 'subjects') return rec.subjects != null ? rec.subjects : null;
+      if (dim === 'weekAvg') return rec.weekAvg != null ? rec.weekAvg : null;
     }
-    var done = actualSummary(snap, pm.year, pm.month, reportWeek);
-    var whole = actualSummary(snap, pm.year, pm.month, null);
-    var campusActual = done.campusActual;
-    var campusSched = whole.campusSched;
-    var hasData = whole.hasData;
-    var actRate = res.sumFinal > 0 ? campusActual / res.sumFinal : 0;
-    var gapG1 = C - campusSched;
-    var gapG2 = C * 1.10 - campusSched;
-    var gapG3 = C * 1.25 - campusSched;
-    var gapText = function (v) { return v <= 0 ? '<span class="lk-tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>'; };
-    var weekLabel = reportWeek > 0 ? (pm.month + '月第' + reportWeek + '周完成率') : '本周完成率';
+    if (['xufeiRate', 'jiekeRate', 'tuifeiRate', 'tingkeRate', 'quitRate'].indexOf(dim) >= 0) return rec[dim] != null ? rec[dim] : null;
+    return null;
+  }
+  function renderCompare(snap, rootId) {
+    var L = linked(snap);
+    var detail = kezuDetail(snap).map(kezuFlat);
+    var wrap = document.getElementById(rootId);
+    if (!wrap) return;
+    if (!L || !L.compare || !Object.keys(L.compare.byYear).length) { wrap.innerHTML = noModelHTML('科组横向对比'); return; }
+    var years = Object.keys(L.compare.byYear).map(Number).sort(function (a, b) { return b - a; });
+    var h = '<div class="lk-cmp-toolbar">';
+    h += '<label>年份</label><select id="cmpYear">' + years.map(function (y) { return '<option value="' + y + '">' + y + ' 年</option>'; }).join('') + '</select>';
+    h += '<label>对比模式</label><div class="seg" id="cmpMode"><button type="button" data-m="month" class="active">月度横向对比</button><button type="button" data-m="quarter">季度横向对比</button></div>';
+    h += '<label>对比维度</label><select id="cmpDim">' + KEZU_CMP_DIMS.map(function (d) { return '<option value="' + d.k + '">' + d.l + '</option>'; }).join('') + '</select>';
+    h += '</div>';
+    h += '<div id="cmpTableWrap"></div>';
+    wrap.innerHTML = h;
 
-    var h = '<div class="lk-stat-grid" style="margin:6px 0 14px">' +
-      '<div class="lk-stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(C) + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">当前1V1人数</div><div class="v">' + (latestV1 != null ? fmt(latestV1) + ' 人' : '<span class="lk-muted">—</span>') + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(C * 1.10) + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:var(--accent)">' + fmt(C * 1.25) + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">' + weekLabel + '</div><div class="v" style="color:var(--accent)">' + (hasData ? pct(actRate) : '<span class="lk-muted">—</span>') + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (hasData ? gapText(gapG1) : '<span class="lk-muted">—</span>') + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (hasData ? gapText(gapG2) : '<span class="lk-muted">—</span>') + '</div></div>' +
-      '<div class="lk-stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (hasData ? gapText(gapG3) : '<span class="lk-muted">—</span>') + '</div></div>' +
-      '</div>';
+    function draw() {
+      var year = +document.getElementById('cmpYear').value;
+      var mode = document.getElementById('cmpMode').dataset.m;
+      var dim = document.getElementById('cmpDim').value;
+      var dimMeta = KEZU_CMP_DIMS.find(function (d) { return d.k === dim; });
+      var c = L.compare.byYear[year];
+      var isQuarter = mode === 'quarter';
+      var recs = isQuarter ? c.quarterAgg : detail.filter(function (r) { return r.year === year; });
+      var subjects = c.subjects;
+      var periods, pLabel, matrix;
+      if (!isQuarter) {
+        periods = c.months.slice();
+        pLabel = function (m) { return m + '月'; };
+        var mMap = {};
+        recs.forEach(function (r) { (mMap[r.subject] = mMap[r.subject] || {})[r.month] = r; });
+        matrix = {};
+        subjects.forEach(function (s) { matrix[s] = {}; periods.forEach(function (m) { matrix[s][m] = mMap[s] ? mMap[s][m] : null; }); });
+      } else {
+        periods = Array.from(new Set(recs.map(function (r) { return r.quarter; }))).filter(function (q) { return q != null; }).sort(function (a, b) { return a - b; });
+        pLabel = function (q) { return 'Q' + q; };
+        var qMap = {};
+        recs.forEach(function (r) { (qMap[r.subject] = qMap[r.subject] || {})[r.quarter] = r; });
+        matrix = {};
+        subjects.forEach(function (s) { matrix[s] = {}; periods.forEach(function (q) { matrix[s][q] = qMap[s] ? qMap[s][q] : null; }); });
+      }
+      var avgLabel = isQuarter ? '季均' : '月均';
+      var unit = dimMeta.kind === 'rate' ? '（%）' : '';
+      var th = '<div class="lk-table-wrap"><table><thead><tr>';
+      th += '<th>' + (isQuarter ? '科组 \\ 季度' : '科组 \\ 月份') + '</th>';
+      periods.forEach(function (p) { th += '<th class="num">' + pLabel(p) + '</th>'; });
+      th += '<th class="num">' + avgLabel + '</th>';
+      th += '</tr></thead><tbody>';
+      if (!subjects.length) {
+        th += '<tr><td colspan="' + (periods.length + 2) + '" class="lk-empty">该年暂无科组数据</td></tr>';
+      } else {
+        subjects.forEach(function (subj) {
+          th += '<tr><td>' + esc(subj) + '</td>';
+          var sumV = 0, cnt = 0;
+          periods.forEach(function (p) {
+            var rec = matrix[subj][p];
+            var v = kezuCmpVal(rec, dim, isQuarter);
+            if (v != null) { sumV += v; cnt++; }
+            if (v == null) th += '<td class="num lk-muted">—</td>';
+            else if (dimMeta.kind === 'rate') th += '<td class="num">' + pct(v) + '</td>';
+            else th += '<td class="num">' + fmt(v, dimMeta.d) + '</td>';
+          });
+          var avg = cnt ? sumV / cnt : null;
+          th += '<td class="num" style="font-weight:600">' + (avg == null ? '—' : (dimMeta.kind === 'rate' ? pct(avg) : fmt(avg, dimMeta.d))) + '</td>';
+          th += '</tr>';
+        });
+      }
+      th += '</tbody></table></div>';
+      th += '<div class="preview-note">' + (isQuarter
+        ? '季度横向对比：同一科组跨各季度的「' + dimMeta.l + unit + '」对比，数据来自数据分析工作台季度聚合（课时累加、单科数取月均、周平均/各率按口径重算），<b>不含任何月度明细</b>。末列「' + avgLabel + '」为该年所列各季度的算术平均。'
+        : '月度横向对比：同一科组跨各月份的「' + dimMeta.l + unit + '」对比，数据来自科组月度明细，<b>不含任何季度汇总</b>。末列「' + avgLabel + '」为该年所列各月份的算术平均。') + '</div>';
+      document.getElementById('cmpTableWrap').innerHTML = th;
+    }
 
-    var maxW = Math.max.apply(null, res.rows.map(function (r) { return r.w; }).concat([0]));
-    var actuals = kezuActualRecs(snap).filter(function (r) { return r.year === pm.year && r.month === pm.month; });
-    var trackTable = maxW > 0 ? kezuTargetWideTableHTML(res, actuals, C) : '<div class="preview-note">最佳科组缺少周数数据，无法生成周度汇总表。</div>';
-    var hasTrack = maxW > 0 && actuals.length > 0;
-    h += '<div class="lk-section-h-flex"><div class="lk-sub-h">科组月度汇总（按周展开）</div>' +
-      (hasTrack ? '<span class="preview-note">含周度实际达成跟踪（来自联动快照 kezuActual）</span>' : '') + '</div>';
-    h += trackTable;
-    resEl.innerHTML = h;
+    document.getElementById('cmpYear').addEventListener('change', draw);
+    document.getElementById('cmpDim').addEventListener('change', draw);
+    Array.prototype.forEach.call(document.querySelectorAll('#cmpMode button'), function (b) {
+      b.addEventListener('click', function () {
+        Array.prototype.forEach.call(document.querySelectorAll('#cmpMode button'), function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        document.getElementById('cmpMode').dataset.m = b.dataset.m;
+        draw();
+      });
+    });
+    document.getElementById('cmpMode').dataset.m = 'month';
+    draw();
   }
 
   /* ---------- 快照拉取（与联动数据共用同一快照源） ---------- */
   function pickSnapshot(rows) {
     var snap = null;
-    (rows || []).forEach(function (r) {
-      if (r && r.kind === 'analytics_snapshot' && r.payload) snap = r.payload;
-    });
+    (rows || []).forEach(function (r) { if (r && r.kind === 'analytics_snapshot' && r.payload) snap = r.payload; });
     return snap;
   }
   function fetchSnapshot(cb) {
@@ -626,10 +404,10 @@
     if (yrSel) { yrSel.addEventListener('change', function () { drawRank(snap); }); drawRank(snap); }
     if (document.getElementById('kezuCmpDashWrap')) renderCompare(snap, 'kezuCmpDashWrap');
   }
-  function bindForecast(snap, weekly) {
+  function bindForecast(snap) {
     var mEl = document.getElementById('dtMonthSel');
-    if (mEl) mEl.addEventListener('change', function () { drawForecast(snap, weekly); });
-    drawForecast(snap, weekly);
+    if (mEl) mEl.addEventListener('change', function () { drawForecast(snap); });
+    drawForecast(snap);
   }
 
   function mountRank(container) {
@@ -650,21 +428,18 @@
     fetchSnapshot(function (err, snap) {
       if (err) { container.innerHTML = '<div class="lk-empty">拉取失败：' + ((err && err.message) || err) + '</div>'; return; }
       if (!snap) { container.innerHTML = noDataHTML('科组生产数据'); return; }
-      var weekly = (snap.latestByStream && snap.latestByStream['weekly'] && snap.latestByStream['weekly'].values) || null;
-      container.innerHTML = renderForecast(snap, weekly).html;
-      bindForecast(snap, weekly);
+      container.innerHTML = renderForecast(snap).html;
+      bindForecast(snap);
     });
   }
 
-  // 合并渲染（两板块同页，可选）
-  function render(rootEl, snap, weekly) {
+  function render(rootEl, snap) {
     if (!rootEl) return;
-    rootEl.innerHTML = '<div class="lk-kezu-wrap">' + renderRank(snap).html + renderForecast(snap, weekly).html + '</div>';
+    rootEl.innerHTML = '<div class="lk-kezu-wrap">' + renderRank(snap).html + renderForecast(snap).html + '</div>';
     bindRank(snap);
-    bindForecast(snap, weekly);
+    bindForecast(snap);
   }
 
-  // 登录 / 云端更新时自动刷新（无论停留在哪个板块）
   window.addEventListener('dos:linked-update', function () {
     if (_rankMounted) mountRank(_rankMounted);
     if (_fcMounted) mountForecast(_fcMounted);
