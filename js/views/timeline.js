@@ -76,6 +76,7 @@
       var dayNodes = allNodes.filter(function(n) {
         if (n.date) return n.date === dateStr;
         if (n.type === 'monthly') {
+          if (n.monthDay != null) return n.monthDay === date.getDate();
           if (n.weekday != null && n.weekday === date.getDay()) {
             if (n.which === 'last') return App.util.isLastWeekOfMonth(date);
             if (n.cron === 'last-week-of-month') return App.util.isLastWeekOfMonth(date);
@@ -104,8 +105,8 @@
     }
     html += '</div>'; // .timeline-week
 
-    // 月度节点提示区
-    var monthlyNodes = allNodes.filter(function(n) { return n.type === 'monthly'; });
+    // 月度节点提示区（仅列「无具体日期锚点」的月度节点；每月几号/最后一周星期已在日历格中显示）
+    var monthlyNodes = allNodes.filter(function(n) { return n.type === 'monthly' && n.monthDay == null && n.weekday == null; });
     if (monthlyNodes.length > 0) {
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期节点</h3></div>';
       monthlyNodes.forEach(function(node) {
@@ -162,6 +163,7 @@
       var dayFixedNodes = allNodes.filter(function(n) {
         if (n.date) return n.date === dateStr;
         if (n.type === 'monthly') {
+          if (n.monthDay != null) return n.monthDay === d.getDate();
           if (n.weekday != null && n.weekday === d.getDay() && n.which === 'last') {
             return App.util.isLastWeekOfMonth(d);
           }
@@ -187,8 +189,8 @@
 
     html += '</div>'; // grid
 
-    // 月度节点列表
-    var monthlyNodes = allNodes.filter(function(n) { return n.type === 'monthly'; });
+    // 月度节点列表（仅列「无具体日期锚点」的月度节点）
+    var monthlyNodes = allNodes.filter(function(n) { return n.type === 'monthly' && n.monthDay == null && n.weekday == null; });
     if (monthlyNodes.length > 0) {
       html += '<div class="card" style="margin-top:18px"><div class="card-header"><h3 class="card-title">' + App.util.svgIcon('clock', 18) + '月度周期任务</h3></div>';
       monthlyNodes.forEach(function(node) {
@@ -227,22 +229,29 @@
 
     var html = '<div style="display:flex;flex-direction:column;gap:14px">';
     // 节点类型
-    html += '<div class="form-group"><label class="form-label">节点类型</label><select class="form-input" id="node-type">';
+    html += '<div class="form-group"><label class="form-label">节点类型</label><select class="form-input" id="node-type" onchange="App.views.timeline.toggleNodeFreq()">';
     html += '<option value="weekly"' + (!isMonthly ? ' selected' : '') + '>每周固定（指定星期）</option>';
-    html += '<option value="monthly"' + (isMonthly ? ' selected' : '') + '>每月固定（最后一周）</option>';
+    html += '<option value="monthly"' + (isMonthly ? ' selected' : '') + '>每月固定（指定星期或每月几号）</option>';
     html += '</select></div>';
     // 标题
     html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="node-title" value="' + App.util.escapeAttr(data.title) + '" placeholder="如：集团会议"></div>';
-    // 星期
+    // 星期（周度=周几；月度=每月最后一周的星期）
     var wdNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    html += '<div class="form-group"><label class="form-label">星期</label><select class="form-input" id="node-weekday">';
-    html += '<option value="">不指定（整月有效）</option>';
+    html += '<div class="form-group" id="fg-weekday"><label class="form-label" id="lbl-weekday">星期</label><select class="form-input" id="node-weekday">';
+    html += '<option value="">不指定</option>';
     wdNames.forEach(function(n, i) {
       html += '<option value="' + i + '"' + (weekdayVal === String(i) ? ' selected' : '') + '>' + n + '</option>';
     });
+    html += '</select><p class="form-hint" id="hint-weekday">' + (isMonthly ? '选择后表示「每月最后一周的该星期」出现' : '选择后每周该星期出现此节点') + '</p></div>';
+    // 每月几号（仅月度可见）：设定后每月该日循环出现
+    var monthDayVal = (data.monthDay == null) ? '' : String(data.monthDay);
+    html += '<div class="form-group" id="fg-monthday" style="display:' + (isMonthly ? 'block' : 'none') + '"><label class="form-label">每月几号（可选，设定后每月该日循环）</label><select class="form-input" id="node-monthday"><option value="">不指定（改用上面星期 / 最后一周）</option>';
+    for (var md = 1; md <= 31; md++) {
+      html += '<option value="' + md + '"' + (monthDayVal === String(md) ? ' selected' : '') + '>每月 ' + md + ' 号</option>';
+    }
     html += '</select></div>';
-    // 具体日期（绝对日期）：设定后按具体某天显示，清空则回到周度/月度
-    html += '<div class="form-group"><label class="form-label">具体日期（可选，设定后按绝对日期显示）</label><input class="form-input" id="node-date" type="date" value="' + App.util.escapeAttr(data.date || '') + '" style="max-width:220px"></div>';
+    // 一次性绝对日期：设定后按具体某天显示一次，清空则回到周度/月度
+    html += '<div class="form-group"><label class="form-label">一次性绝对日期（可选，设定后按具体某天显示一次）</label><input class="form-input" id="node-date" type="date" value="' + App.util.escapeAttr(data.date || '') + '" style="max-width:220px"></div>';
     // 颜色标记
     html += '<div class="form-group"><label class="form-label">颜色标记（用于区分事项）</label><div id="node-color-swatches" class="color-swatches">';
     PALETTE.forEach(function(c) {
@@ -272,6 +281,18 @@
     App.util.modal(modalOpts);
   }
 
+  function toggleNodeFreq() {
+    var typeEl = document.getElementById('node-type');
+    if (!typeEl) return;
+    var monthly = typeEl.value === 'monthly';
+    var fgM = document.getElementById('fg-monthday');
+    if (fgM) fgM.style.display = monthly ? 'block' : 'none';
+    var lbl = document.getElementById('lbl-weekday');
+    if (lbl) lbl.textContent = monthly ? '星期（每月最后一周）' : '星期（周几）';
+    var hint = document.getElementById('hint-weekday');
+    if (hint) hint.textContent = monthly ? '选择后表示「每月最后一周的该星期」出现' : '选择后每周该星期出现此节点';
+  }
+
   function saveNode(id, close) {
     var titleEl = document.getElementById('node-title');
     if (!titleEl) return;
@@ -286,6 +307,8 @@
     var color = document.getElementById('node-color').value;
     var dateEl = document.getElementById('node-date');
     var dateVal = dateEl ? dateEl.value.trim() : '';
+    var monthDaySel = document.getElementById('node-monthday') ? document.getElementById('node-monthday').value : '';
+    var monthDay = (isMonthly && monthDaySel !== '') ? parseInt(monthDaySel, 10) : null;
 
     var newNode = {
       title: title,
@@ -297,14 +320,39 @@
     };
     if (color) newNode.color = color; else newNode.color = null;
     if (dateVal) {
-      // 设定具体日期 → 转为绝对日期事项（type 归 fixed，清除月度相位）
+      // 设定具体日期 → 转为一次性绝对日期事项（type 归 fixed，清除月度相位）
       newNode.type = 'fixed';
       newNode.date = dateVal;
       newNode.weekday = new Date(dateVal + 'T00:00:00').getDay();
-      delete newNode.which; delete newNode.cron;
+      delete newNode.which; delete newNode.cron; delete newNode.monthDay;
     } else if (isMonthly) {
-      if (weekday != null) newNode.which = 'last';
-      else newNode.cron = 'last-week-of-month';
+      if (monthDay != null) {
+        // 每月几号循环：优先于「最后一周的星期」
+        newNode.monthDay = monthDay;
+        newNode.weekday = null;
+        delete newNode.which; delete newNode.cron;
+      } else if (weekday != null) {
+        // 每月最后一周的该星期
+        newNode.which = 'last';
+        delete newNode.cron; delete newNode.monthDay;
+      } else {
+        // 每月最后一周（不指定星期）
+        newNode.cron = 'last-week-of-month';
+        newNode.weekday = null;
+        delete newNode.monthDay;
+      }
+    } else {
+      // 周度：仅保留 weekday，清除一切月度相位
+      delete newNode.which; delete newNode.cron; delete newNode.monthDay;
+    }
+
+    // 编辑时清掉旧对象里残留的月度字段（newNode 未声明即视为不再需要）
+    function cleanStored(obj) {
+      if (!('monthDay' in newNode)) delete obj.monthDay;
+      if (!('which' in newNode)) delete obj.which;
+      if (!('cron' in newNode)) delete obj.cron;
+      if (!('date' in newNode)) delete obj.date;
+      if (newNode.color === null) delete obj.color;
     }
 
     if (id) {
@@ -313,8 +361,8 @@
       var fi = -1, ci = -1;
       fixed.forEach(function(n, i) { if (n.id === id) fi = i; });
       custom.forEach(function(n, i) { if (n.id === id) ci = i; });
-      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); if (newNode.color === null) delete fixed[fi].color; if (!newNode.date) delete fixed[fi].date; App.store.set('timeline.fixedNodes', fixed); }
-      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); if (newNode.color === null) delete custom[ci].color; if (!newNode.date) delete custom[ci].date; App.store.set('timeline.customNodes', custom); }
+      if (fi >= 0) { fixed[fi] = Object.assign({}, fixed[fi], newNode); cleanStored(fixed[fi]); App.store.set('timeline.fixedNodes', fixed); }
+      else if (ci >= 0) { custom[ci] = Object.assign({}, custom[ci], newNode); cleanStored(custom[ci]); App.store.set('timeline.customNodes', custom); }
     } else {
       newNode.id = App.store.uid('node');
       App.store.push('timeline.customNodes', newNode);

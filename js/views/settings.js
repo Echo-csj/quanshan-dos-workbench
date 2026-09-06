@@ -54,7 +54,11 @@
       html += '<tr>';
       html += '<td><strong>' + App.util.escapeHtml(node.title) + '</strong></td>';
       html += '<td><span class="tag tag-' + (node.type === 'monthly' ? 'warn' : 'accent') + '" style="font-size:10px">' + (node.type === 'fixed' ? '固定' : '月度') + '</span></td>';
-      html += '<td>' + (node.weekday !== null ? '周' + wdNames[node.weekday] : '-') + '</td>';
+      var freqLabel = '-';
+      if (node.monthDay != null) freqLabel = '每月 ' + node.monthDay + ' 号';
+      else if (node.weekday != null) freqLabel = '周' + wdNames[node.weekday];
+      else if (node.date) freqLabel = node.date.slice(5);
+      html += '<td>' + freqLabel + '</td>';
       html += '<td class="mono" style="font-size:12px">' + (node.time || '-') + '</td>';
       html += '<td>' + (node.reminder ? '✅' : '❌') + '</td>';
       html += '</tr>';
