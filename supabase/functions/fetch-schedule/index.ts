@@ -18,19 +18,24 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // 注意：SUPABASE_URL / SUPABASE_ANON_KEY 由 CLI 部署时自动注入，无需手动设；
 // 但 service-role key 不会自动注入且不能用 SUPABASE_ 前缀的 Secret 设置，
 // 故用自定义名 SERVICE_ROLE_KEY（普通 Secret 允许）承载。
-const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
-const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
-const SERVICE_ROLE = Deno.env.get('SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const OWNER_USER_ID = Deno.env.get('OWNER_USER_ID') || '';
-const CRON_SECRET = Deno.env.get('CRON_SECRET') || '';
+// cleanSecret: 剔除不可见/非 ASCII 字符与首尾空白，防止从后台复制 key 时带入换行/零宽字符，
+// 否则 Deno 在设置 Authorization 等请求头时会抛 "not a valid ByteString"。
+function cleanSecret(v: string): string {
+  return v.replace(/[^\x20-\x7e]/g, '').trim();
+}
+const SUPABASE_URL = cleanSecret(Deno.env.get('SUPABASE_URL') || '');
+const SUPABASE_ANON_KEY = cleanSecret(Deno.env.get('SUPABASE_ANON_KEY') || '');
+const SERVICE_ROLE = cleanSecret(Deno.env.get('SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '');
+const OWNER_USER_ID = cleanSecret(Deno.env.get('OWNER_USER_ID') || '');
+const CRON_SECRET = cleanSecret(Deno.env.get('CRON_SECRET') || '');
 
 // 源站（内部排课系统 91paike）配置
-const SOURCE_BASE_URL = (Deno.env.get('SOURCE_BASE_URL') || 'http://zyg.91paike.com').replace(/\/$/, '');
-const SOURCE_MODULE = Deno.env.get('SOURCE_MODULE') || '400002';
-const SOURCE_USER = Deno.env.get('SOURCE_USER') || '';
-const SOURCE_PASS = Deno.env.get('SOURCE_PASS') || '';
-const SOURCE_PARSE_MODE = (Deno.env.get('SOURCE_PARSE_MODE') || 'html').toLowerCase();
-const SOURCE_API_URL = Deno.env.get('SOURCE_API_URL') || ''; // 若源站提供 JSON 接口，设此项并 SOURCE_PARSE_MODE=json
+const SOURCE_BASE_URL = (Deno.env.get('SOURCE_BASE_URL') || 'http://zyg.91paike.com').replace(/\/$/, '').trim();
+const SOURCE_MODULE = (Deno.env.get('SOURCE_MODULE') || '400002').trim();
+const SOURCE_USER = (Deno.env.get('SOURCE_USER') || '').trim();
+const SOURCE_PASS = (Deno.env.get('SOURCE_PASS') || '').trim();
+const SOURCE_PARSE_MODE = (Deno.env.get('SOURCE_PARSE_MODE') || 'html').toLowerCase().trim();
+const SOURCE_API_URL = (Deno.env.get('SOURCE_API_URL') || '').trim(); // 若源站提供 JSON 接口，设此项并 SOURCE_PARSE_MODE=json
 
 const KIND = 'schedule_fetch';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
