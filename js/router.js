@@ -85,16 +85,6 @@ window.App = window.App || {};
         item.classList.remove('active');
       }
     });
-
-    // 移动端 tab 更新
-    document.querySelectorAll('.mobile-tab').forEach(function(tab) {
-      var href = tab.getAttribute('data-route');
-      if (href && activePath.indexOf(href) === 0) {
-        tab.classList.add('active');
-      } else {
-        tab.classList.remove('active');
-      }
-    });
   }
 
   // 监听 hash 变化

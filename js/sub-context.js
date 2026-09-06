@@ -241,7 +241,7 @@
     applyRoleVisibility();
   }
 
-  // 按角色隐藏无权访问的侧栏/移动端模块入口（含全员统一隐藏，如「设置」）
+  // 按角色隐藏无权访问的侧栏/模块入口（含全员统一隐藏，如「设置」）
   function applyRoleVisibility() {
     if (!isSub()) return;
     var hidden = subHiddenRoutes();
