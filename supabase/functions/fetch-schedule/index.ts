@@ -61,6 +61,10 @@ function json(body: unknown, status = 200) {
 }
 
 // Deno 的 Headers.get('set-cookie') 对多值头部返回 null，必须用 getSetCookie()
+function isAscii(s: string): boolean {
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) > 255) return false;
+  return true;
+}
 function makeCookieJar() {
   const cookies = new Map<string, string>();
   const store = (res: Response) => {
@@ -74,7 +78,13 @@ function makeCookieJar() {
       if (idx > 0) cookies.set(kv.slice(0, idx).trim(), kv.slice(idx + 1).trim());
     });
   };
-  const header = () => Array.from(cookies.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+  // 仅保留纯 ASCII 的 cookie：源站可能下发含中文的 cookie，直接塞进 Cookie 头会触发
+  // Deno 的 "not a valid ByteString" 报错；会话/认证 cookie(ASP.NET_SessionId/.ASPXAUTH)均为 ASCII，丢弃非 ASCII 不影响登录。
+  const header = () =>
+    Array.from(cookies.entries())
+      .filter(([k, v]) => isAscii(k) && isAscii(v))
+      .map(([k, v]) => `${k}=${v}`)
+      .join('; ');
   return { store, header, has: () => cookies.size > 0 };
 }
 
