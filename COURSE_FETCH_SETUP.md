@@ -47,12 +47,13 @@ Supabase Edge Function: fetch-schedule
 | `SOURCE_PASS` | ✅ | 源站登录密码 | `<你的源站密码>` |
 | `SOURCE_PARSE_MODE` | ⬜ | `html`（默认）或 `json` | `html` |
 | `SOURCE_API_URL` | ⬜ | 仅当源站有 JSON 接口时填（设后改 `SOURCE_PARSE_MODE=json`） | `` |
+| `SERVICE_ROLE_KEY` | ✅ | **service-role key（用自定义名，不能叫 SUPABASE_ 开头）**；定时任务/手动 cron 写入用 | `eyJ...`（Dashboard→API→service_role 那串） |
 | `OWNER_USER_ID` | ✅ | 课程表归属者(DOS)的 `auth.users.id`，定时写入用 | `a1b2c3...` |
 | `CRON_SECRET` | ⬜ | 手动 cron 调用共享密钥（可选） | `随机串` |
 
 > ⚠️ 不要把真实账号/密码/密钥写进仓库文件。Secrets 只在 Supabase 后台设置。
-> ℹ️ **`SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 不要手动设**——
-> `supabase functions deploy` / `invoke` 时 CLI 会自动注入。手动设会被 CLI 拒绝（提示 `Env name cannot start with SUPABASE_, skipping`）。
+> ℹ️ **`SUPABASE_URL` / `SUPABASE_ANON_KEY` 由 CLI 部署时自动注入，无需手动设**（手动设会被拒：`Env name cannot start with SUPABASE_, skipping`）。
+> ℹ️ **service-role key 不能用 `SUPABASE_SERVICE_ROLE_KEY` 当 Secret 名**（同样被拒）。必须用自定义名 `SERVICE_ROLE_KEY` 设置，函数在运行时读取它来以 service-role 写入。
 > ⚠️ **HTTP-only 风险**：源站无 HTTPS。Supabase Edge Function(Deno) 对明文 `http://` 出站抓取可能受限；
 > 若部署后报网络错误（如 `error sending request` / `403` from Deno），请改用下方「备选方案」。
 
@@ -73,18 +74,19 @@ supabase --version
 supabase login
 supabase link --project-ref zxemcyngesgxpbevdxsu
 
-# 3) 设置自定义 Secrets（SUPABASE_URL/ANON_KEY/SERVICE_ROLE_KEY 由 CLI 自动注入，无需手动设）
+# 3) 设置自定义 Secrets（每条独立命令，避免 zsh 续行解析坑）
 supabase secrets set SOURCE_BASE_URL="http://zyg.91paike.com"
 supabase secrets set SOURCE_MODULE="400002"
 supabase secrets set SOURCE_USER="<你的源站账号>"
 supabase secrets set SOURCE_PASS="<你的源站密码>"
+supabase secrets set SERVICE_ROLE_KEY="eyJ...你的service_role..."
 supabase secrets set OWNER_USER_ID="a1b2c3..."
 supabase secrets set CRON_SECRET="daily-fetch-2026"
 
-# 验证（应看到上面 6 条，且不应有任何 SUPABASE_ 开头的项）
+# 验证（应看到上面 7 条；SUPABASE_URL/ANON 不会出现在这里，因为它们由 CLI 注入）
 supabase secrets list
 
-# 4) 部署函数
+# 4) 部署函数（必须在含 supabase/ 目录的项目根目录里运行！）
 supabase functions deploy fetch-schedule
 ```
 
@@ -97,12 +99,14 @@ Dashboard 以 service-role 调用，函数按 `OWNER_USER_ID` 写入，无需额
 
 ## 四、手动触发 / 调试
 
-- 前端「课程表」页的「同步抓取」按钮：以当前用户身份立即触发一次（结果落地后弹「应用抓取结果」横幅）。
-- 命令行直接触发（需已 `supabase link`）：
+- 前端「课程表」页的「同步抓取」按钮：以当前用户身份立即触发一次（结果落地后弹「应用抓取结果」横幅）。这是最常用路径，且不依赖 service-role key。
+- 命令行用 **cron-secret** 触发（走 service-role 写入 owner，等价于每日定时）：
   ```bash
-  supabase functions invoke fetch-schedule --no-verify-jwt
+  curl -s -X POST 'https://zxemcyngesgxpbevdxsu.supabase.co/functions/v1/fetch-schedule' \
+    -H "x-cron-secret: daily-fetch-2026" -H "Content-Type: application/json" -d '{}'
   ```
   返回 `{"ok":true,"teachers":26,"fetchedAt":"..."}` 即成功。
+  > 注：不要用 `Authorization: Bearer <service_role>` 来测——那会落到「用户 JWT」分支并因 service-role 不是用户 token 而报 `no user`。正确做法是用 `x-cron-secret` 头（与 `CRON_SECRET` 一致）。
 
 ## 五、HTTP-only 备选方案（若 Deno 拦截明文 HTTP）
 

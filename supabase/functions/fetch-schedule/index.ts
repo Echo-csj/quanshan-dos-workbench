@@ -15,9 +15,12 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // ---------- 配置（来自 Supabase Secrets） ----------
+// 注意：SUPABASE_URL / SUPABASE_ANON_KEY 由 CLI 部署时自动注入，无需手动设；
+// 但 service-role key 不会自动注入且不能用 SUPABASE_ 前缀的 Secret 设置，
+// 故用自定义名 SERVICE_ROLE_KEY（普通 Secret 允许）承载。
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') || '';
-const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+const SERVICE_ROLE = Deno.env.get('SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const OWNER_USER_ID = Deno.env.get('OWNER_USER_ID') || '';
 const CRON_SECRET = Deno.env.get('CRON_SECRET') || '';
 
@@ -323,25 +326,21 @@ Deno.serve(async (req: Request) => {
     let userId: string | null = null;
     let client: any;
 
-    if (authRaw && SERVICE_ROLE && authRaw === SERVICE_ROLE) {
-      // 由 Supabase 调度（Dashboard Cron 以 service-role 调用）→ 写入指定 owner
+    if (cronSecret && CRON_SECRET && cronSecret === CRON_SECRET && SERVICE_ROLE && OWNER_USER_ID) {
+      // 每日定时 / 手动 cron：带 x-cron-secret → 以 service-role 写入指定 owner
       client = createClient(SUPABASE_URL, SERVICE_ROLE);
-      userId = OWNER_USER_ID || null;
+      userId = OWNER_USER_ID;
     } else if (authRaw) {
-      // 按需触发：以调用用户身份写入（受 RLS 作用域约束）
+      // 前端「同步抓取」按钮：携带用户 JWT → 以该用户身份写入（受 RLS 作用域约束）
       client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         global: { headers: { Authorization: `Bearer ${authRaw}` } },
       });
-      const { data } = await client.auth.getUser();
-      userId = data.user?.id ?? null;
-    } else if (cronSecret && CRON_SECRET && cronSecret === CRON_SECRET && SERVICE_ROLE && OWNER_USER_ID) {
-      // 手动 cron 调用（带 x-cron-secret）→ 写入指定 owner
-      client = createClient(SUPABASE_URL, SERVICE_ROLE);
-      userId = OWNER_USER_ID;
+      const { data, error } = await client.auth.getUser();
+      if (!error && data.user) userId = data.user.id;
     } else {
       return json({ error: 'unauthorized' }, 401);
     }
-    if (!userId) return json({ error: 'no user' }, 401);
+    if (!userId || !client) return json({ error: 'no user' }, 401);
 
     if (!SOURCE_USER || !SOURCE_PASS) {
       return json({ error: '源站账号未配置（SOURCE_USER / SOURCE_PASS）' }, 500);
