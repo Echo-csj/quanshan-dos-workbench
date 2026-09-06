@@ -21,6 +21,24 @@ window.App = window.App || {};
     window.location.hash = '#' + path;
   }
 
+  // 渲染路由处理器，出错时显示可见错误面板而非整屏空白
+  function renderRoute(handler, hash, params) {
+    try {
+      handler(params || {});
+    } catch (err) {
+      console.error('[router] 渲染失败 @ ' + hash, err);
+      var vc = document.getElementById('view-container');
+      if (vc) {
+        var esc = (App.util && App.util.escapeHtml) ? App.util.escapeHtml : function (s) { return String(s); };
+        vc.innerHTML = '<div style="padding:48px 20px;text-align:center;color:#ef4444;font-family:system-ui,sans-serif">'
+          + '<div style="font-size:16px;font-weight:600;margin-bottom:12px">页面渲染出错</div>'
+          + '<pre style="text-align:left;white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px;font-size:12px;color:#333;max-width:680px;margin:0 auto;overflow:auto">'
+          + esc(err && err.stack ? err.stack : String(err)) + '</pre>'
+          + '<div style="margin-top:16px"><button class="btn btn-secondary" onclick="location.reload()">刷新重试</button></div></div>';
+      }
+    }
+  }
+
   // 解析并执行路由
   function resolve() {
     var hash = window.location.hash.replace('#', '') || '/today';
@@ -42,7 +60,7 @@ window.App = window.App || {};
     if (routes[hash]) {
       currentRoute = hash;
       currentParams = {};
-      routes[hash]();
+      renderRoute(routes[hash], hash);
       updateActiveNav(hash);
       return;
     }
@@ -65,7 +83,7 @@ window.App = window.App || {};
         paramNames.forEach(function(name, i) {
           currentParams[name] = match[i + 1];
         });
-        routes[pattern](currentParams);
+        renderRoute(routes[pattern], pattern, currentParams);
         updateActiveNav(hash);
       }
     });
