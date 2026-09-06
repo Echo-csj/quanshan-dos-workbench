@@ -41,9 +41,6 @@ Supabase Edge Function: fetch-schedule
 
 | Secret | 必填 | 说明 | 示例 |
 |---|---|---|---|
-| `SUPABASE_URL` | ✅ | 项目 URL | `https://zxemcyngesgxpbevdxsu.supabase.co` |
-| `SUPABASE_ANON_KEY` | ✅ | anon key（与前端 config.js 同值） | `sb_publishable_...` |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | service-role key（定时任务写入用） | `eyJ...` |
 | `SOURCE_BASE_URL` | ✅ | 源站根地址（**用 http:// 不是 https://**） | `http://zyg.91paike.com` |
 | `SOURCE_MODULE` | ✅ | 课表 module 参数 | `400002` |
 | `SOURCE_USER` | ✅ | 源站登录账号 | `<你的源站账号>` |
@@ -54,6 +51,8 @@ Supabase Edge Function: fetch-schedule
 | `CRON_SECRET` | ⬜ | 手动 cron 调用共享密钥（可选） | `随机串` |
 
 > ⚠️ 不要把真实账号/密码/密钥写进仓库文件。Secrets 只在 Supabase 后台设置。
+> ℹ️ **`SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 不要手动设**——
+> `supabase functions deploy` / `invoke` 时 CLI 会自动注入。手动设会被 CLI 拒绝（提示 `Env name cannot start with SUPABASE_, skipping`）。
 > ⚠️ **HTTP-only 风险**：源站无 HTTPS。Supabase Edge Function(Deno) 对明文 `http://` 出站抓取可能受限；
 > 若部署后报网络错误（如 `error sending request` / `403` from Deno），请改用下方「备选方案」。
 
@@ -74,12 +73,16 @@ supabase --version
 supabase login
 supabase link --project-ref zxemcyngesgxpbevdxsu
 
-# 3) 设置 Secrets（替换为你的真实值；可一次设多个）
-supabase secrets set SUPABASE_URL="https://zxemcyngesgxpbevdxsu.supabase.co" \
-  SUPABASE_ANON_KEY="sb_publishable_..." SUPABASE_SERVICE_ROLE_KEY="eyJ..." \
-  SOURCE_BASE_URL="http://zyg.91paike.com" SOURCE_MODULE="400002" \
-  SOURCE_USER="<你的源站账号>" SOURCE_PASS="<你的源站密码>" \
-  OWNER_USER_ID="a1b2c3..." CRON_SECRET="随机串"
+# 3) 设置自定义 Secrets（SUPABASE_URL/ANON_KEY/SERVICE_ROLE_KEY 由 CLI 自动注入，无需手动设）
+supabase secrets set SOURCE_BASE_URL="http://zyg.91paike.com"
+supabase secrets set SOURCE_MODULE="400002"
+supabase secrets set SOURCE_USER="<你的源站账号>"
+supabase secrets set SOURCE_PASS="<你的源站密码>"
+supabase secrets set OWNER_USER_ID="a1b2c3..."
+supabase secrets set CRON_SECRET="daily-fetch-2026"
+
+# 验证（应看到上面 6 条，且不应有任何 SUPABASE_ 开头的项）
+supabase secrets list
 
 # 4) 部署函数
 supabase functions deploy fetch-schedule
