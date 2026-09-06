@@ -310,7 +310,7 @@
     w.innerHTML = '<div class="sw-box"><span class="sw-dot green"></span>' +
       '<span class="sw-user">' + user + ' · 已同步</span>' +
       (tsOn ? '<button id="sync-tasks" class="sw-btn small">任务协作<span id="ts-badge" class="sw-badge" style="display:none"></span></button>' : '') +
-      '<button id="sync-link" class="sw-btn small">查看联动数据</button>' +
+      (App.isSub && App.isSub() ? '' : '<button id="sync-link" class="sw-btn small">查看联动数据</button>') +
       '<button id="sync-out" class="sw-link">退出</button></div>';
     if (tsOn) el('sync-tasks').onclick = function () { if (App.taskShare && App.taskShare.openInbox) App.taskShare.openInbox(); };
     el('sync-link').onclick = openSharedModal;

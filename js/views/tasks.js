@@ -283,7 +283,9 @@
 
     if (filtered.length === 0) {
       var emptyBody = tasks.length === 0
-        ? '<p>点击「新建任务」手动添加，或点「从时间轴生成」把周/月节律节点一键转为待办。</p><button class="btn btn-primary btn-sm" onclick="App.views.tasks.generateFromTimeline()">从时间轴生成</button>'
+        ? (isSubView()
+            ? '<p>点击「新建任务」手动添加任务。</p>'
+            : '<p>点击「新建任务」手动添加，或点「从时间轴生成」把周/月节律节点一键转为待办。</p><button class="btn btn-primary btn-sm" onclick="App.views.tasks.generateFromTimeline()">从时间轴生成</button>')
         : '<p>当前筛选/搜索条件下没有匹配的任务，试试调整搜索词或清空筛选。</p><button class="btn btn-ghost btn-sm" onclick="App.views.tasks.clearFilters()">清空筛选</button>';
       html += '<div class="empty-state" style="padding:50px"><h4>' + (tasks.length === 0 ? '暂无任务' : '没有匹配的任务') + '</h4>' + emptyBody + '</div>';
       return html;
@@ -305,7 +307,7 @@
     // Row 1: 主操作 + 视图 tabs + 搜索 + 计数
     html += '<div class="tasks-toolbar-row">';
     html += '<button class="btn btn-primary" onclick="App.views.tasks.openTaskModal()">' + App.util.svgIcon('plus', 15) + ' 新建任务</button>';
-    html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
+    if (!isSubView()) html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
     html += '<button class="btn btn-secondary" onclick="App.views.tasks.openPasteModal()">📋 粘贴提取</button>';
     html += '<button class="btn btn-ghost" onclick="App.views.tasks.openRulesModal()">⚙ 提取规则</button>';
     html += '<span class="toolbar-sep"></span>';

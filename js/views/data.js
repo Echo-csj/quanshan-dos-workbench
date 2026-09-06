@@ -23,6 +23,9 @@
     return App.util.judge(v, baseline).level;
   }
 
+  // 是否子工作台视角：子台隐藏「联动数据」标签与入口（与 sub-context.js 的 SUB_WIDE_HIDDEN 对齐）
+  function subView() { return !!(App.isSub && App.isSub()); }
+
   /* ---------------- 路由 ---------------- */
   App.router.register('/data', function() {
     App.router.navigate('/data/baseline');
@@ -44,7 +47,7 @@
     html += tabBtn('hr', '👥 人事数据', tab);
     html += tabBtn('kezu-rank', '🏆 最佳科组排名', tab);
     html += tabBtn('kezu-forecast', '📊 科组生产预测', tab);
-    html += tabBtn('linked', '🔗 联动数据', tab);
+    if (!subView()) html += tabBtn('linked', '🔗 联动数据', tab);
     html += '</div>';
 
     if (tab === 'baseline') html += renderBaseline();
@@ -76,7 +79,7 @@
       html += '<div class="empty-state" style="padding:50px"><h4>暂无数据</h4>' +
         '<p>基准值对标的数据由<b>联动数据</b>自动填充（来源：数据分析工作台·周报快照）。' +
         '若为空，请确认：① 已在数据分析工作台「推送分析到个人台」；② 本工作台已登录同一账号并保持同步。</p>' +
-        '<button class="btn btn-primary btn-sm" onclick="App.router.navigate(\'/data/linked\')">前往联动数据</button></div>';
+        (subView() ? '</div>' : '<button class="btn btn-primary btn-sm" onclick="App.router.navigate(\'/data/linked\')">前往联动数据</button></div>');
       return html;
     }
 
@@ -217,7 +220,7 @@
       html += '<div class="empty-state" style="padding:50px"><h4>暂无数据</h4>' +
         '<p>趋势数据由<b>联动数据</b>自动填充（来源：数据分析工作台·周报快照）。' +
         '随着校区按月推送，历史月份会自动累计，环比/同比将逐步可用。</p>' +
-        '<button class="btn btn-primary btn-sm" onclick="App.router.navigate(\'/data/linked\')">前往联动数据</button></div>';
+        (subView() ? '</div>' : '<button class="btn btn-primary btn-sm" onclick="App.router.navigate(\'/data/linked\')">前往联动数据</button></div>');
       return html;
     }
 
@@ -490,7 +493,7 @@
         '<p>人事数据已改为<b>自动从联动数据提取</b>（来源：数据分析工作台·周报）。请确认：' +
         '① 已在数据分析工作台录入周报并「推送分析到个人台」；② 本工作台已登录同一账号并保持同步。' +
         '数据将在同步后自动填充，无需手动录入。</p>' +
-        '<button class="btn btn-primary btn-sm" onclick="App.router.navigate(\'/data/linked\')">前往联动数据</button></div>';
+        (subView() ? '</div>' : '<button class="btn btn-primary btn-sm" onclick="App.router.navigate(\'/data/linked\')">前往联动数据</button></div>');
       return html;
     }
 

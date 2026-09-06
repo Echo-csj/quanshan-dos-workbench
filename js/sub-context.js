@@ -81,8 +81,8 @@
     project_lead:     ['/data', '/teachers']
   };
 
-  // 所有子工作台统一隐藏的模块（与角色无关）——「设置」对所有子台不可见
-  var SUB_WIDE_HIDDEN = ['/settings'];
+  // 所有子工作台统一隐藏的模块（与角色无关）——「设置」与「联动数据」对所有子台不可见且无法访问
+  var SUB_WIDE_HIDDEN = ['/settings', '/data/linked'];
 
   // 子台生效的完整隐藏路由 = 全员统一隐藏 + 角色差异隐藏
   function subHiddenRoutes() {
