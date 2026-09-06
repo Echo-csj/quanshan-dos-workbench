@@ -58,10 +58,26 @@ interface ScheduleData {
 }
 
 // ---------- 工具 ----------
-function json(body: unknown, status = 200) {
+
+// CORS：supabase-js invoke 会带 Authorization / apikey / x-client-info 这些头，
+// 浏览器预检要求服务器显式 Allow-Headers；带 Authorization 时 Allow-Origin 不能为 *，
+// 故回显请求方的 Origin。
+function buildCorsHeaders(req: Request): Record<string, string> {
+  const origin = req.headers.get('origin') || '*';
+  const reqHeaders = req.headers.get('access-control-request-headers') || '';
+  return {
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': reqHeaders || 'authorization, x-cron-secret, content-type, x-client-info, apikey',
+    'access-control-max-age': '86400',
+    'vary': 'Origin, Access-Control-Request-Headers',
+  };
+}
+
+function json(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', 'access-control-allow-origin': '*' },
+    headers: { 'content-type': 'application/json', ...corsHeaders },
   });
 }
 
@@ -332,8 +348,10 @@ async function loginAndFetch(): Promise<ScheduleData> {
 
 // ---------- 主入口 ----------
 Deno.serve(async (req: Request) => {
+  const cors = buildCorsHeaders(req);
   try {
-    if (req.method === 'OPTIONS') return json({}, 204);
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    if (req.method !== 'POST') return json({ error: 'method not allowed' }, 405, cors);
 
     const authRaw = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '';
     const cronSecret = req.headers.get('x-cron-secret') || '';
@@ -353,12 +371,12 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await client.auth.getUser();
       if (!error && data.user) userId = data.user.id;
     } else {
-      return json({ error: 'unauthorized' }, 401);
+      return json({ error: 'unauthorized' }, 401, cors);
     }
-    if (!userId || !client) return json({ error: 'no user' }, 401);
+    if (!userId || !client) return json({ error: 'no user' }, 401, cors);
 
     if (!SOURCE_USER || !SOURCE_PASS) {
-      return json({ error: '源站账号未配置（SOURCE_USER / SOURCE_PASS）' }, 500);
+      return json({ error: '源站账号未配置（SOURCE_USER / SOURCE_PASS）' }, 500, cors);
     }
 
     const schedule = await loginAndFetch();
@@ -367,11 +385,11 @@ Deno.serve(async (req: Request) => {
     const { error } = await client
       .from('shared_link')
       .upsert({ user_id: userId, kind: KIND, payload }, { onConflict: 'user_id,kind' });
-    if (error) return json({ error: error.message }, 500);
+    if (error) return json({ error: error.message }, 500, cors);
 
-    return json({ ok: true, teachers: schedule.teachers.length, fetchedAt: schedule.fetchedAt });
+    return json({ ok: true, teachers: schedule.teachers.length, fetchedAt: schedule.fetchedAt }, 200, cors);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return json({ error: msg }, 500);
+    return json({ error: msg }, 500, cors);
   }
 });
