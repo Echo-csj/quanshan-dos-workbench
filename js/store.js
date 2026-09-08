@@ -12,6 +12,8 @@ window.App = window.App || {};
   let _data = null;
   let _listeners = [];
   let _saveTimer = null;
+  let _lastSaveError = null;     // 最近一次保存失败的错误信息（null = 当前可正常保存）
+  let _saveErrorNotified = false; // 是否已弹过一次失败 alert，避免反复打断
 
   // --- Default Data Structure ---
   function getDefaultData() {
@@ -275,13 +277,83 @@ window.App = window.App || {};
       try {
         _data.meta.updatedAt = new Date().toISOString();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(_data));
+        _lastSaveError = null;       // 成功，重置
+        _saveErrorNotified = false;
         notifyListeners();
       } catch (e) {
         console.error('Store save failed:', e);
-        // 可能超5MB限制
-        alert('数据保存失败，可能超出存储上限（5MB）。请尝试导出后清理旧数据。');
+        _lastSaveError = {
+          message: (e && e.message) || String(e),
+          name: e && e.name,
+          at: new Date().toISOString()
+        };
+        // 首次失败弹一次 alert（避免反复打断），后续静默——可在「设置」页查看用量与整理
+        if (!_saveErrorNotified) {
+          _saveErrorNotified = true;
+          var usedUnits = 0;
+          try { usedUnits = JSON.stringify(_data).length; } catch (_eu) {}
+          var pct = Math.min(100, Math.round(usedUnits / (5 * 1024 * 1024) * 1000) / 10);
+          try {
+            alert('数据保存失败：' + (_lastSaveError.name || 'Error') + '。\n\n可能超出浏览器存储上限（5MB），当前用量约 ' + pct + '%。\n请前往「设置 → 数据管理」点击「数据整理」释放空间，或先「导出备份」后「重置」。');
+          } catch (_ea) {}
+        }
       }
     }, 200);
+  }
+
+  // --- 存储用量与整理（解决 5MB 上限问题） ---
+  function getStorageUsage() {
+    if (!_data) load();
+    var usedUnits = 0;
+    try { usedUnits = JSON.stringify(_data).length; } catch (_eu) {}
+    var totalUnits = 5 * 1024 * 1024; // 5 MB UTF-16（Chrome/Safari 实际配额；Firefox 10MB，此处取保守下限）
+    return {
+      usedBytes: usedUnits,
+      totalBytes: totalUnits,
+      ratio: totalUnits > 0 ? usedUnits / totalUnits : 0,
+      percent: totalUnits > 0 ? Math.min(100, Math.round(usedUnits / totalUnits * 1000) / 10) : 0
+    };
+  }
+
+  // 压缩/整理数据：裁剪 reports.imports 与超期 reports.monthly，释放存储。
+  // 保留策略：导入日志最近 20 条；月度快照最近 24 个月。
+  function compact(opts) {
+    opts = opts || {};
+    var keepImports = opts.keepImports != null ? opts.keepImports : 20;
+    var keepMonthlyMonths = opts.keepMonthlyMonths != null ? opts.keepMonthlyMonths : 24;
+    if (!_data) load();
+    var beforeUnits = 0;
+    try { beforeUnits = JSON.stringify(_data).length; } catch (_b) {}
+    var actions = [];
+
+    // 1) 裁剪 reports.imports（unshift 写入，索引 0 为最新；保留前 N 条 = 保留最新）
+    if (_data.reports && Array.isArray(_data.reports.imports) && _data.reports.imports.length > keepImports) {
+      var dropped = _data.reports.imports.length - keepImports;
+      _data.reports.imports = _data.reports.imports.slice(0, keepImports);
+      actions.push('导入日志删除 ' + dropped + ' 条（保留最近 ' + keepImports + ' 条）');
+    }
+
+    // 2) 裁剪 reports.monthly（key 为 YYYY-MM；按时间升序，删除最旧的超出部分）
+    if (_data.reports && _data.reports.monthly && typeof _data.reports.monthly === 'object' && !Array.isArray(_data.reports.monthly)) {
+      var months = Object.keys(_data.reports.monthly).sort();
+      if (months.length > keepMonthlyMonths) {
+        var dropMonths = months.slice(0, months.length - keepMonthlyMonths);
+        dropMonths.forEach(function (mk) { delete _data.reports.monthly[mk]; });
+        actions.push('月度快照删除 ' + dropMonths.length + ' 个月（保留最近 ' + keepMonthlyMonths + ' 个月）');
+      }
+    }
+
+    var afterUnits = 0;
+    try { afterUnits = JSON.stringify(_data).length; } catch (_a) {}
+    var freedUnits = Math.max(0, beforeUnits - afterUnits);
+    if (actions.length > 0) save(); // 立即持久化（若仍超限会再次失败，但内存态的清理已生效）
+    return {
+      beforeBytes: beforeUnits,
+      afterBytes: afterUnits,
+      freedBytes: freedUnits,
+      actions: actions,
+      changed: actions.length > 0
+    };
   }
 
   // --- Get value by dot-path ---
@@ -454,7 +526,11 @@ window.App = window.App || {};
       var added = mergeTeacherRoster();
       save();
       return added;
-    }
+    },
+    // —— 存储用量与整理（5MB 上限应对）——
+    getStorageUsage: getStorageUsage,
+    compact: compact,
+    getLastSaveError: function () { return _lastSaveError; }
   };
 
 })();

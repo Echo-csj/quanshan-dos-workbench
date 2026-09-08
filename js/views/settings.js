@@ -84,6 +84,22 @@
     html += '<button class="btn btn-danger btn-ghost" onclick="App.views.settings.confirmReset()">' + App.util.svgIcon('trash-2', 14) + '重置所有数据</button>';
     html += '</div>';
     html += '<p class="form-hint">导出的 JSON 文件包含所有时间节点、报表数据、设置等。可在不同设备间通过导入/导出同步。</p>';
+
+    // —— 存储用量与整理（解决浏览器 5MB 上限问题）——
+    html += '<div style="display:flex;flex-direction:column;gap:8px;padding-top:14px;border-top:1px solid var(--border);margin-top:4px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">';
+    html += '<span style="color:var(--text-secondary)">存储用量（约）</span>';
+    html += '<span id="storage-usage-text" style="font-family:var(--font-mono);font-size:12px;color:var(--text-muted)">--</span>';
+    html += '</div>';
+    html += '<div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden">';
+    html += '<div id="storage-usage-bar" style="height:100%;width:0%;background:var(--primary);transition:width .3s,background .3s"></div>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
+    html += '<button class="btn btn-secondary btn-sm" onclick="App.views.settings.runCompact()">🧹 数据整理</button>';
+    html += '<span class="form-hint" style="margin:0">清理旧的导入日志（保留最近 20 条）与超出保留期的月度快照（保留最近 24 个月）。</span>';
+    html += '</div>';
+    html += '</div>';
+
     var remind = (data.settings && data.settings.remindBackup !== false);
     html += '<div style="display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--border);margin-top:4px">';
     html += '<input type="checkbox" id="remind-backup" ' + (remind ? 'checked' : '') + ' style="width:16px;height:16px" onchange="App.store.set(\'settings.remindBackup\', this.checked); App.util.toast(\'已保存\',\'ok\')">';
@@ -107,7 +123,43 @@
     html += '</div>';
 
     container.innerHTML = html;
+    renderStorageUsage();
   });
+
+  // --- 存储用量显示与整理操作 ---
+  function formatBytes(units) {
+    if (units < 1024) return units + ' B';
+    if (units < 1024 * 1024) return (units / 1024).toFixed(1) + ' KB';
+    return (units / 1024 / 1024).toFixed(2) + ' MB';
+  }
+
+  function renderStorageUsage() {
+    try {
+      var u = App.store.getStorageUsage();
+      var text = formatBytes(u.usedBytes) + ' / ' + formatBytes(u.totalBytes) + '（' + u.percent + '%）';
+      var textEl = document.getElementById('storage-usage-text');
+      var barEl = document.getElementById('storage-usage-bar');
+      if (textEl) textEl.textContent = text;
+      if (barEl) {
+        barEl.style.width = Math.min(100, u.percent) + '%';
+        if (u.percent >= 80) barEl.style.background = 'var(--bad)';
+        else if (u.percent >= 50) barEl.style.background = '#f59e0b';
+        else barEl.style.background = 'var(--primary)';
+      }
+    } catch (_e) {}
+  }
+
+  function runCompact() {
+    if (!window.confirm('将清理：\n• 旧的导入日志（保留最近 20 条）\n• 超出保留期的月度快照（保留最近 24 个月）\n\n建议先「导出备份」再操作。是否继续？')) return;
+    var r;
+    try { r = App.store.compact(); } catch (e) { App.util.toast('整理失败：' + (e && e.message), 'bad'); return; }
+    if (!r || !r.changed) {
+      App.util.toast('当前数据无需整理', 'ok');
+    } else {
+      App.util.toast('已释放 ' + formatBytes(r.freedBytes) + '（' + r.actions.join('；') + '）', 'ok');
+    }
+    renderStorageUsage();
+  }
 
   // --- 模型下拉构建（保留当前值，避免切换时丢失自定义名）---
   function buildModelSelect(id, current, options) {
@@ -323,7 +375,8 @@
         rd.readAsDataURL(file);
       };
       input.click();
-    }
+    },
+    runCompact: runCompact
   };
 
 })();
