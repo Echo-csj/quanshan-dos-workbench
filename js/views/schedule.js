@@ -41,6 +41,15 @@
     return '未设置周范围';
   }
 
+  // 取某月最后一天（YYYY-MM -> YYYY-MM-DD），用于月度模式展示区间
+  function lastDayOfMonth(ym) {
+    var parts = String(ym).split('-');
+    var y = parseInt(parts[0], 10), mo = parseInt(parts[1], 10);
+    if (!y || !mo) return null;
+    var d = new Date(y, mo, 0); // 下个月第 0 天 = 当月最后一天
+    return y + '-' + (mo < 10 ? '0' + mo : '' + mo) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+
   // 读取课表存储（含缺省结构）
   function getSchedule() {
     var d = App.store.get('schedule') || {};
@@ -52,6 +61,8 @@
       screenshotsCount: d.screenshotsCount || 0,
       weekStartDate: d.weekStartDate || null,
       weekEndDate: d.weekEndDate || null,
+      scheduleMode: d.scheduleMode || 'weekly',
+      selMonth: d.selMonth || null,
       periods: (d.periods && d.periods.length) ? d.periods.slice() : DEFAULT_PERIODS.slice(),
       teachers: (d.teachers && d.teachers.length) ? d.teachers.slice() : []
     };
@@ -90,13 +101,26 @@
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:6px">上次更新：' + U.escapeHtml(updatedAt) + U.escapeHtml(srcInfo) + '</p>';
     html += '<p class="form-hint" style="margin-bottom:14px">按教师分块排布（每位教师一行组，周一至周日 7 列、时间节次为行）。导入：选择多张课表截图，由 AI（DeepSeek 视觉模型，复用现有密钥）识别为可编辑课程表；识别后请在网页里核对修正，再点「保存课程表」。无密钥或识别异常时，可直接手动添加教师与节次填写。</p>';
 
-    // 周范围
+    // 日期选择模式（周度 / 月度）
+    var mode = data.scheduleMode || 'weekly';
+    var selMonth = data.selMonth || (data.weekStartDate ? data.weekStartDate.slice(0, 7) : new Date().toISOString().slice(0, 7));
     var ws = data.weekStartDate || thisMonday();
     var we = data.weekEndDate || thisSunday();
+    var rangeStart = ws, rangeEnd = we;
+    if (mode === 'monthly' && selMonth) { rangeStart = selMonth + '-01'; rangeEnd = lastDayOfMonth(selMonth); }
+
     html += '<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12px;color:var(--text-muted)">';
-    html += '<label>本周一 <input type="date" class="form-input" data-field="weekStartDate" value="' + U.escapeAttr(ws) + '" style="width:auto;display:inline-block"></label>';
-    html += '<label>本周日 <input type="date" class="form-input" data-field="weekEndDate" value="' + U.escapeAttr(we) + '" style="width:auto;display:inline-block"></label>';
-    html += '<span style="color:var(--text-muted)">（' + U.escapeHtml(fmtRange(ws, we)) + '）</span>';
+    html += '<div class="seg" style="margin-right:4px">';
+    html += '<button type="button" class="' + (mode === 'weekly' ? 'active' : '') + '" onclick="App.views.schedule.setScheduleMode(\'weekly\')">周度</button>';
+    html += '<button type="button" class="' + (mode === 'monthly' ? 'active' : '') + '" onclick="App.views.schedule.setScheduleMode(\'monthly\')">月度</button>';
+    html += '</div>';
+    if (mode === 'monthly') {
+      html += '<label>月份 <input type="month" class="form-input" data-field="selMonth" value="' + U.escapeAttr(selMonth) + '" style="width:auto;display:inline-block" onchange="App.views.schedule.onMonthChange(this.value)"></label>';
+    } else {
+      html += '<label>本周一 <input type="date" class="form-input" data-field="weekStartDate" value="' + U.escapeAttr(ws) + '" style="width:auto;display:inline-block"></label>';
+      html += '<label>本周日 <input type="date" class="form-input" data-field="weekEndDate" value="' + U.escapeAttr(we) + '" style="width:auto;display:inline-block"></label>';
+    }
+    html += '<span style="color:var(--text-muted)">（' + U.escapeHtml(fmtRange(rangeStart, rangeEnd)) + '）</span>';
     html += '</div>';
 
     // 时间节次编辑器
@@ -515,6 +539,36 @@
     }
   }
 
+  /* ---------------- 日期选择模式（周度 / 月度） ---------------- */
+  // 切换日期选择模式：保留教师/节次等已编辑内容，仅切换日期选取方式
+  function setScheduleMode(mode) {
+    if (mode !== 'weekly' && mode !== 'monthly') return;
+    var data = collectData(); // 保留当前教师表与节次
+    data.scheduleMode = mode;
+    if (mode === 'monthly') {
+      if (!data.selMonth) {
+        data.selMonth = data.weekStartDate ? data.weekStartDate.slice(0, 7) : new Date().toISOString().slice(0, 7);
+      }
+    } else {
+      // 切回周度：清空月度选择（周范围沿用上次/默认，不覆盖既有填写）
+      data.selMonth = null;
+      if (!data.weekStartDate) data.weekStartDate = thisMonday();
+      if (!data.weekEndDate) data.weekEndDate = thisSunday();
+    }
+    App.store.set('schedule', data);
+    renderShell(document.getElementById('view-container'), data);
+  }
+
+  // 月度模式下选取某月：仅更新月份与展示区间，不动周度日期与课表内容
+  function onMonthChange(val) {
+    if (!/^\d{4}-\d{2}$/.test(val)) return;
+    var data = collectData();
+    data.scheduleMode = 'monthly';
+    data.selMonth = val;
+    App.store.set('schedule', data);
+    renderShell(document.getElementById('view-container'), data);
+  }
+
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.schedule = {
@@ -531,7 +585,10 @@
     applyFetchedFromBanner: applyFetchedFromBanner,
     dismissFetchBanner: dismissFetchBanner,
     // 供未来「自动抓取」接入：把抓取/视觉模型返回的 JSON 归一到标准结构
-    normalizeImport: normalizeData
+    normalizeImport: normalizeData,
+    // 日期选择模式（周度 / 月度）
+    setScheduleMode: setScheduleMode,
+    onMonthChange: onMonthChange
   };
 
 })();

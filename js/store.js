@@ -145,6 +145,8 @@ window.App = window.App || {};
         screenshotsCount: 0,
         weekStartDate: null,        // 本周一 (YYYY-MM-DD)
         weekEndDate: null,          // 本周日 (YYYY-MM-DD)
+        scheduleMode: 'weekly',     // 日期选择模式：'weekly'(周度) | 'monthly'(月度)
+        selMonth: null,             // 月度模式选中的月份 YYYY-MM（仅月度模式使用）
         periods: ['08:00-10:00','10:10-12:10','12:50-14:50','15:00-17:00','17:30-19:30','19:40-21:40'],
         teachers: []
       }
