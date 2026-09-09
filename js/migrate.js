@@ -18,11 +18,11 @@
 
   function backupKey() { return '_migration_backup_teacherComm_v1'; }
 
-  // 执行清理
+  // 执行清理（_r1 版本：保证使用旧版 migrate.js 的浏览器也能再次清理）
   App.runMigrations = function () {
     try {
       var store = App.store;
-      if (store.get('settings.migratedTeacherComm')) return;
+      if (store.get('settings.migratedTeacherComm_r1')) return;
 
       // 数据是否就绪：未加载（三个关键 key 均为 undefined）则本次跳过，等下次 init
       if (store.get('timeline.customNodes') === undefined &&
@@ -54,21 +54,26 @@
         if (removedTasks.length) store.set('tasks', keptTasks);
       }
 
+      // 始终设置备份键（即使为空），便于排查「迁移是否曾跑过」
+      store.set(backupKey(), {
+        ts: new Date().toISOString(),
+        customNodes: removedNodes,
+        tasks: removedTasks,
+        version: 'r1'
+      });
+
       if (removedNodes.length || removedTasks.length) {
-        store.set(backupKey(), {
-          ts: new Date().toISOString(),
-          customNodes: removedNodes,
-          tasks: removedTasks
-        });
         var msg = '已清理历史遗留的「教师沟通」类时间轴节点 ' + removedNodes.length +
           ' 个、相关待办 ' + removedTasks.length + ' 条（详见数据备份，可回滚）';
         if (App.util && App.util.toast) App.util.toast(msg, 'ok');
-        console.log('[migration] ' + msg, store.get(backupKey()));
+        console.log('[migration:r1] ' + msg, store.get(backupKey()));
+      } else {
+        console.log('[migration:r1] 无需清理（数据已干净）。备份时间戳已记录。');
       }
 
-      store.set('settings.migratedTeacherComm', true);
+      store.set('settings.migratedTeacherComm_r1', true);
     } catch (e) {
-      console.error('[migration] teacherComm cleanup failed', e);
+      console.error('[migration:r1] teacherComm cleanup failed', e);
     }
   };
 
@@ -86,7 +91,7 @@
         var tasks = store.get('tasks') || [];
         store.set('tasks', tasks.concat(b.tasks));
       }
-      store.set('settings.migratedTeacherComm', false); // 允许再次清理
+      store.set('settings.migratedTeacherComm_r1', false); // 允许再次清理
       if (App.util && App.util.toast) App.util.toast('已回滚教师沟通清理（' + (b.customNodes.length + b.tasks.length) + ' 项）', 'ok');
       console.log('[migration] restored', b);
     } catch (e) {

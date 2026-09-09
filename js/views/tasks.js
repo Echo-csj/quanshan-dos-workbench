@@ -1130,6 +1130,8 @@
     var added = 0;
 
     nodes.forEach(function(node) {
+      // 教师里程碑节点不转化为待办（避免与 teacherMilestones 系统重复）
+      if (node.source === 'teacher-milestone') return;
       if (existingIds.indexOf(node.id) >= 0) return; // 已生成，跳过
       var due = computeDueDate(node);
       tasks.push({
