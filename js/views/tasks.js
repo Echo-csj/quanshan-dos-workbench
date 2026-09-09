@@ -65,6 +65,11 @@
     return !!(t && t.source === 'sub');
   }
 
+  // 多选删除：选择状态（module 级，跨重渲染保留）
+  var _selectMode = false;
+  var _selected = {};            // id -> true
+  var _lastSelectableIds = [];   // 当前可见且可编辑的任务 id（用于「全选」）
+
   // 主工作台：拉取所有子工作台整档，聚合其自建任务（用于总台统一查看，只读）
   async function refreshOwnerSubTasks() {
     if (isSubView()) return;
@@ -268,6 +273,9 @@
     if (hideDone) filtered = filtered.filter(function(t) { return t.status !== 'done'; });
     var doneVisible = tasks.filter(function(t) { return t.status === 'done'; });
 
+    // 多选删除：记录当前可见且可编辑的任务 id（用于「全选」）
+    _lastSelectableIds = filtered.filter(function(t) { return isEditable(t); }).map(function(t) { return t.id; });
+
     var html = '';
 
     // 页头（按当前视图给不同副标题）
@@ -293,6 +301,8 @@
     else if (view.mode === 'list') html += renderListView(filtered, view);
     else if (view.mode === 'date') html += renderDateGroupedView(filtered, view);
     else if (view.mode === 'priority') html += renderPriorityGroupedView(filtered, view);
+
+    if (_selectMode) html += batchBarHtml();
 
     return html;
   }
@@ -324,6 +334,14 @@
     html += '<span class="toolbar-sep"></span>';
     html += '<input class="form-input tasks-search" placeholder="🔍 搜索 标题/负责人/备注" value="' + App.util.escapeAttr(view.search) + '" oninput="App.views.tasks.setSearch(this.value)">';
     html += '<span style="margin-left:auto;font-size:12px;color:var(--text-muted)">活动 ' + filtered.length + ' 条 · 已归档 ' + archivedCount + ' 条</span>';
+    if (!_selectMode) {
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleSelectMode()">☑ 批量选择</button>';
+    } else {
+      html += '<span class="toolbar-select-info">已选 <b id="batch-count-inline">' + selectedCount() + '</b> 项</span>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.tasks.selectAllVisible()">全选</button>';
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.clearSelection()">清空</button>';
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleSelectMode()">退出</button>';
+    }
     html += '</div>';
 
     // Row 2: 筛选 chips + 排序（仅列表）+ 密度 + 隐藏已完成 + 归档
@@ -464,8 +482,8 @@
     var hidden = sorted.length - visible.length;
     var html = '<div class="tasks-list-wrap density-' + view.density + '">';
     html += '<table class="tasks-list-table">';
-    html += '<thead><tr><th>标题</th><th>状态</th><th>优先级</th><th>负责人</th><th>截止</th><th>来源</th><th>操作</th></tr></thead><tbody>';
-    if (visible.length === 0) html += '<tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:30px">无任务</td></tr>';
+    html += '<thead><tr><th class="list-select-h"></th><th>标题</th><th>状态</th><th>优先级</th><th>负责人</th><th>截止</th><th>来源</th><th>操作</th></tr></thead><tbody>';
+    if (visible.length === 0) html += '<tr><td colspan="8" style="text-align:center;color:var(--text-faint);padding:30px">无任务</td></tr>';
     else visible.forEach(function(t) { html += renderListRow(t); });
     html += '</tbody></table>';
     if (hidden > 0) html += '<button class="kanban-expand-btn" onclick="App.views.tasks.toggleGroup(\'' + key + '\')">展开 ' + hidden + ' 条 ▾</button>';
@@ -478,7 +496,13 @@
     var overdue = t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate);
     var readonly = !!t._readOnly;
     var srcLabel = t.source === 'timeline' ? '⏱ 时间轴' : (t.source === 'paste' ? '📋 粘贴' : (t.source === 'teacher-milestone' ? '🎯 里程碑' : (readonly ? '子台' : '手动')));
-    var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + '">';
+    var _selCls = (_selectMode && _selected[t.id] && isEditable(t)) ? ' selected' : '';
+    var html = '<tr class="tasks-list-row' + (overdue ? ' overdue' : '') + _selCls + '">';
+    if (_selectMode && isEditable(t)) {
+      html += '<td class="list-select-cell"><label class="task-select task-select-inline" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"><input type="checkbox" ' + (_selected[t.id] ? 'checked' : '') + ' onchange="App.views.tasks.toggleSelect(\'' + t.id + '\', this.checked)"></label></td>';
+    } else {
+      html += '<td class="list-select-cell"></td>';
+    }
     html += '<td class="list-title"' + (readonly ? '' : ' onclick="App.views.tasks.editTask(\'' + t.id + '\')"') + '>' + App.util.escapeHtml(t.title || '未命名任务');
     if (t.permTags && t.permTags.length) {
       t.permTags.forEach(function (g) {
@@ -597,9 +621,13 @@
     var overdue = t.status !== 'done' && t.dueDate && App.util.isOverdue(t.dueDate);
     var tags = '';
 
-    var html = '<div class="kanban-card" draggable="true" data-id="' + t.id + '" ' +
+    var _selCls = (_selectMode && _selected[t.id] && isEditable(t)) ? ' selected' : '';
+    var html = '<div class="kanban-card' + _selCls + '" draggable="true" data-id="' + t.id + '" ' +
       'ondragstart="App.views.tasks.onDragStart(event, \'' + t.id + '\')" ' +
       'ondragend="App.views.tasks.onDragEnd(event)">';
+    if (_selectMode && isEditable(t)) {
+      html += '<label class="task-select" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"><input type="checkbox" ' + (_selected[t.id] ? 'checked' : '') + ' onchange="App.views.tasks.toggleSelect(\'' + t.id + '\', this.checked)"></label>';
+    }
 
     // 操作按钮
     html += '<div class="kanban-card-actions">';
@@ -874,6 +902,86 @@
         App.store.set('tasks', tasks);
         close();
         App.util.toast('已删除', 'ok');
+        App.router.resolve();
+      }
+    });
+  }
+
+  /* ---------------- 多选删除 ---------------- */
+  function selectedCount() {
+    var n = 0;
+    for (var k in _selected) { if (_selected.hasOwnProperty(k) && _selected[k]) n++; }
+    return n;
+  }
+
+  // 单个勾选：仅更新状态 + 刷新底部操作条（不整体重渲染，避免卡片闪烁/滚动跳动）
+  function toggleSelect(id, on) {
+    if (on) _selected[id] = true; else delete _selected[id];
+    updateBatchBar();
+  }
+
+  // 全选 / 全不选（针对当前可见且可编辑的任务）
+  function toggleSelectAll(on) {
+    if (on) _lastSelectableIds.forEach(function(id) { _selected[id] = true; });
+    else _selected = {};
+    App.router.resolve();
+  }
+  function selectAllVisible() { toggleSelectAll(true); }
+  function clearSelection() { _selected = {}; App.router.resolve(); }
+
+  // 进入 / 退出选择模式
+  function toggleSelectMode() {
+    _selectMode = !_selectMode;
+    if (!_selectMode) _selected = {};
+    App.router.resolve();
+  }
+
+  // 刷新底部操作条（及工具条内联计数）
+  function updateBatchBar() {
+    var cnt = selectedCount();
+    var bar = document.getElementById('tasks-batchbar');
+    if (bar) bar.outerHTML = batchBarHtml();
+    var inline = document.getElementById('batch-count-inline');
+    if (inline) inline.textContent = cnt;
+  }
+
+  function batchBarHtml() {
+    var cnt = selectedCount();
+    var total = _lastSelectableIds.length;
+    var allOn = total > 0 && cnt >= total;
+    var html = '<div id="tasks-batchbar" class="tasks-batchbar">';
+    html += '<label class="batch-master"><input type="checkbox" ' + (allOn ? 'checked' : '') + ' onchange="App.views.tasks.toggleSelectAll(this.checked)"> 全选（' + total + '）</label>';
+    html += '<span class="batch-count">已选 <b id="batch-count">' + cnt + '</b> 项</span>';
+    html += '<div class="batch-actions">';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.clearSelection()">取消选择</button>';
+    html += '<button class="btn btn-danger" onclick="App.views.tasks.deleteSelected()">🗑 删除选中（' + cnt + '）</button>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.tasks.toggleSelectMode()">退出选择</button>';
+    html += '</div></div>';
+    return html;
+  }
+
+  // 批量删除：仅删除可编辑且存在的本地任务；只读/总台任务自动排除
+  function deleteSelected() {
+    var ids = Object.keys(_selected).filter(function(id) { return _selected[id]; });
+    if (!ids.length) { App.util.toast('请先选择要删除的任务', 'warn'); return; }
+    var all = localTasks();
+    var removable = all.filter(function(t) { return ids.indexOf(t.id) >= 0 && isEditable(t); });
+    var skip = ids.length - removable.length;
+    if (!removable.length) { App.util.toast('所选任务均不可删除（只读/总台任务）', 'warn'); return; }
+    App.util.modal({
+      title: '批量删除任务',
+      content: '确定删除选中的 <strong>' + removable.length + '</strong> 条任务？' +
+        (skip ? '（已自动排除 ' + skip + ' 条只读任务）' : '') + ' 此操作不可撤销。',
+      confirmText: '删除', confirmStyle: 'danger',
+      onConfirm: function(close) {
+        var removeSet = {};
+        removable.forEach(function(t) { removeSet[t.id] = true; });
+        var tasks = all.filter(function(t) { return !removeSet[t.id]; });
+        App.store.set('tasks', tasks);
+        ids.forEach(function(id) { delete _selected[id]; });
+        _selectMode = false;
+        close();
+        App.util.toast('已删除 ' + removable.length + ' 条任务', 'ok');
         App.router.resolve();
       }
     });
@@ -2265,6 +2373,13 @@
     openTaskModal: openTaskModal,
     editTask: openTaskModal,
     deleteTask: deleteTask,
+    // —— 多选删除 ——
+    toggleSelectMode: toggleSelectMode,
+    toggleSelect: toggleSelect,
+    toggleSelectAll: toggleSelectAll,
+    selectAllVisible: selectAllVisible,
+    clearSelection: clearSelection,
+    deleteSelected: deleteSelected,
     saveTask: saveTask,
     sendTask: sendTask,
     permTagToggle: permTagToggle,
