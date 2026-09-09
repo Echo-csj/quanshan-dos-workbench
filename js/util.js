@@ -72,6 +72,14 @@ window.App = window.App || {};
     return diff < 7;
   }
 
+  // 判断是否是本月第 n 周（n=1..5）：按「每月 1-7 日=第1周、8-14=第2周…」计算
+  function isNthWeekOfMonth(d, n) {
+    d = d || new Date();
+    if (!n) return false;
+    var weekIndex = Math.floor((d.getDate() - 1) / 7) + 1; // 1..5
+    return weekIndex === n;
+  }
+
   // --- Traffic Light Judgment (红绿灯判定) ---
   function judge(actual, baselineItem) {
     if (!baselineItem) return { level: 'neutral', label: '无基准', color: 'var(--text-faint)' };
@@ -393,6 +401,7 @@ window.App = window.App || {};
     getMonthName: getMonthName,
     daysUntilSunday: daysUntilSunday,
     isLastWeekOfMonth: isLastWeekOfMonth,
+    isNthWeekOfMonth: isNthWeekOfMonth,
     judge: judge,
     truncate: truncate,
     toast: toast,

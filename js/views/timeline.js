@@ -79,6 +79,8 @@
           if (n.monthDay != null) return n.monthDay === date.getDate();
           if (n.weekday != null && n.weekday === date.getDay()) {
             if (n.which === 'last') return App.util.isLastWeekOfMonth(date);
+            var wn = parseInt(n.which, 10);
+            if (!isNaN(wn) && wn >= 1 && wn <= 5) return App.util.isNthWeekOfMonth(date, wn);
             if (n.cron === 'last-week-of-month') return App.util.isLastWeekOfMonth(date);
           }
           return false;
@@ -164,8 +166,11 @@
         if (n.date) return n.date === dateStr;
         if (n.type === 'monthly') {
           if (n.monthDay != null) return n.monthDay === d.getDate();
-          if (n.weekday != null && n.weekday === d.getDay() && n.which === 'last') {
-            return App.util.isLastWeekOfMonth(d);
+          if (n.weekday != null && n.weekday === d.getDay()) {
+            if (n.which === 'last') return App.util.isLastWeekOfMonth(d);
+            var wn = parseInt(n.which, 10);
+            if (!isNaN(wn) && wn >= 1 && wn <= 5) return App.util.isNthWeekOfMonth(d, wn);
+            if (n.cron === 'last-week-of-month') return App.util.isLastWeekOfMonth(d);
           }
           return false;
         }
@@ -235,14 +240,23 @@
     html += '</select></div>';
     // 标题
     html += '<div class="form-group"><label class="form-label">标题</label><input class="form-input" id="node-title" value="' + App.util.escapeAttr(data.title) + '" placeholder="如：集团会议"></div>';
-    // 星期（周度=周几；月度=每月最后一周的星期）
+    // 星期（周度=周几；月度=每月第几周的星期）
     var wdNames = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-    html += '<div class="form-group" id="fg-weekday"><label class="form-label" id="lbl-weekday">星期</label><select class="form-input" id="node-weekday">';
+    html += '<div class="form-group" id="fg-weekday"><label class="form-label" id="lbl-weekday">星期</label><select class="form-input" id="node-weekday" onchange="App.views.timeline.syncMonthlyFields()">';
     html += '<option value="">不指定</option>';
     wdNames.forEach(function(n, i) {
       html += '<option value="' + i + '"' + (weekdayVal === String(i) ? ' selected' : '') + '>' + n + '</option>';
     });
-    html += '</select><p class="form-hint" id="hint-weekday">' + (isMonthly ? '选择后表示「每月最后一周的该星期」出现' : '选择后每周该星期出现此节点') + '</p></div>';
+    html += '</select><p class="form-hint" id="hint-weekday">' + (isMonthly ? '选择后表示「每月第N周的该星期」出现；下方选择「第几周」' : '选择后每周该星期出现此节点') + '</p></div>';
+    // 第几周（仅月度 + 已指定星期时可见）：与上文「星期」组合成「每月第N周的星期X」
+    var whichVal = (data.which == null) ? 'last' : String(data.which);
+    html += '<div class="form-group" id="fg-which" style="display:' + (isMonthly && weekdayVal !== '' ? 'block' : 'none') + '"><label class="form-label">第几周</label><select class="form-input" id="node-which">';
+    html += '<option value="1"' + (whichVal === '1' ? ' selected' : '') + '>第一周</option>';
+    html += '<option value="2"' + (whichVal === '2' ? ' selected' : '') + '>第二周</option>';
+    html += '<option value="3"' + (whichVal === '3' ? ' selected' : '') + '>第三周</option>';
+    html += '<option value="4"' + (whichVal === '4' ? ' selected' : '') + '>第四周</option>';
+    html += '<option value="last"' + (whichVal === 'last' ? ' selected' : '') + '>最后一周</option>';
+    html += '</select><p class="form-hint">与上述「星期」组合，表示「每月第N周的该星期」出现（如每月第一周的周二）。</p></div>';
     // 每月几号（仅月度可见）：设定后每月该日循环出现
     var monthDayVal = (data.monthDay == null) ? '' : String(data.monthDay);
     html += '<div class="form-group" id="fg-monthday" style="display:' + (isMonthly ? 'block' : 'none') + '"><label class="form-label">每月几号（可选，设定后每月该日循环）</label><select class="form-input" id="node-monthday"><option value="">不指定（改用上面星期 / 最后一周）</option>';
@@ -281,16 +295,24 @@
     App.util.modal(modalOpts);
   }
 
-  function toggleNodeFreq() {
+  function syncMonthlyFields() {
     var typeEl = document.getElementById('node-type');
     if (!typeEl) return;
     var monthly = typeEl.value === 'monthly';
     var fgM = document.getElementById('fg-monthday');
     if (fgM) fgM.style.display = monthly ? 'block' : 'none';
+    var wdSel = document.getElementById('node-weekday');
+    var wdSet = wdSel && wdSel.value !== '';
+    var fgW = document.getElementById('fg-which');
+    if (fgW) fgW.style.display = (monthly && wdSet) ? 'block' : 'none';
     var lbl = document.getElementById('lbl-weekday');
-    if (lbl) lbl.textContent = monthly ? '星期（每月最后一周）' : '星期（周几）';
+    if (lbl) lbl.textContent = monthly ? '星期（每月第几周）' : '星期（周几）';
     var hint = document.getElementById('hint-weekday');
-    if (hint) hint.textContent = monthly ? '选择后表示「每月最后一周的该星期」出现' : '选择后每周该星期出现此节点';
+    if (hint) hint.textContent = monthly ? '选择后表示「每月第N周的该星期」出现；下方选择「第几周」' : '选择后每周该星期出现此节点';
+  }
+
+  function toggleNodeFreq() {
+    syncMonthlyFields();
   }
 
   function saveNode(id, close) {
@@ -327,13 +349,14 @@
       delete newNode.which; delete newNode.cron; delete newNode.monthDay;
     } else if (isMonthly) {
       if (monthDay != null) {
-        // 每月几号循环：优先于「最后一周的星期」
+        // 每月几号循环：优先于「第N周的星期」
         newNode.monthDay = monthDay;
         newNode.weekday = null;
         delete newNode.which; delete newNode.cron;
       } else if (weekday != null) {
-        // 每月最后一周的该星期
-        newNode.which = 'last';
+        // 每月第N周的该星期（which: '1'..'4' 或 'last'）
+        var whichSel = document.getElementById('node-which') ? document.getElementById('node-which').value : 'last';
+        newNode.which = (whichSel === 'last' || whichSel === '') ? 'last' : String(parseInt(whichSel, 10));
         delete newNode.cron; delete newNode.monthDay;
       } else {
         // 每月最后一周（不指定星期）
@@ -508,6 +531,7 @@
     },
     openNodeModal: openNodeModal,
     saveNode: saveNode,
+    syncMonthlyFields: syncMonthlyFields,
     deleteNode: deleteNode,
     pickColor: pickColor,
     onDragStart: onDragStart,
