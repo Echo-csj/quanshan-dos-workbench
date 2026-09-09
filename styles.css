@@ -315,6 +315,17 @@ a:hover { color: var(--accent-hover); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-hint { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
 
+/* 从时间轴生成 · 范围选择 */
+.gen-range-modes { display: flex; flex-direction: column; gap: 8px; }
+.gen-mode {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; cursor: pointer; background: var(--surface-2);
+  transition: border-color .15s, background .15s;
+}
+.gen-mode:hover { border-color: var(--accent); }
+.gen-mode input[type="radio"] { accent-color: var(--accent); margin: 0; }
+
 /* --- Table --- */
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table th {

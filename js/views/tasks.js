@@ -1120,70 +1120,219 @@
   }
 
   /* ---------------- 从时间轴生成 ---------------- */
+  /* ---------------- 从时间轴生成（支持时间范围） ---------------- */
+  function atMidnight(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function parseDateStr(s) {
+    if (!s) return null;
+    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+    if (!m) return null;
+    var dt = new Date(+m[1], +m[2] - 1, +m[3]);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  // 计算某月第 which 个 weekday（which: '1'..'4' 或 'last'）
+  function nthWeekdayOfMonth(year, month, weekday, which) {
+    var first = new Date(year, month, 1);
+    var diff = (weekday - first.getDay() + 7) % 7;
+    var firstOcc = new Date(year, month, 1 + diff);
+    if (which === 'last') {
+      var d = new Date(firstOcc);
+      while (true) {
+        var nd = new Date(d); nd.setDate(d.getDate() + 7);
+        if (nd.getMonth() !== month) break;
+        d = nd;
+      }
+      return d;
+    }
+    var n = parseInt(which, 10);
+    if (isNaN(n) || n < 1) return firstOcc;
+    var res = new Date(firstOcc); res.setDate(firstOcc.getDate() + (n - 1) * 7);
+    return (res.getMonth() === month) ? res : null;
+  }
+
+  // 取节点在 [start,end] 范围内的所有发生日期
+  function getNodeOccurrences(node, start, end) {
+    var occs = [];
+    var s = atMidnight(start), e = atMidnight(end);
+    function pushIfIn(d) { var dm = atMidnight(d); if (dm >= s && dm <= e) occs.push(dm); }
+    if (!node) return occs;
+    if (node.date) { var ad = parseDateStr(node.date); if (ad) pushIfIn(ad); return occs; }
+    if (node.type === 'monthly') {
+      if (node.monthDay != null) {
+        var c = new Date(s.getFullYear(), s.getMonth(), 1);
+        while (c <= e) {
+          var y = c.getFullYear(), m = c.getMonth();
+          var last = new Date(y, m + 1, 0).getDate();
+          pushIfIn(new Date(y, m, Math.min(parseInt(node.monthDay, 10), last)));
+          c = new Date(y, m + 1, 1);
+        }
+        return occs;
+      }
+      if (node.weekday != null) {
+        var wd = parseInt(node.weekday, 10);
+        var which = (node.which == null) ? 'last' : String(node.which);
+        var c2 = new Date(s.getFullYear(), s.getMonth(), 1);
+        while (c2 <= e) {
+          var y2 = c2.getFullYear(), m2 = c2.getMonth();
+          var d2 = nthWeekdayOfMonth(y2, m2, wd, which);
+          if (d2) pushIfIn(d2);
+          c2 = new Date(y2, m2 + 1, 1);
+        }
+        return occs;
+      }
+      if (node.cron === 'last-week-of-month') {
+        var c3 = new Date(s.getFullYear(), s.getMonth(), 1);
+        while (c3 <= e) {
+          var y3 = c3.getFullYear(), m3 = c3.getMonth();
+          pushIfIn(new Date(y3, m3 + 1, 0));
+          c3 = new Date(y3, m3 + 1, 1);
+        }
+        return occs;
+      }
+      return occs;
+    }
+    // 每周固定星期节点
+    if (node.weekday != null) {
+      var w = parseInt(node.weekday, 10);
+      var d = new Date(s);
+      while (d <= e) {
+        if (d.getDay() === w) pushIfIn(new Date(d));
+        d.setDate(d.getDate() + 1);
+      }
+    }
+    return occs;
+  }
+
+  // 本周（周一至周日）
+  function weekRangeThisWeek() {
+    var now = new Date();
+    var day = now.getDay(); // 0=周日
+    var mondayOffset = (day === 0) ? -6 : (1 - day);
+    var monday = new Date(now); monday.setDate(now.getDate() + mondayOffset);
+    var sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+    return { start: atMidnight(monday), end: atMidnight(sunday) };
+  }
+
+  // 入口：打开范围选择弹窗
   function generateFromTimeline() {
+    var wr = weekRangeThisWeek();
+    var defStart = App.util.formatDate(wr.start, 'YYYY-MM-DD');
+    var defEnd = App.util.formatDate(wr.end, 'YYYY-MM-DD');
+    var html = '' +
+      '<div class="form-group"><label class="form-label">生成范围</label>' +
+        '<div class="gen-range-modes">' +
+          '<label class="gen-mode"><input type="radio" name="genmode" value="week" checked> 本周（周一至周日）</label>' +
+          '<label class="gen-mode"><input type="radio" name="genmode" value="custom"> 自定义范围</label>' +
+          '<label class="gen-mode"><input type="radio" name="genmode" value="all"> 全部未来节点</label>' +
+        '</div>' +
+      '</div>' +
+      '<div id="gen-custom" style="display:none">' +
+        '<div class="form-row">' +
+          '<div class="form-group"><label class="form-label">起始日期</label><input class="form-input" type="date" id="gen-start" value="' + defStart + '"></div>' +
+          '<div class="form-group"><label class="form-label">结束日期</label><input class="form-input" type="date" id="gen-end" value="' + defEnd + '"></div>' +
+        '</div>' +
+      '</div>' +
+      '<p class="muted" style="font-size:12px;line-height:1.6;margin-top:8px">结果按日期排序，每条待办会自动标注所属日期（含星期）；已生成的日期不会重复生成。</p>';
+
+    App.util.modal({
+      title: '从时间轴生成待办',
+      content: html,
+      confirmText: '生成',
+      onConfirm: function(close) {
+        var mode = (document.querySelector('input[name="genmode"]:checked') || {}).value || 'week';
+        var start, end, label;
+        if (mode === 'week') {
+          start = wr.start; end = wr.end; label = '本周（' + defStart + ' ~ ' + defEnd + '）';
+        } else if (mode === 'custom') {
+          var sv = document.getElementById('gen-start').value;
+          var ev = document.getElementById('gen-end').value;
+          if (!sv || !ev) { App.util.toast('请填写起始与结束日期', 'warn'); return; }
+          start = parseDateStr(sv); end = parseDateStr(ev);
+          if (!start || !end) { App.util.toast('日期格式无效', 'warn'); return; }
+          if (start > end) { var tmp = start; start = end; end = tmp; }
+          label = '自定义（' + sv + ' ~ ' + ev + '）';
+        } else {
+          start = atMidnight(new Date());
+          end = new Date(start); end.setFullYear(end.getFullYear() + 5);
+          label = '全部未来';
+        }
+        close();
+        generateFromTimelineRange(start, end, label);
+      }
+    });
+
+    // 模式切换显示/隐藏自定义日期
+    setTimeout(function() {
+      var radios = document.querySelectorAll('input[name="genmode"]');
+      for (var i = 0; i < radios.length; i++) {
+        radios[i].addEventListener('change', function() {
+          var box = document.getElementById('gen-custom');
+          if (box) box.style.display = (document.querySelector('input[name="genmode"]:checked').value === 'custom') ? 'block' : 'none';
+        });
+      }
+    }, 0);
+  }
+
+  // 实际生成（按范围，结果按日期排序）
+  function generateFromTimelineRange(start, end, label) {
     var data = App.store.getData();
     var nodes = ((data.timeline && data.timeline.fixedNodes) || []).concat((data.timeline && data.timeline.customNodes) || []);
     var tasks = localTasks();
     var isSub = isSubView();
     var myName = isSub ? (App.subContext.myName() || '') : '';
-    var existingIds = tasks.map(function(t) { return t.timelineNodeId; });
-    var added = 0;
 
+    // 已生成集合（兼容旧版 timelineNodeId=node.id 的单日期任务）
+    var existing = {};
+    tasks.forEach(function(t) {
+      if (t.timelineNodeId) {
+        existing[t.timelineNodeId] = true;
+        if (t.timelineNodeId.indexOf('@') < 0 && t.dueDate) existing[t.timelineNodeId + '@' + t.dueDate] = true;
+      }
+    });
+
+    var newTasks = [];
     nodes.forEach(function(node) {
       // 教师里程碑节点不转化为待办（避免与 teacherMilestones 系统重复）
       if (node.source === 'teacher-milestone') return;
-      if (existingIds.indexOf(node.id) >= 0) return; // 已生成，跳过
-      var due = computeDueDate(node);
-      tasks.push({
-        id: App.store.uid('task'),
-        title: node.title,
-        priority: defaultPriority(node),
-        assignee: isSub ? (myName || 'DOS') : 'DOS',
-        dueDate: due ? App.util.formatDate(due, 'YYYY-MM-DD') : '',
-        status: 'todo',
-        source: isSub ? 'sub' : 'timeline',
-        scope: 'personal',
-        timelineNodeId: node.id,
-        note: node.note || '',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+      var occs = getNodeOccurrences(node, start, end);
+      occs.forEach(function(d) {
+        var ds = App.util.formatDate(d, 'YYYY-MM-DD');
+        var occId = node.id + '@' + ds;
+        if (existing[occId]) return;
+        var weekday = App.util.getWeekdayName(d);
+        newTasks.push({
+          id: App.store.uid('task'),
+          title: App.util.formatDate(d, 'MM/DD') + ' ' + weekday + ' · ' + node.title,
+          priority: defaultPriority(node),
+          assignee: isSub ? (myName || 'DOS') : 'DOS',
+          dueDate: ds,
+          status: 'todo',
+          source: isSub ? 'sub' : 'timeline',
+          scope: 'personal',
+          timelineNodeId: occId,
+          note: (node.note ? node.note : ''),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
       });
-      added++;
     });
 
+    if (newTasks.length === 0) {
+      App.util.toast('该范围内没有可生成的新待办（均已生成或无可匹配节点）', 'ok');
+      App.router.resolve();
+      return;
+    }
+
+    newTasks.sort(function(a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); });
+    tasks = tasks.concat(newTasks);
     App.store.set('tasks', tasks);
-    App.util.toast(added > 0 ? ('已从时间轴生成 ' + added + ' 条待办') : '时间轴节点已全部生成，无新增', 'ok');
+    App.util.toast('已生成 ' + newTasks.length + ' 条待办（' + label + '）', 'ok');
     App.router.resolve();
   }
 
   function defaultPriority(node) {
     if (['sun-report', 'tue-super', 'tue-edu', 'month-prearrange', 'month-schedule'].indexOf(node.id) >= 0) return 'high';
     return 'normal';
-  }
-
-  function computeDueDate(node) {
-    var now = new Date();
-    // 固定星期节点 → 下一个该星期几
-    if (node.weekday != null && typeof node.weekday === 'number' && node.type !== 'monthly') {
-      var d = new Date(now);
-      var diff = node.weekday - d.getDay();
-      if (diff <= 0) diff += 7;
-      d.setDate(d.getDate() + diff);
-      return d;
-    }
-    // 月度节点 → 本月/下月最后一周的该星期几
-    if (node.type === 'monthly') {
-      var wd = (node.weekday != null && typeof node.weekday === 'number') ? node.weekday : 3;
-      for (var m = now.getMonth(); m <= now.getMonth() + 2; m++) {
-        var year = now.getFullYear() + Math.floor(m / 12);
-        var month = ((m % 12) + 12) % 12;
-        var lastDay = new Date(year, month + 1, 0);
-        var d2 = new Date(lastDay);
-        while (d2.getDay() !== wd) d2.setDate(d2.getDate() - 1);
-        if (d2 >= now) return d2;
-      }
-    }
-    return null;
   }
 
   /* ---------------- 粘贴提取（规则驱动 + 即时校验） ---------------- */
