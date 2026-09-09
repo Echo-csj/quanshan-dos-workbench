@@ -196,6 +196,24 @@
     pEl.value = f.predYear + ' 年 ' + f.predMonth + ' 月';
     if (consEl) consEl.innerHTML = f.consistHTML || '';
     var h = statCardsHTML(f.stat);
+    // —— 科组参考月单科及课时 / 科组G1·G2·G3目标（与核心看板口径一致；数据来自联动模型 f.model）——
+    if (f.model && f.model.rows && f.model.rows.length) {
+      var Gc = f.model.Gcfg || { G1: 1.00, G2: 1.10, G3: 1.25 };
+      h += '<div class="lk-sub-h">科组参考月单科及课时（来自最佳科组）</div>';
+      h += '<div class="preview-note">单科数 / 课时取自参考月「最佳科组」；周数为预测月自然周数。可在数据分析台「科组生产指标」中编辑后重新推送。</div>';
+      h += '<div class="lk-table-wrap"><table><thead><tr><th>科组名称</th><th class="num">单科数</th><th class="num">上月课时</th><th class="num">周数</th></tr></thead><tbody>';
+      f.model.rows.forEach(function (r) {
+        h += '<tr><td>' + esc(r.name) + '</td><td class="num">' + fmt(r.s) + '</td><td class="num">' + fmt(r.h) + '</td><td class="num">' + fmt(r.w) + '</td></tr>';
+      });
+      h += '</tbody><tfoot><tr><td class="total-label">校区总计</td><td class="num">' + fmt(f.model.S) + '</td><td class="num">' + fmt(f.model.H) + '</td><td class="num">—</td></tr></tfoot></table></div>';
+      h += '<div class="lk-sub-h">科组G1 / G2 / G3目标</div>';
+      h += '<div class="preview-note">完成率 = 四科组预测之和 / C；100%→G1，110%→G2，125%→G3。各档总盘 = C × 档位，按单科占比分解到每科组。</div>';
+      h += '<div class="lk-table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">G1 目标（100%）</th><th class="num">G2 目标（110%）</th><th class="num">G3 目标（125%）</th></tr></thead><tbody>';
+      f.model.rows.forEach(function (r) {
+        h += '<tr><td>' + esc(r.name) + '</td><td class="num">' + fmt(r.s) + '</td><td class="num">' + fmt(r.G1) + '</td><td class="num">' + fmt(r.G2) + '</td><td class="num">' + fmt(r.G3) + '</td></tr>';
+      });
+      h += '</tbody><tfoot><tr><td class="total-label">校区总计</td><td class="num">' + fmt(f.model.S) + '</td><td class="num">' + fmt(f.C * Gc.G1) + '</td><td class="num">' + fmt(f.C * Gc.G2) + '</td><td class="num">' + fmt(f.C * Gc.G3) + '</td></tr></tfoot></table></div>';
+    }
     var maxW = f.wide ? f.wide.maxW : 0;
     var actuals = kezuActualRecs(snap).filter(function (r) { return r.year === f.predYear && r.month === f.predMonth; });
     var trackTable = maxW > 0 ? renderWideTable(f.wide) : '<div class="preview-note">最佳科组缺少周数数据，无法生成周度汇总表。</div>';
@@ -447,3 +465,4 @@
 
   App.views.linkedKezu = { renderRank: mountRank, renderForecast: mountForecast, render: render };
 })();
+
