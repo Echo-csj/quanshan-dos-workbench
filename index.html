@@ -165,6 +165,7 @@
 <script src="js/master-hub.js?v=20260829i"></script>
 <script src="js/views/org-admin.js?v=20260829i"></script>
 <script src="js/auth-gate.js?v=20260829s"></script>
+<script src="js/migrate.js?v=20260909m"></script>
 
 <!-- ===== 初始化 ===== -->
 <script>
@@ -202,6 +203,9 @@
   function init() {
     // 确保数据已加载
     App.store.getData();
+
+    // 启动前执行一次性数据迁移（幂等、可回滚）：清理遗留的教师沟通时间轴节点
+    if (App.runMigrations) App.runMigrations();
 
     // 更新顶部信息
     updateTopbar();
