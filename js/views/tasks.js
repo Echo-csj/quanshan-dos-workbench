@@ -1946,7 +1946,9 @@
 
       var item = extractOne(content, base, rule, currentWeekBias);
       if (item && item.title && isMeaningfulTitle(item.title)) {
-        if (!item.assignee && currentOwner) item.assignee = currentOwner;
+        // 一旦识别到「XXX本周…安排：」分组标题，后续条目负责人统一归为该 owner；
+        // 这比 dash/冒号等局部标记优先级更高，避免「叶栖桐-童钰琪」把被听课人误当负责人。
+        if (currentOwner) item.assignee = currentOwner;
         items.push(item);
       } else if (item) {
         skipped.push({ line: line, reason: '标题无意义' });
@@ -2209,7 +2211,9 @@
       // 中文点时间：10点 / 15点半 / 10点30分
       .replace(/\d{1,2}\s*点\s*(?:半|\d{1,2}\s*分)?/g, ' ')
       // 13:00 / 9:30 / 14:30（不再含点号，避免 9.10 被误判为时间）
-      .replace(/[01]?\d[:：][0-5]\d/g, ' ');
+      .replace(/[01]?\d[:：][0-5]\d/g, ' ')
+      // 残留日期前缀：周六： / 星期六： / 周日:
+      .replace(/(?:周|星期)[一二三四五六日天]\s*[:：]/g, ' ');
   }
 
   function stripPriority(s) {
@@ -2250,19 +2254,8 @@
     // 1) HH:MM-HH:MM 区间（冒号）
     var rm = text.match(/\b([01]?\d|2[0-3])[:：]([0-5]\d)\s*[-–—~到至]\s*([01]?\d|2[0-3])[:：]([0-5]\d)\b/);
     if (rm) return rm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
-    // 2) 中文点时间：N点 / N点半 / N点M分
-    var m = text.match(/(\d{1,2})\s*点\s*(?:半|(\d{1,2})\s*分)?/);
-    if (m) {
-      var h = +m[1];
-      if (h > 23) return '';
-      var mi = m[2] === '半' ? 30 : (m[3] != null ? +m[3] : 0);
-      if (mi > 59) mi = 0;
-      return (h < 10 ? '0' + h : '' + h) + ':' + (mi < 10 ? '0' + mi : '' + mi);
-    }
-    // 3) 单点 HH:MM（冒号）
-    var tm = text.match(/\b([01]?\d|2[0-3])[:：]([0-5]\d)\b/);
-    if (tm) return tm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
-    // 4) 区间 HH-HH（无冒号）：仅当紧跟星期 或 后缀「点」，避免把日期 8-20 误判为时间
+    // 2) 区间 HH-HH（无冒号）：必须紧跟星期 或 后缀「点」，避免把日期 8-20 误判为时间
+    //    放在「N点」之前，避免「15-17点」被拆成单点 17:00
     var rng = text.match(/(?:周[一二三四五六日天]\s*|星期[一二三四五六日天]\s*)?(\d{1,2})\s*[-–—~到至]\s*(\d{1,2})\s*点?/);
     if (rng) {
       var a = +rng[1], b = +rng[2];
@@ -2274,6 +2267,18 @@
         return fa + '-' + fb;
       }
     }
+    // 3) 中文点时间：N点 / N点半 / N点M分
+    var m = text.match(/(\d{1,2})\s*点\s*(?:半|(\d{1,2})\s*分)?/);
+    if (m) {
+      var h = +m[1];
+      if (h > 23) return '';
+      var mi = m[2] === '半' ? 30 : (m[3] != null ? +m[3] : 0);
+      if (mi > 59) mi = 0;
+      return (h < 10 ? '0' + h : '' + h) + ':' + (mi < 10 ? '0' + mi : '' + mi);
+    }
+    // 4) 单点 HH:MM（冒号）
+    var tm = text.match(/\b([01]?\d|2[0-3])[:：]([0-5]\d)\b/);
+    if (tm) return tm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
     return '';
   }
 
