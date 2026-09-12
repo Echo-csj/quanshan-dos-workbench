@@ -140,6 +140,31 @@ create table if not exists org_member (
 );
 alter table org_member enable row level security;
 
+-- 辅助函数：打破 RLS 递归（security definer 以创建者权限运行，不触发目标表的 RLS）
+--     否则 org ↔ org_member 的策略会互相查对方表，造成 infinite recursion
+--     必须在引用它们的 RLS 策略之前定义
+
+create or replace function public.is_org_owner(p_org_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (select 1 from org where id = p_org_id and owner_user_id = auth.uid());
+$$;
+
+create or replace function public.is_org_member(p_org_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (select 1 from org_member where org_id = p_org_id and user_id = auth.uid());
+$$;
+
+create or replace function public.is_my_org_member(p_user_id uuid)
+returns boolean language sql security definer set search_path = public
+as $$
+  select exists (
+    select 1 from org o join org_member m on m.org_id = o.id
+    where o.owner_user_id = auth.uid() and m.user_id = p_user_id
+  );
+$$;
+
 drop policy if exists "member_owner_all" on org_member;
 create policy "member_owner_all" on org_member
   for all using (public.is_org_owner(org_member.org_id));
@@ -276,29 +301,6 @@ create policy "log_owner_read" on share_log
 drop policy if exists "log_self_read" on share_log;
 create policy "log_self_read" on share_log
   for select using (target_user_id = auth.uid() or actor_user_id = auth.uid());
-
--- 7.6b 辅助函数：打破 RLS 递归（security definer 以创建者权限运行，不触发目标表的 RLS）
---     否则 org ↔ org_member 的策略会互相查对方表，造成 infinite recursion
-create or replace function public.is_org_owner(p_org_id uuid)
-returns boolean language sql security definer set search_path = public
-as $$
-  select exists (select 1 from org where id = p_org_id and owner_user_id = auth.uid());
-$$;
-
-create or replace function public.is_org_member(p_org_id uuid)
-returns boolean language sql security definer set search_path = public
-as $$
-  select exists (select 1 from org_member where org_id = p_org_id and user_id = auth.uid());
-$$;
-
-create or replace function public.is_my_org_member(p_user_id uuid)
-returns boolean language sql security definer set search_path = public
-as $$
-  select exists (
-    select 1 from org o join org_member m on m.org_id = o.id
-    where o.owner_user_id = auth.uid() and m.user_id = p_user_id
-  );
-$$;
 
 -- 7.7 updated_at 自动刷新（复用第 5 节的 touch_updated_at）
 drop trigger if exists trg_org on org;
