@@ -86,6 +86,30 @@ window.App = window.App || {};
               skipReply: false, skipSectionHeaders: false, skipNegative: false,
               skipEmailLines: false, skipPreface: false, skipNotice: false, groupBackfill: false
             }
+          },
+          {
+            id: 'rule_listen',
+            name: '听课安排',
+            enabled: true,
+            isDefault: false,
+            triggers: ['听课安排'],       // 粘贴内容含「听课安排」即优先选用本规则
+            lineDelimiter: '\\n',
+            rowDelimiter: '',             // 按整行智能提取
+            fields: {
+              title:    { key:'title',    label:'事项',    enabled:true,  required:true,  method:'remainder' },
+              dueDate:  { key:'dueDate',  label:'日期',    enabled:true,  required:false, method:'auto',
+                          formats:['WEEKDAY','MD_CN','MD_DOT','MD_HAO','YMD','RELATIVE','RANGE'], rangeLatest:true },
+              time:     { key:'time',     label:'时间',     enabled:true,  required:false, method:'auto' },
+              assignee: { key:'assignee', label:'负责人',   enabled:true,  required:false, method:'auto',
+                          // 注意：不带 dash 标记——听课里「叶栖桐-童钰琪」的连字符是"听课人-被听课人"，不是负责人
+                          markers:['at','colon','parens','role'] },
+              priority: { key:'priority', label:'优先级',   enabled:true,  required:false, method:'auto',
+                          keywords:['紧急','加急','特急','尽快','重要','高优'] }
+            },
+            lineFilters: {
+              skipReply: true, skipSectionHeaders: true, skipNegative: true,
+              skipEmailLines: true, skipPreface: true, skipNotice: true, groupBackfill: false
+            }
           }
         ]
       },

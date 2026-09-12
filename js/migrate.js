@@ -18,10 +18,45 @@
 
   function backupKey() { return '_migration_backup_teacherComm_v1'; }
 
+  // 老用户补发「听课安排」提取规则（幂等；与 store.js 种子保持一致）
+  var LISTEN_RULE = {
+    id: 'rule_listen',
+    name: '听课安排',
+    enabled: true,
+    isDefault: false,
+    triggers: ['听课安排'],
+    lineDelimiter: '\\n',
+    rowDelimiter: '',
+    fields: {
+      title:    { key: 'title',    label: '事项',   enabled: true, required: true,  method: 'remainder' },
+      dueDate:  { key: 'dueDate',  label: '日期',   enabled: true, required: false, method: 'auto',
+                  formats: ['WEEKDAY', 'MD_CN', 'MD_DOT', 'MD_HAO', 'YMD', 'RELATIVE', 'RANGE'], rangeLatest: true },
+      time:     { key: 'time',     label: '时间',   enabled: true, required: false, method: 'auto' },
+      assignee: { key: 'assignee', label: '负责人', enabled: true, required: false, method: 'auto',
+                  markers: ['at', 'colon', 'parens', 'role'] },
+      priority: { key: 'priority', label: '优先级', enabled: true, required: false, method: 'auto',
+                  keywords: ['紧急', '加急', '特急', '尽快', '重要', '高优'] }
+    },
+    lineFilters: {
+      skipReply: true, skipSectionHeaders: true, skipNegative: true,
+      skipEmailLines: true, skipPreface: true, skipNotice: true, groupBackfill: false
+    }
+  };
+
+  function ensureListenRule(store) {
+    var rules = store.get('settings.extractionRules');
+    if (!Array.isArray(rules)) return;
+    if (rules.some(function (r) { return r && r.id === 'rule_listen'; })) return;
+    rules.push(LISTEN_RULE);
+    store.set('settings.extractionRules', rules);
+    console.log('[migration] 已为老用户补充「听课安排」提取规则');
+  }
+
   // 执行清理（_r1 版本：保证使用旧版 migrate.js 的浏览器也能再次清理）
   App.runMigrations = function () {
     try {
       var store = App.store;
+      ensureListenRule(store);   // 幂等：老用户补发「听课安排」提取规则
       if (store.get('settings.migratedTeacherComm_r1')) return;
 
       // 数据是否就绪：未加载（三个关键 key 均为 undefined）则本次跳过，等下次 init

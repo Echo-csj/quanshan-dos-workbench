@@ -1884,6 +1884,8 @@
     var lines = (text || '').split(/\r?\n/);
     var items = [], skipped = [], errors = [];
     var lastGroupCount = 0, inReply = false;
+    var currentOwner = '';        // 分组标题（如「付静雯本周听课安排：」）识别出的负责人，向下回填给后续条目
+    var currentWeekBias = false;  // 处于「本周…安排」分组内时，无方向词的星期按"本周"解析（而非下一个该星期）
     var lf = rule.lineFilters || {};
 
     lines.forEach(function (orig) {
@@ -1911,6 +1913,16 @@
       var content = stripLeading(line);
       if (!content) return;
 
+      // 分组标题：OWNER 本周 … 安排（如「DOS本周听课安排：」「付静雯本周听课安排：」）
+      // → 跳过该行，并记录负责人，回填给后续条目（负责人空缺时）
+      var gh = matchGroupHeader(content);
+      if (gh !== null) {
+        currentOwner = gh;
+        currentWeekBias = true;   // 分组标题必含「本周」，后续条目按本周解析星期
+        skipped.push({ line: line, reason: '分组标题' });
+        return;
+      }
+
       if (lf.groupBackfill) {
         var gfm = content.match(/^以上\s*([一二三四五六七八九十两俩\d]+)\s*项/);
         if (gfm) {
@@ -1932,8 +1944,9 @@
       var hdrReason = classifyAsHeader(content, rule);
       if (hdrReason) { skipped.push({ line: line, reason: hdrReason }); return; }
 
-      var item = extractOne(content, base, rule);
+      var item = extractOne(content, base, rule, currentWeekBias);
       if (item && item.title && isMeaningfulTitle(item.title)) {
+        if (!item.assignee && currentOwner) item.assignee = currentOwner;
         items.push(item);
       } else if (item) {
         skipped.push({ line: line, reason: '标题无意义' });
@@ -2040,6 +2053,15 @@
     return false;
   }
 
+  // 分组标题识别：OWNER 本周 … 安排（如「DOS本周听课安排：」「付静雯本周听课安排：」「本周事项安排：」）
+  // 返回 owner 名（可能为空字符串），非分组标题返回 null
+  // 说明：此类行是"下面这些条目的归属/负责人"说明，不是待办，应跳过并把 owner 回填给后续条目
+  function matchGroupHeader(s) {
+    var m = s.match(/^(?:([\u4e00-\u9fa5A-Za-z·]{1,8})\s*)?本周[^\n]*?安排\s*[:：]?\s*$/);
+    if (m) return (m[1] || '').trim();
+    return null;
+  }
+
   // 标题必须包含至少 2 个有效字符（排除纯标点/纯数字/纯空白）
   function isMeaningfulTitle(s) {
     if (!s) return false;
@@ -2058,7 +2080,7 @@
    *   4) 标题 = 原行 - 日期片段 - 星期括号 - 优先级词 - 负责人残留 - emoji - 边界标点
    *   5) compute confidence + warnings
    */
-  function extractOne(line, base, rule) {
+  function extractOne(line, base, rule, weekBias) {
     var raw = line;
     var f = (rule && rule.fields) || {};
 
@@ -2094,14 +2116,19 @@
     var df = f.dueDate;
     if (df && df.enabled !== false) {
       if (df.method === 'column' && typeof df.col === 'number' && cols && cols[df.col] !== undefined) {
-        var dpc = parseDate(cols[df.col], base, rule);
+        var dpc = parseDate(cols[df.col], base, rule, weekBias);
         dueDate = dpc.date || '';
         timeText = dpc.timeText || '';
       } else {
-        var dp = parseDate(working, base, rule);
+        var dp = parseDate(working, base, rule, weekBias);
         dueDate = dp.date || '';
         timeText = dp.timeText || '';
         working = stripDateAndWeekday(working);
+        // 已解析为日期的星期/相对词从标题剔除，避免与日期列重复（仅听课安排规则启用，避免影响通用规则标题）
+        if (dp && dp.raw && rule && rule.id === 'rule_listen' &&
+            /^((本周|这周|下周|下个?周|上周|上個?周)\s*)?(?:周|星期)[一二三四五六日天]$|^[今明后]天$/.test(dp.raw)) {
+          working = working.replace(dp.raw, ' ');
+        }
       }
     }
 
@@ -2177,6 +2204,10 @@
       .replace(/\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g, ' ')
       // （周三）/ (周四)
       .replace(/[（(]\s*[周星期]\s*[一二三四五六日天]\s*[）)]/g, ' ')
+      // 区间时间（先去，避免「15-17点」被点时间正则截断）：周六17-19 / 15-17点
+      .replace(/(?:周[一二三四五六日天]\s*|星期[一二三四五六日天]\s*)?\d{1,2}\s*[-–—~到至]\s*\d{1,2}\s*点?/g, ' ')
+      // 中文点时间：10点 / 15点半 / 10点30分
+      .replace(/\d{1,2}\s*点\s*(?:半|\d{1,2}\s*分)?/g, ' ')
       // 13:00 / 9:30 / 14:30（不再含点号，避免 9.10 被误判为时间）
       .replace(/[01]?\d[:：][0-5]\d/g, ' ');
   }
@@ -2210,6 +2241,43 @@
   }
 
   /**
+   * 时间片段提取（与日期解析解耦，供 time 字段与标题清洗共用）
+   * 支持：HH:MM（冒号） / N点 / N点半 / N点M分 / HH-HH 区间（仅当紧跟星期或后缀「点」）
+   * 返回归一化字符串，如 "10:00" / "15:00-17:00"；无则返回 ''
+   */
+  function extractTimeText(text) {
+    if (!text) return '';
+    // 1) HH:MM-HH:MM 区间（冒号）
+    var rm = text.match(/\b([01]?\d|2[0-3])[:：]([0-5]\d)\s*[-–—~到至]\s*([01]?\d|2[0-3])[:：]([0-5]\d)\b/);
+    if (rm) return rm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
+    // 2) 中文点时间：N点 / N点半 / N点M分
+    var m = text.match(/(\d{1,2})\s*点\s*(?:半|(\d{1,2})\s*分)?/);
+    if (m) {
+      var h = +m[1];
+      if (h > 23) return '';
+      var mi = m[2] === '半' ? 30 : (m[3] != null ? +m[3] : 0);
+      if (mi > 59) mi = 0;
+      return (h < 10 ? '0' + h : '' + h) + ':' + (mi < 10 ? '0' + mi : '' + mi);
+    }
+    // 3) 单点 HH:MM（冒号）
+    var tm = text.match(/\b([01]?\d|2[0-3])[:：]([0-5]\d)\b/);
+    if (tm) return tm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
+    // 4) 区间 HH-HH（无冒号）：仅当紧跟星期 或 后缀「点」，避免把日期 8-20 误判为时间
+    var rng = text.match(/(?:周[一二三四五六日天]\s*|星期[一二三四五六日天]\s*)?(\d{1,2})\s*[-–—~到至]\s*(\d{1,2})\s*点?/);
+    if (rng) {
+      var a = +rng[1], b = +rng[2];
+      var hasWeekday = /周[一二三四五六日天]|星期[一二三四五六日天]/.test(rng[0]);
+      var hasDian = /点$/.test(rng[0]);
+      if ((hasWeekday || hasDian) && a <= 23 && b <= 23) {
+        var fa = (a < 10 ? '0' + a : '' + a) + ':00';
+        var fb = (b < 10 ? '0' + b : '' + b) + ':00';
+        return fa + '-' + fb;
+      }
+    }
+    return '';
+  }
+
+  /**
    * 日期提取（v2：分级解析 + 区间 + 报告）
    * 返回 { date: 'YYYY-MM-DD'|null, dateConfidence: 'high'|'medium'|'low'|null, raw: 命中片段原文 }
    *  - 完整日期（年-月-日） / M月D日 / M/D / M.D ：high
@@ -2220,16 +2288,14 @@
    *  - 8.21号 / 8月21号 ：high
    *  - 「13:00单独时间」返回 null + timeText
    */
-  function parseDate(text, base, rule) {
+  function parseDate(text, base, rule, weekBias) {
     if (!text) return { date: null, dateConfidence: null, raw: '', timeText: '' };
     var df = (rule && rule.fields) ? rule.fields.dueDate : null;
     var fmts = df ? (df.formats || null) : null;   // null = 全部启用
     var allow = function (k) { return !fmts || fmts.indexOf(k) >= 0; };
 
-    // 时间片段只识别「数字:数字」（不识别点号"9.10" → "9:10" 那是日期）
-    var tm = text.match(/\b([01]?\d|2[0-3])[:：]\s*([0-5]\d)\b/);
-    var timeText = '';
-    if (tm) timeText = tm[0].replace(/[：]/g, ':').replace(/\s+/g, '');
+    // 时间片段：支持「数字:数字」「N点 / N点半 / N点M分」「HH-HH 区间（仅当紧跟星期或后缀点，避免误删日期 8-20）」
+    var timeText = extractTimeText(text);
 
     // 1) 完整年-月-日 2026-08-20 / 2026/8/20
     if (allow('YMD')) {
@@ -2286,7 +2352,7 @@
 
     // 6) 相对星期
     if (allow('WEEKDAY')) {
-      var rd = parseRelativeWeekday(text, base);
+      var rd = parseRelativeWeekday(text, base, weekBias);
       if (rd) {
         var wm = text.match(/(本周|这周|下周|下个?周|上周|上個?周)?\s*(?:周|星期)\s*[一二三四五六日天]|\b[一二三四五六日天]周(?:[一二三四五六日天])?/);
         return { date: rd, dateConfidence: 'high', raw: wm ? wm[0] : '', timeText: timeText };
@@ -2319,7 +2385,7 @@
     return mdThisOrNextYear(mo, d, base);
   }
 
-  function parseRelativeWeekday(text, base) {
+  function parseRelativeWeekday(text, base, weekBias) {
     var wdMap = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 0, '天': 0 };
     var m = text.match(/(本周|这周|下周|下个?周|上周|上個?周)\s*(?:周|星期)?\s*([一二三四五六日天])/);
     var dir = null, dayChar = null;
@@ -2336,6 +2402,7 @@
     if (dir === '下周' || dir === '下个周') diff += 7;
     else if (dir === '上周' || dir === '上個周') diff -= 7;
     else if (dir === '本周' || dir === '这周') { if (diff < 0) diff += 7; }
+    else if (weekBias) { if (diff < 0) diff += 7; }   // 本周分组内：无方向词也按"本周"解析（已过则顺延到本周内/之后那次）
     else { if (diff <= 0) diff += 7; } // 无方向词，默认下一个该星期
     d.setDate(d.getDate() + diff);
     return App.util.formatDate(d, 'YYYY-MM-DD');
