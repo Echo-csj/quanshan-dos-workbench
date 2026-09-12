@@ -13,7 +13,7 @@ create extension if not exists pg_cron;
 create extension if not exists pg_net;
 
 -- 2) 删除同名旧任务（若存在；不存在时 pg_cron 会报错，故先查后删）
-select cron.unschedule(job_name) from cron.job where job_name = 'daily-fetch-schedule';
+select cron.unschedule(jobname) from cron.job where jobname = 'daily-fetch-schedule';
 
 -- 3) 新建每日 06:00（服务器时区，默认 UTC；如需东八区可改为 '0 22 * * *'）调用
 select cron.schedule(
