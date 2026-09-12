@@ -137,6 +137,6 @@ docker compose pull && docker compose up -d
 ## 10. 运维提醒
 
 - **升级**：1Panel 应用商店一键升级 Supabase 镜像（手动 Compose 则需拉新镜像 + 跑迁移）
-- **HTTPS**：用 1Panel「网站」做反代 + 一键免费证书
+- **HTTPS**：前端若部署在 GitHub Pages（HTTPS），Supabase 也必须走 HTTPS，否则浏览器会拦截「混合内容」。建议注册一个真实域名（如 `.top`/`.cn`，约 ¥10–30/年），A 记录指向服务器 IP，再用 1Panel「网站」做反代 + Let's Encrypt 免费证书。**慎用 `sslip.io`/`nip.io` 等免费 IP 子域**：腾讯云 DNSPod 会拦截这类域名，导致 Let's Encrypt HTTP-01 验证失败。
 - **安全**：service_role key 绝不外泄；面板建议开两步验证；定期看备份是否成功
 - **容量监控**：1Panel 仪表盘实时看磁盘，快满时按第 7 节扩容
