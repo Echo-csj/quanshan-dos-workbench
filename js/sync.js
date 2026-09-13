@@ -307,6 +307,21 @@
     }
     var user = session && session.user && session.user.email ? session.user.email : '已同步';
     var tsOn = !!(App.taskShare && App.taskShare.isEnabled && App.taskShare.isEnabled());
+    var foot = el('auth-foot');
+    if (foot) {
+      // 登录态/退出移入左侧栏底部账户区（不再用右上角悬浮条遮挡内容）
+      w.style.display = 'none';
+      foot.innerHTML = '<div class="sf-mail">' + user + ' · 已同步</div>' +
+        (tsOn ? '<button id="sync-tasks" class="sf-logout">任务协作<span id="ts-badge" class="sw-badge" style="display:none"></span></button>' : '') +
+        '<button id="sync-link" class="sf-logout">查看联动数据</button>' +
+        '<button id="sync-out" class="sf-logout">退出登录</button>';
+      if (tsOn) el('sync-tasks').onclick = function () { if (App.taskShare && App.taskShare.openInbox) App.taskShare.openInbox(); };
+      el('sync-link').onclick = openSharedModal;
+      el('sync-out').onclick = signOut;
+      return;
+    }
+    // 回退：无侧栏账户区时仍用浮动小组件
+    w.style.display = '';
     w.innerHTML = '<div class="sw-box"><span class="sw-dot green"></span>' +
       '<span class="sw-user">' + user + ' · 已同步</span>' +
       (tsOn ? '<button id="sync-tasks" class="sw-btn small">任务协作<span id="ts-badge" class="sw-badge" style="display:none"></span></button>' : '') +
