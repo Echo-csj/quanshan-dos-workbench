@@ -502,14 +502,27 @@
     if (banner) banner.innerHTML = '';
   }
 
-  // 触发后端 Edge Function（fetch-schedule）立即抓取一次
+  // 触发 Cloudflare Worker（fetch-schedule）立即抓取一次
+  // 注：原自建 Supabase Edge Function 已随服务器重装丢失且 CLI 无法重部署，改走 CF Worker
   async function syncNow() {
-    var c = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
-    if (!c || !c.functions || !c.functions.invoke) { App.util.toast('同步服务未启用，无法触发抓取', 'warn'); return; }
+    var url = (window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL) || '';
+    var secret = (window.APP_CONFIG && window.APP_CONFIG.CRON_SECRET) || '';
+    if (!url) {
+      App.util.toast('课表自动抓取尚未配置（Cloudflare Worker 未部署），无法触发', 'warn');
+      return;
+    }
     App.util.toast('正在从源站抓取课程表…');
     try {
-      var r = await c.functions.invoke('fetch-schedule', { body: {} });
-      if (r && r.error) { App.util.toast('抓取失败：' + ((r.error && r.error.message) || r.error), 'bad'); return; }
+      var res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-cron-secret': secret },
+        body: '{}'
+      });
+      var j = await res.json().catch(function () { return {}; });
+      if (!res.ok || (j && j.ok === false)) {
+        App.util.toast('抓取失败：' + ((j && (j.error || j.message)) || res.status), 'bad');
+        return;
+      }
       await refreshFetchBanner();
       App.util.toast('抓取完成，请核对后点「应用抓取结果」', 'ok');
     } catch (e) {
