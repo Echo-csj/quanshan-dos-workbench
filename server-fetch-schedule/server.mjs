@@ -5,7 +5,9 @@
 // 零依赖：仅用 Node 内置 http 模块 + 全局 fetch（Node 18+ 自带，本机已是 Node 24）。
 //
 // 功能：
-//   1) HTTP POST /fetch  （必须带请求头 x-cron-secret） → 立即执行一次抓取并写回自建 Supabase 的 shared_link(kind='schedule_fetch')
+//   1) HTTP POST /fetch  （二选一鉴权） → 立即执行一次抓取并写回自建 Supabase 的 shared_link(kind='schedule_fetch')
+//        a) 请求头 x-cron-secret = 服务端 cron secret（定时抓取 / pg_cron 用，原逻辑不变）
+//        b) 请求头 Authorization: Bearer <用户会话 JWT>（前端「同步抓取」按钮用，去 Supabase 验真）
 //   2) 内置每日定时（默认 06:00，可用 FETCH_SCHEDULE=HH:MM 改）自动执行同样逻辑
 //   前端「同步抓取」按钮即调用本服务的 /fetch 端点（config.js 的 COURSE_FETCH_WORKER_URL 指向它）。
 //
@@ -15,6 +17,7 @@
 // 部署后防火墙需放行 TCP 28888（与 8000 同理）。
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 
 // ---------- 配置（来自环境变量）----------
 const cleanSecret = (v) => (v || '').replace(/[^\x20-\x7e]/g, '').trim();
@@ -29,6 +32,22 @@ function cfg() {
     SOURCE_USER: (process.env.SOURCE_USER || '').trim(),
     SOURCE_PASS: (process.env.SOURCE_PASS || '').trim(),
   };
+}
+
+// ---------- 会话 JWT 校验（手动「同步抓取」走用户登录令牌）----------
+// 不依赖 JWT 密钥，直接拿令牌去 Supabase 的 /auth/v1/user 验真（服务端已知 SUPABASE_URL + SERVICE_ROLE）。
+// 仅当返回合法用户时才放行；匿名 anon key 不会通过（无用户 id）。
+async function verifyUserJWT(jwt, C) {
+  if (!jwt || !C.SUPABASE_URL || !C.SERVICE_ROLE) return null;
+  try {
+    const r = await fetch(`${C.SUPABASE_URL}/auth/v1/user`, {
+      headers: { Authorization: `Bearer ${jwt}`, apikey: C.SERVICE_ROLE, 'Content-Type': 'application/json' },
+    });
+    if (!r.ok) return null;
+    const u = await r.json();
+    if (u && u.id) return u;
+  } catch { /* 网络/解析异常一律视为未授权 */ }
+  return null;
 }
 
 const KIND = 'schedule_fetch';
@@ -411,7 +430,17 @@ const server = http.createServer(async (req, res) => {
 
     const C = cfg();
     const cronSecret = req.headers['x-cron-secret'] || '';
-    if (!(cronSecret && C.CRON_SECRET && cronSecret === C.CRON_SECRET && C.SERVICE_ROLE && C.OWNER_USER_ID)) {
+    const authHeader = req.headers['authorization'] || '';
+    const jwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+    // 两条通路，任一通过即放行：
+    // ① 定时抓取：服务端持有的 cron secret（pg_cron / 原逻辑不变）
+    const cronOk = !!(cronSecret && C.CRON_SECRET && cronSecret === C.CRON_SECRET && C.SERVICE_ROLE && C.OWNER_USER_ID);
+    // ② 手动「同步抓取」：前端传来当前登录用户的会话 JWT（拿去 Supabase 验真，零依赖）
+    const user = jwt ? await verifyUserJWT(jwt, C) : null;
+    const jwtOk = !!user;
+
+    if (!(cronOk || jwtOk)) {
       res.writeHead(401, { 'content-type': 'application/json', ...cors });
       res.end(JSON.stringify({ error: 'unauthorized' }));
       return;
