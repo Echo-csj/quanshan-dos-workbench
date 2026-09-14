@@ -35,13 +35,15 @@ function cfg() {
 }
 
 // ---------- 会话 JWT 校验（手动「同步抓取」走用户登录令牌）----------
-// 不依赖 JWT 密钥，直接拿令牌去 Supabase 的 /auth/v1/user 验真（服务端已知 SUPABASE_URL + SERVICE_ROLE）。
+// 不依赖 JWT 密钥，直接拿令牌去 Supabase 的 /auth/v1/user 验真（服务端已知 SUPABASE_URL）。
 // 仅当返回合法用户时才放行；匿名 anon key 不会通过（无用户 id）。
+// apikey 用公开 anon key（与官方客户端 getUser 行为一致，确保合法用户令牌一定放行）。
+const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjoxNzg5MTk1Mzk5LCJleHAiOjQxMDI0NDQ4MDB9.Yejt5D7n9lzPzORBa9nUYJrzccPgxk3i5-sihrn-AV4';
 async function verifyUserJWT(jwt, C) {
-  if (!jwt || !C.SUPABASE_URL || !C.SERVICE_ROLE) return null;
+  if (!jwt || !C.SUPABASE_URL) return null;
   try {
     const r = await fetch(`${C.SUPABASE_URL}/auth/v1/user`, {
-      headers: { Authorization: `Bearer ${jwt}`, apikey: C.SERVICE_ROLE, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${jwt}`, apikey: ANON_KEY, 'Content-Type': 'application/json' },
     });
     if (!r.ok) return null;
     const u = await r.json();
