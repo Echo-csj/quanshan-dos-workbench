@@ -11,7 +11,7 @@ window.APP_CONFIG = {
   TASK_SHARE: false,
   // 课程表自动抓取（腾讯云服务器本地 Node 服务，替代已失效的自建 Edge Function fetch-schedule）
   // 走已可用证书 supabase.dosworkbench.top 的路径反代：HTTPS 入口 = https://supabase.dosworkbench.top/fetch-schedule
-  // （fetch.dosworkbench.top 子域名被腾讯 webblock 拦截、HTTP-01 无法签发证书，故改用此路径方案）；CRON_SECRET 须与服务器 .env 一致
-  COURSE_FETCH_WORKER_URL: 'https://supabase.dosworkbench.top/fetch-schedule',
-  CRON_SECRET: 'daily-fetch-2026'
+  // （fetch.dosworkbench.top 子域名被腾讯 webblock 拦截、HTTP-01 无法签发证书，故改用此路径方案）
+  // 鉴权：定时抓取走服务端 cron secret（仅服务端持有）；手动「同步抓取」走当前登录用户的 Supabase 会话 JWT，前端不再下发任何密钥
+  COURSE_FETCH_WORKER_URL: 'https://supabase.dosworkbench.top/fetch-schedule'
 };

@@ -502,23 +502,34 @@
     if (banner) banner.innerHTML = '';
   }
 
-  // 触发 Cloudflare Worker（fetch-schedule）立即抓取一次
-  // 注：原自建 Supabase Edge Function 已随服务器重装丢失且 CLI 无法重部署，改走 CF Worker
+  // 触发 fetch-schedule 立即抓取一次（腾讯云 Node 服务，路径反代）
   async function syncNow() {
     var url = (window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL) || '';
-    var secret = (window.APP_CONFIG && window.APP_CONFIG.CRON_SECRET) || '';
     if (!url) {
-      App.util.toast('课表自动抓取尚未配置（Cloudflare Worker 未部署），无法触发', 'warn');
+      App.util.toast('课表自动抓取尚未配置，无法触发', 'warn');
       return;
     }
+    // 手动触发：用当前登录用户的 Supabase 会话 JWT 鉴权（前端不再下发任何密钥，避免 cron secret 暴露）
+    var jwt = '';
+    try {
+      var sb = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
+      if (sb && sb.auth && sb.auth.getSession) {
+        var s = await sb.auth.getSession();
+        jwt = (s && s.data && s.session && s.session.access_token) || '';
+      }
+    } catch (e) { jwt = ''; }
     App.util.toast('正在从源站抓取课程表…');
     try {
       var res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-cron-secret': secret },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
         body: '{}'
       });
       var j = await res.json().catch(function () { return {}; });
+      if (res.status === 401) {
+        App.util.toast('服务端尚未启用 JWT 鉴权，请先部署 server.mjs 更新', 'bad');
+        return;
+      }
       if (!res.ok || (j && j.ok === false)) {
         App.util.toast('抓取失败：' + ((j && (j.error || j.message)) || res.status), 'bad');
         return;
