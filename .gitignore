@@ -2,3 +2,10 @@
 .workbuddy/
 .DS_Store
 *.log
+
+# 密钥 / 未测试迁移文件：切勿提交到公开仓库（避免泄露 \+ 避免把未测 DB 改动推上线）
+supabase/
+COURSE_FETCH_SETUP.md
+MIGRATION_CHECKLIST.md
+cloudflare-worker/
+tests/
