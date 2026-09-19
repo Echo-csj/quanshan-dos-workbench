@@ -264,6 +264,7 @@
 
   // 子台判断某条（总台）任务是否可见：优先按权限标签 permTags，否则回退旧 scope 规则
   function taskVisibleToSub(t) {
+    if (t && t.source === 'teacher-milestone') return false; // 子台不接收「教师管理」板块待办（转正/工龄沟通）
     var tags = t.permTags || [];
     if (tags.length) {
       if (tags.indexOf('personal') >= 0) return false;   // 个人标签优先：仅 DOS 可见，子台一律不可见
@@ -335,6 +336,14 @@
     MIRROR_KEYS.forEach(function (k) {
       if (md[k] !== undefined) out[k] = md[k];
     });
+    // 子台不接收「教师管理」板块的待办与提醒（含转正 / 工龄沟通）：
+    // 不镜像里程碑数据，并剔除时间轴中对应的里程碑节点；教师花名册(roster)仍保留供查看。
+    if (out.teacherMilestones) out.teacherMilestones = [];
+    if (out.timeline && out.timeline.customNodes) {
+      out.timeline = Object.assign({}, out.timeline, {
+        customNodes: out.timeline.customNodes.filter(function (n) { return n.source !== 'teacher-milestone'; })
+      });
+    }
     out.tasks = mergedTasks();
     return out;
   }

@@ -328,7 +328,11 @@
       html += '<div id="ms-team-body" class="ms-team-body"><div class="ms-empty muted">正在加载团队数据…</div></div>';
       setTimeout(function () { renderTeamPanel(); }, 0);
     } else if (filtered.length === 0) {
-      html += '<div class="ms-empty muted">暂无' + (panelFilter === 'done' ? '已完成' : (panelFilter === 'all' ? '' : '待处理')) + '的提醒</div>';
+      if (isSub()) {
+        html += '<div class="ms-empty muted">子工作台不接收「教师管理」板块的待办与提醒（含转正 / 工龄沟通），相关事项请由总工作台处理。</div>';
+      } else {
+        html += '<div class="ms-empty muted">暂无' + (panelFilter === 'done' ? '已完成' : (panelFilter === 'all' ? '' : '待处理')) + '的提醒</div>';
+      }
     } else {
       html += '<div class="table-card"><table class="teacher-table ms-table"><thead><tr>';
       html += '<th style="width:92px">教师</th><th>关键节点</th><th style="width:104px">触发日期</th><th style="width:104px">截止</th><th style="width:64px">负责人</th><th style="width:76px">状态</th><th style="width:92px">操作</th>';
