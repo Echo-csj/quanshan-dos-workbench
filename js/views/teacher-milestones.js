@@ -63,6 +63,7 @@
   };
 
   var SOURCE = 'teacher-milestone'; // 用于待办/时间轴的来源标识，便于筛选与追踪
+  var RELEVANCE_WINDOW_DAYS = 7;    // 里程碑截止后仍视为可处理的宽限天数；超过此窗口的历史节点不再生成/保留，防止历史数据批量生成过期待办
 
   // ---------- 日期工具 ----------
   function parse(d) { return new Date(d + 'T00:00:00'); }
@@ -138,6 +139,8 @@
       MS_DEFS.forEach(function (def) {
         var trigger = addMonths(t.entryDate, def.months);
         if (trigger > today) return; // 节点未到，暂不生成
+        var due = addDays(trigger, def.dueDays);
+        if (addDays(due, RELEVANCE_WINDOW_DAYS) < today) return; // 已过期太久，不再生成，避免历史数据批量生成过期待办
         var id = 'ms_' + teacherKey(t) + '_' + def.type;
         if (byId[id]) return; // 已存在，幂等跳过
 
@@ -247,12 +250,39 @@
     return changed;
   }
 
+  // ---------- 清理过期太久的待处理里程碑（修正历史数据批量错误） ----------
+  function cleanupStaleMilestones() {
+    var today = todayStr();
+    var ms = getMilestones();
+    if (!ms.length) return 0;
+
+    var removeIds = [];
+    var kept = [];
+    ms.forEach(function (m) {
+      if (m.status !== 'done' && addDays(m.dueDate, RELEVANCE_WINDOW_DAYS) < today) {
+        removeIds.push(m.id);
+        return;
+      }
+      kept.push(m);
+    });
+    if (!removeIds.length) return 0;
+
+    var tasks = (App.store.get('tasks') || []).filter(function (t) { return removeIds.indexOf(t.milestoneId) === -1; });
+    var nodes = (App.store.get('timeline.customNodes') || []).filter(function (n) { return removeIds.indexOf(n.milestoneId) === -1; });
+
+    App.store.set('teacherMilestones', kept);
+    App.store.set('tasks', tasks);
+    App.store.set('timeline.customNodes', nodes);
+    return removeIds.length;
+  }
+
   // ---------- 单次确保（应用启动/视图渲染时调用，幂等） ----------
   var ensured = false;
   function ensure() {
     if (ensured) return;
     ensured = true;
     if (isSub()) return; // 子台读取总台的里程碑，不自己生成
+    cleanupStaleMilestones();
     generate();
     reconcile();
   }
