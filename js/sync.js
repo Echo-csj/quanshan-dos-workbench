@@ -221,6 +221,10 @@
       App.store.applyRemote(remote.data);
       setStatus('ok');
     } finally { applyingRemote = false; }
+    // 通知各模块：远端整档已覆盖本地。供其在「最新云端数据」上做修正
+    // （如 teacher-milestones 清理随云端同步回来的历史孤儿过期待办/节点，保证零残留）。
+    // 放在 applyRemote 之后，确保清理跑在云端数据落地之后，避免「本地清空→云端覆盖回填」的竞态。
+    try { window.dispatchEvent(new Event('dos:store-remote-applied')); } catch (e) {}
   }
   function subscribeStore() {
     App.store.subscribe(function () {

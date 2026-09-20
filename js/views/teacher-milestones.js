@@ -503,6 +503,23 @@
     else deferBoot();
   }
 
+  // 云端整档覆盖本地后，重新清理可能随同步回来的「历史孤儿过期待办/时间轴节点」，保证零残留。
+  // 必要性：启动 ensure() 与 sync.applyRemote() 均为异步、竞态不可控；若 ensure 先跑、applyRemote
+  // 后把含 250 条残留的云端副本覆盖回来，ensured 守卫会阻止二次清理 → 用户仍见旧数据。
+  // 本监听挂在 applyRemote 之后派发的事件上，确保清理一定跑在「云端数据落地」之后。
+  if (typeof window !== 'undefined' && window.addEventListener) {
+    window.addEventListener('dos:store-remote-applied', function () {
+      if (isSub()) return;            // 子台只读总台镜像，不自行清理
+      try {
+        var n = cleanupStaleMilestones();
+        if (n) {
+          reconcile();
+          if (App.views.teachers && App.views.teachers.render) App.views.teachers.render();
+        }
+      } catch (e) { console.error('[teacherMilestones] remote-applied cleanup failed', e); }
+    });
+  }
+
   App.views.teacherMilestones = {
     ensure: ensure,
     generate: generate,
