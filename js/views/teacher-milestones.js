@@ -144,7 +144,6 @@
         var id = 'ms_' + teacherKey(t) + '_' + def.type;
         if (byId[id]) return; // 已存在，幂等跳过
 
-        var due = addDays(trigger, def.dueDays);
         var m = {
           id: id,
           teacherId: t.id,
@@ -253,9 +252,11 @@
   // ---------- 清理过期太久的待处理里程碑（修正历史数据批量错误） ----------
   function cleanupStaleMilestones() {
     var today = todayStr();
-    var ms = getMilestones();
-    if (!ms.length) return 0;
+    var cutoff = addDays(today, -RELEVANCE_WINDOW_DAYS);
+    // 孤儿时间轴节点的触发日期阈值：due = trigger + 7，故 trigger 早于 cutoff-7 即视为过期
+    var nodeTriggerCutoff = addDays(cutoff, -7);
 
+    var ms = getMilestones() || [];
     var removeIds = [];
     var kept = [];
     ms.forEach(function (m) {
@@ -265,15 +266,34 @@
       }
       kept.push(m);
     });
-    if (!removeIds.length) return 0;
 
-    var tasks = (App.store.get('tasks') || []).filter(function (t) { return removeIds.indexOf(t.milestoneId) === -1; });
-    var nodes = (App.store.get('timeline.customNodes') || []).filter(function (n) { return removeIds.indexOf(n.milestoneId) === -1; });
+    var oldTaskCount = 0, oldNodeCount = 0;
+    var tasks = (App.store.get('tasks') || []).filter(function (t) {
+      oldTaskCount++;
+      // 1) 关联到本次清理的里程碑
+      if (removeIds.indexOf(t.milestoneId) !== -1) return false;
+      // 2) 孤儿节点：source 为教师里程碑、未完成、dueDate 已超窗口
+      if (t.source === SOURCE && t.status !== 'done' && t.dueDate && t.dueDate < cutoff) return false;
+      return true;
+    });
+
+    var nodes = (App.store.get('timeline.customNodes') || []).filter(function (n) {
+      oldNodeCount++;
+      if (removeIds.indexOf(n.milestoneId) !== -1) return false;
+      // 孤儿节点：source 为教师里程碑、未完成、触发日期早于阈值
+      if (n.source === SOURCE && !n.done && n.date && n.date < nodeTriggerCutoff) return false;
+      return true;
+    });
+
+    var removed = oldTaskCount - tasks.length;
+    var removedNodes = oldNodeCount - nodes.length;
+    if (kept.length === ms.length && removed === 0 && removedNodes === 0) return 0;
 
     App.store.set('teacherMilestones', kept);
-    App.store.set('tasks', tasks);
-    App.store.set('timeline.customNodes', nodes);
-    return removeIds.length;
+    if (removed) App.store.set('tasks', tasks);
+    if (removedNodes) App.store.set('timeline.customNodes', nodes);
+    console.log('[teacherMilestones] cleanupStaleMilestones removed', removeIds.length, 'milestones,', removed, 'tasks,', removedNodes, 'nodes');
+    return removeIds.length + removed + removedNodes;
   }
 
   // ---------- 单次确保（应用启动/视图渲染时调用，幂等） ----------
