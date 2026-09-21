@@ -85,6 +85,8 @@
       var name = m.name || '子工作台';
       (m.data.tasks || []).forEach(function (t) {
         if (!t || !t.id) return;
+        // 子工作台不应持有「教师里程碑」任务（早期版本脏数据），总台聚合时排除，避免主工作台出现不可删除的只读里程碑
+        if (t.source === 'teacher-milestone' || t.milestoneId) return;
         out.push(Object.assign({}, t, { _readOnly: true, _subName: name }));
       });
     });

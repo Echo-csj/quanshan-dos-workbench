@@ -196,6 +196,7 @@
     try { window.dispatchEvent(new Event('dos:linked-update')); } catch (e) {}
     try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
     await loadMaster();
+    cleanupStaleMilestoneTasks(); // 清理子台本地脏数据：教师里程碑任务不应由子台持有
     subscribeRealtime();
     startPolling();
     fireReady();
@@ -313,6 +314,22 @@
     return (App.store.get('tasks') || []).filter(function (t) { return t && t.source === 'sub'; });
   }
 
+  // 清理子台本地不应存在的「教师里程碑」脏任务：早期版本子台可能生成/同步过这些任务，
+  // 导致总台聚合后看到「只读」的里程碑任务且无法删除。子台启动时自动清理并同步到云端。
+  function cleanupStaleMilestoneTasks() {
+    if (!isSub()) return 0;
+    var tasks = App.store.get('tasks') || [];
+    var before = tasks.length;
+    var cleaned = tasks.filter(function (t) {
+      if (!t) return true;
+      return t.source !== 'teacher-milestone' && !t.milestoneId;
+    });
+    if (cleaned.length === before) return 0;
+    App.store.set('tasks', cleaned);
+    console.log('[subContext] cleanupStaleMilestoneTasks removed', before - cleaned.length, 'stale milestone tasks');
+    return before - cleaned.length;
+  }
+
   // 取总台某字段（全量模块用），支持点路径
   function masterField(path, fallback) {
     var md = masterData || {};
@@ -358,6 +375,7 @@
     loadMaster: loadMaster,
     mergedTasks: mergedTasks,
     myOwnTasks: myOwnTasks,
+    cleanupStaleMilestoneTasks: cleanupStaleMilestoneTasks,
     masterField: masterField,
     viewData: viewData,
     myRole: myRole,
