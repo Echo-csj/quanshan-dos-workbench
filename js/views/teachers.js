@@ -27,7 +27,8 @@
   var SUBJECT_GROUPS = ['数学', '英语', '文综', '理综'];
 
   // ---------- 标签体系（可点击编辑；支持自定义）----------
-  var TAG_PALETTE = ['跨学科', '离职', '待离职'];
+  // 注：离职 / 待离职 不再作为自由标签，改由结构化 status 字段统一管理（见 statusOf）
+  var TAG_PALETTE = ['跨学科'];
   var TAG_COLORS = {
     '跨学科': '#0EA5E9',
     '离职':   '#9CA3AF',
@@ -56,6 +57,8 @@
   var filterSubject = '';
   var filterPos = '';
   var search = '';
+  // 状态档位：'onboard'（在职中，默认隐藏离职）/ 'left'（仅离职教师）/ 'all'（全部）
+  var filterStatus = 'onboard';
 
   // 编辑弹窗状态
   var edId = null;
@@ -88,10 +91,13 @@
 
   function posName(code) { return POSITION_CODEBOOK[code] || code || ''; }
 
-  // 由标签派生状态：离职 > 待离职 > 在职（默认）
+  // 状态 = 结构化 status 字段（单一事实来源）；缺省时回退到旧 tag 派生，保证旧数据不崩
   function statusOf(t) {
-    if (hasTag(t, '离职')) return 'left';
-    if (hasTag(t, '待离职')) return 'pending';
+    if (t && t.status === 'left') return 'left';
+    if (t && t.status === 'pending') return 'pending';
+    if (t && t.status === 'active') return 'active';
+    if (hasTag(t, '离职')) return 'left';      // 旧数据回退
+    if (hasTag(t, '待离职')) return 'pending'; // 旧数据回退
     return 'active';
   }
   // 颜色 + 图标 + 文字三重编码（色觉障碍友好），标注于姓名栏
@@ -225,6 +231,14 @@
     html += '</div>';
     html += '</div>';
 
+    // 状态档位切换（在职中默认隐藏离职教师）
+    html += '<div class="tch-status-tabs">';
+    [['onboard', '在职中'], ['left', '离职教师'], ['all', '全部']].forEach(function(tb) {
+      html += '<button class="tch-tab' + (filterStatus === tb[0] ? ' active' : '') + '" onclick="App.views.teachers.setStatusTab(\'' + tb[0] + '\')">' + tb[1] + '</button>';
+    });
+    html += '</div>';
+    html += '<p class="tch-status-hint muted">离职教师默认隐藏于「在职中」；切到「离职教师」可查看留存信息与历史待办。当前档位共 <b>' + (filterStatus === 'left' ? statusCount.left : (filterStatus === 'all' ? teachers.length : (teachers.length - statusCount.left))) + '</b> 人。</p>';
+
     // 统计条
     html += '<div class="teacher-stats">';
     html += '<span class="stat-pill">共 <b>' + stats.total + '</b> 人</span>';
@@ -242,6 +256,10 @@
 
     // 表格
     var list = teachers.filter(function(t) {
+      // 状态档位过滤（在职中隐藏离职；离职教师档仅显示离职）
+      var st0 = statusOf(t);
+      if (filterStatus === 'onboard' && st0 === 'left') return false;
+      if (filterStatus === 'left' && st0 !== 'left') return false;
       if (filterSubject && canonSubject(t.subjectGroup) !== filterSubject) return false;
       if (filterPos && t.positionCode !== filterPos) return false;
       if (search) {
@@ -257,54 +275,58 @@
     // 按入职日期升序（老→新）
     list.sort(function(a, b) { return (a.entryDate || '').localeCompare(b.entryDate || ''); });
 
-    html += '<div class="card table-card">';
-    html += '<table class="teacher-table">';
-    html += '<thead><tr>';
-    html += '<th style="width:40px">#</th>';
-    html += '<th style="width:84px">姓名</th>';
-    html += '<th style="width:76px">学科组</th>';
-    html += '<th style="width:60px">岗位</th>';
-    html += '<th style="width:92px">入职日期</th>';
-    html += '<th style="width:80px">工龄</th>';
-    if (!isSub) {
-      html += '<th style="width:132px">毕业院校</th>';
-      html += '<th style="width:72px">学历</th>';
-      html += '<th>专业</th>';
-    }
-    html += '<th style="width:180px">证书</th>';
-    html += '</tr></thead><tbody>';
-    if (list.length === 0) {
-      html += '<tr><td colspan="' + (isSub ? 7 : 10) + '" class="empty-row">无匹配教师</td></tr>';
+    if (filterStatus === 'left') {
+      html += renderLeaveTable(list, isSub);
     } else {
-      list.forEach(function(t, i) {
-        var sc = SUBJECT_COLORS[canonSubject(t.subjectGroup)] || '#888';
-        var st = statusOf(t);
-        var sm = STATUS_META[st];
-        var certs = (t.certificates || []).map(function(c) {
-          return '<span class="cert-chip">' + esc(c) + '</span>';
-        }).join('');
-        var certHtml = certs ? '<span class="certs">' + certs + '</span>' : '<span class="muted">—</span>';
-        var posBadge = '<span class="pos-badge" title="' + esc(posName(t.positionCode)) + '">' + esc(t.positionCode || '—') + '</span>';
-        var rowCls = st === 'left' ? ' class="row-leave"' : (st === 'pending' ? ' class="row-pending"' : ' class="row-active"');
-        var rowClick = App.isSub() ? '' : ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑"';
-        html += '<tr' + rowCls + rowClick + '>';
-        html += '<td class="mono muted">' + (i + 1) + '</td>';
-        html += '<td class="name-cell">' + nameCellHtml(t, sm) + '</td>';
-        html += '<td><span class="dot" style="background:' + sc + ';margin-right:4px"></span>' + esc(t.subjectGroup) + '</td>';
-        html += '<td>' + posBadge + '</td>';
-        html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
-        html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
-        if (!isSub) {
-          html += '<td class="school-cell">' + esc(t.school || '—') + '</td>';
-          html += '<td class="degree-cell">' + degreeCellHtml(t) + '</td>';
-          html += '<td class="major-cell">' + esc(t.major || '—') + '</td>';
-        }
-        html += '<td class="cert-cell">' + certHtml + '</td>';
-        html += '</tr>';
-      });
+      html += '<div class="card table-card">';
+      html += '<table class="teacher-table">';
+      html += '<thead><tr>';
+      html += '<th style="width:40px">#</th>';
+      html += '<th style="width:84px">姓名</th>';
+      html += '<th style="width:76px">学科组</th>';
+      html += '<th style="width:60px">岗位</th>';
+      html += '<th style="width:92px">入职日期</th>';
+      html += '<th style="width:80px">工龄</th>';
+      if (!isSub) {
+        html += '<th style="width:132px">毕业院校</th>';
+        html += '<th style="width:72px">学历</th>';
+        html += '<th>专业</th>';
+      }
+      html += '<th style="width:180px">证书</th>';
+      html += '</tr></thead><tbody>';
+      if (list.length === 0) {
+        html += '<tr><td colspan="' + (isSub ? 7 : 10) + '" class="empty-row">无匹配教师</td></tr>';
+      } else {
+        list.forEach(function(t, i) {
+          var sc = SUBJECT_COLORS[canonSubject(t.subjectGroup)] || '#888';
+          var st = statusOf(t);
+          var sm = STATUS_META[st];
+          var certs = (t.certificates || []).map(function(c) {
+            return '<span class="cert-chip">' + esc(c) + '</span>';
+          }).join('');
+          var certHtml = certs ? '<span class="certs">' + certs + '</span>' : '<span class="muted">—</span>';
+          var posBadge = '<span class="pos-badge" title="' + esc(posName(t.positionCode)) + '">' + esc(t.positionCode || '—') + '</span>';
+          var rowCls = st === 'left' ? ' class="row-leave"' : (st === 'pending' ? ' class="row-pending"' : ' class="row-active"');
+          var rowClick = App.isSub() ? '' : ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑"';
+          html += '<tr' + rowCls + rowClick + '>';
+          html += '<td class="mono muted">' + (i + 1) + '</td>';
+          html += '<td class="name-cell">' + nameCellHtml(t, sm) + '</td>';
+          html += '<td><span class="dot" style="background:' + sc + ';margin-right:4px"></span>' + esc(t.subjectGroup) + '</td>';
+          html += '<td>' + posBadge + '</td>';
+          html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
+          html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
+          if (!isSub) {
+            html += '<td class="school-cell">' + esc(t.school || '—') + '</td>';
+            html += '<td class="degree-cell">' + degreeCellHtml(t) + '</td>';
+            html += '<td class="major-cell">' + esc(t.major || '—') + '</td>';
+          }
+          html += '<td class="cert-cell">' + certHtml + '</td>';
+          html += '</tr>';
+        });
+      }
+      html += '</tbody></table>';
+      html += '</div>';
     }
-    html += '</tbody></table>';
-    html += '</div>';
 
     // 教师职业发展关键节点提醒面板
     if (App.views.teacherMilestones && App.views.teacherMilestones.panelHtml) {
@@ -335,6 +357,128 @@
     // 防抖
     if (window.__tchSearchTimer) clearTimeout(window.__tchSearchTimer);
     window.__tchSearchTimer = setTimeout(render, 200);
+  }
+
+  // 状态档位切换
+  function setStatusTab(k) { filterStatus = k; render(); }
+
+  // 编辑弹窗：状态下拉联动「离职信息」显隐
+  function onStatusChange(val) {
+    var wrap = document.getElementById('ed-leave-wrap');
+    if (wrap) wrap.style.display = (val === 'left') ? '' : 'none';
+  }
+
+  // 离职教师专属表格：留存基础信息 + 离职时间 + 原因 + 历史待办入口
+  function renderLeaveTable(list, isSub) {
+    var colCount = isSub ? 8 : 11;
+    var html = '';
+    html += '<div class="card table-card">';
+    html += '<table class="teacher-table leave-table">';
+    html += '<thead><tr>';
+    html += '<th style="width:36px">#</th>';
+    html += '<th style="width:84px">姓名</th>';
+    html += '<th style="width:70px">学科组</th>';
+    html += '<th style="width:56px">岗位</th>';
+    html += '<th style="width:92px">入职日期</th>';
+    html += '<th style="width:80px">工龄</th>';
+    if (!isSub) {
+      html += '<th style="width:120px">毕业院校</th>';
+      html += '<th style="width:64px">学历</th>';
+      html += '<th style="width:96px">专业</th>';
+    }
+    html += '<th style="width:104px">离职时间</th>';
+    html += '<th>离职原因</th>';
+    html += '<th style="width:108px">历史待办</th>';
+    html += '</tr></thead><tbody>';
+    if (!list.length) {
+      html += '<tr><td colspan="' + colCount + '" class="empty-row">暂无离职教师</td></tr>';
+    } else {
+      list.forEach(function(t, i) {
+        var sc = SUBJECT_COLORS[canonSubject(t.subjectGroup)] || '#888';
+        var certs = (t.certificates || []).map(function(c) { return '<span class="cert-chip">' + esc(c) + '</span>'; }).join('');
+        var certHtml = certs ? '<span class="certs">' + certs + '</span>' : '<span class="muted">—</span>';
+        var posBadge = '<span class="pos-badge" title="' + esc(posName(t.positionCode)) + '">' + esc(t.positionCode || '—') + '</span>';
+        var rowClick = App.isSub() ? '' : ' style="cursor:pointer" onclick="App.views.teachers.openEdit(\'' + App.util.escapeAttr(t.id) + '\')" title="点击编辑留存信息"';
+        html += '<tr class="row-leave-view"' + rowClick + '>';
+        html += '<td class="mono muted">' + (i + 1) + '</td>';
+        html += '<td class="name-cell"><span class="name-status status-left"><span class="ns-glyph">■</span><strong class="ns-name">' + esc(t.name) + '</strong></span></td>';
+        html += '<td><span class="dot" style="background:' + sc + ';margin-right:4px"></span>' + esc(t.subjectGroup) + '</td>';
+        html += '<td>' + posBadge + '</td>';
+        html += '<td class="mono">' + esc(t.entryDate || '—') + '</td>';
+        html += '<td class="mono">' + App.util.workAge(t.entryDate) + '</td>';
+        if (!isSub) {
+          html += '<td class="school-cell">' + esc(t.school || '—') + '</td>';
+          html += '<td>' + esc(t.degree || '—') + '</td>';
+          html += '<td class="major-cell">' + esc(t.major || '—') + '</td>';
+        }
+        html += '<td class="mono leave-at">' + esc(t.leftAt || '—') + '</td>';
+        html += '<td class="leave-reason">' + esc(t.leaveReason || '—') + '</td>';
+        html += '<td><button class="btn btn-secondary btn-xs" onclick="App.views.teachers.openHistory(\'' + App.util.escapeAttr(t.id) + '\')">查看历史待办</button></td>';
+        html += '</tr>';
+      });
+    }
+    html += '</tbody></table>';
+    html += '</div>';
+    return html;
+  }
+
+  // 统一任务来源：主台取整档 tasks；子台取合并视图（权限过滤后）任务
+  function allTasks() {
+    if (App.isSub() && App.subContext && App.subContext.mergedTasks) return App.subContext.mergedTasks() || [];
+    var vd = App.viewData() || {};
+    return vd.tasks || App.store.get('tasks') || [];
+  }
+
+  // 聚合某教师的历史关联：里程碑记录 + 关联待办（精确 teacherId 匹配 + assignee 名称匹配，去重）
+  function teacherHistory(tId) {
+    var vd = App.viewData() || {};
+    var tasks = allTasks();
+    var ms = vd.teacherMilestones || App.store.get('teacherMilestones') || [];
+    var allTeachers = (localTeachers() || []).concat((vd.teachers || []));
+    var t = null;
+    for (var i = 0; i < allTeachers.length; i++) { if (allTeachers[i] && allTeachers[i].id === tId) { t = allTeachers[i]; break; } }
+    var name = t ? t.name : '';
+    var seen = {};
+    var linked = [];
+    tasks.forEach(function(x) {
+      if (!x || !x.id) return;
+      if (x.teacherId === tId) { if (!seen[x.id]) { seen[x.id] = 1; linked.push(x); } }
+      else if (name && x.assignee === name) { if (!seen[x.id]) { seen[x.id] = 1; linked.push(x); } }
+    });
+    var milestones = (ms || []).filter(function(m) { return m && m.teacherId === tId; });
+    return { name: name, tasks: linked, milestones: milestones };
+  }
+
+  // 历史待办弹窗：分两段展示里程碑历史与关联待办
+  function openHistory(tId) {
+    var h = teacherHistory(tId);
+    var html = '';
+    html += '<div class="hist-block">';
+    html += '<h4 class="hist-h">发展提醒 / 里程碑历史（' + h.milestones.length + '）</h4>';
+    if (!h.milestones.length) {
+      html += '<p class="muted">无记录</p>';
+    } else {
+      html += '<table class="preview-table hist-table"><thead><tr><th>类型</th><th>标题</th><th>状态</th><th>负责人</th><th>截止</th></tr></thead><tbody>';
+      h.milestones.forEach(function(m) {
+        html += '<tr><td>' + esc(m.type || '—') + '</td><td>' + esc(m.title || '—') + '</td><td>' + (m.status === 'done' ? '已完成' : '进行中') + '</td><td>' + esc(m.owner || '—') + '</td><td class="mono">' + esc(m.dueDate || '—') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+    html += '<div class="hist-block">';
+    html += '<h4 class="hist-h">关联待办（' + h.tasks.length + '，含已完成）</h4>';
+    if (!h.tasks.length) {
+      html += '<p class="muted">无关联待办</p>';
+    } else {
+      html += '<table class="preview-table hist-table"><thead><tr><th>标题</th><th>状态</th><th>来源</th><th>负责人</th><th>截止</th></tr></thead><tbody>';
+      h.tasks.forEach(function(x) {
+        var src = x.source === 'teacher-milestone' ? '🎯 里程碑' : (x.source === 'timeline' ? '⏱ 时间轴' : (x.source === 'paste' ? '📋 粘贴' : (x.source === 'sub' ? '子台' : '手动')));
+        html += '<tr><td>' + esc(x.title || '—') + '</td><td>' + (x.status === 'done' ? '已完成' : '待办') + '</td><td>' + src + '</td><td>' + esc(x.assignee || '—') + '</td><td class="mono">' + esc(x.dueDate || '—') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+    App.util.modal({ title: '历史待办 · ' + esc(h.name), content: html, confirmText: '关闭', onConfirm: function(c) { c(); } });
   }
 
   /* ---------- 学历行内编辑 ---------- */
@@ -404,6 +548,20 @@
     }
     html += '</select></div>';
     html += '<div class="ed-field"><label>入职日期</label><input class="form-input" type="date" id="ed-entry" value="' + esc(v('entryDate')) + '"></div>';
+    html += '</div>';
+    // 在职状态（结构化字段，单一事实来源）
+    var stV = isNew ? 'active' : (t.status || statusOf(t));
+    html += '<div class="ed-row">';
+    html += '<div class="ed-field"><label>在职状态</label><select class="form-input" id="ed-status" onchange="App.views.teachers.onStatusChange(this.value)">';
+    [['active', '在职'], ['pending', '待离职'], ['left', '离职']].forEach(function(o) {
+      html += '<option value="' + o[0] + '"' + (stV === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+    });
+    html += '</select></div>';
+    html += '</div>';
+    var showLeave = (stV === 'left');
+    html += '<div class="ed-row" id="ed-leave-wrap"' + (showLeave ? '' : ' style="display:none"') + '>';
+    html += '<div class="ed-field"><label>离职日期</label><input class="form-input" type="date" id="ed-leftat" value="' + esc(isNew ? '' : (t.leftAt || '')) + '"></div>';
+    html += '<div class="ed-field" style="flex:1"><label>离职原因</label><input class="form-input" id="ed-leavereason" value="' + esc(isNew ? '' : (t.leaveReason || '')) + '"></div>';
     html += '</div>';
     if (!App.isSub()) {
       html += '<div class="ed-row">';
@@ -496,6 +654,10 @@
     var degree = (document.getElementById('ed-degree') || {}).value || '';
     var major = (document.getElementById('ed-major') || {}).value || '';
     var certsRaw = (document.getElementById('ed-certs') || {}).value || '';
+    var status = (document.getElementById('ed-status') || {}).value || 'active';
+    var leftAt = (document.getElementById('ed-leftat') || {}).value || '';
+    var leaveReason = (document.getElementById('ed-leavereason') || {}).value || '';
+    if (status !== 'left') { leftAt = ''; leaveReason = ''; } // 非离职状态清空离职信息
 
     // 校验：姓名 + 所属部门（学科组）为必填项
     if (!name.trim() || !subjectGroup) {
@@ -523,7 +685,10 @@
           degree: degree,
           major: major.trim(),
           certificates: splitCerts(certsRaw),
-          tags: edTags.slice()
+          tags: edTags.slice(),
+          status: status,
+          leftAt: leftAt,
+          leaveReason: leaveReason
         };
         teachers.push(rec);
         App.store.set('teachers', teachers);
@@ -547,7 +712,10 @@
           degree: degree,
           major: major.trim(),
           certificates: splitCerts(certsRaw),
-          tags: edTags.slice()
+          tags: edTags.slice(),
+          status: status,
+          leftAt: leftAt,
+          leaveReason: leaveReason
         });
         App.store.set('teachers', teachers);
         close();
@@ -745,6 +913,7 @@
       } else {
         rec.id = App.store.uid('tr');
         rec.tags = []; // Excel 导入默认无标签（在职）
+        rec.status = 'active'; // Excel 批量导入均为在职
         teachers.push(rec);
       }
     });
@@ -781,6 +950,10 @@
     render: render,
     onFilterChange: onFilterChange,
     onSearchChange: onSearchChange,
+    setStatusTab: setStatusTab,
+    onStatusChange: onStatusChange,
+    teacherHistory: teacherHistory,
+    openHistory: openHistory,
     handleFile: handleFile,
     downloadTemplate: downloadTemplate,
     addTeacher: addTeacher,

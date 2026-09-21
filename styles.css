@@ -1662,3 +1662,25 @@ body.auth-locked .sync-widget{display:none}
 /* 主工作台中来自子工作台的任务：只读标识 */
 .kanban-card.read-only{border-left:3px solid var(--accent,#4F46E5);background:var(--bg-subtle,#fafafa)}
 .kanban-card.read-only .kanban-card-note{color:var(--accent-text,#4338ca)}
+
+/* ===== 教师管理：状态档位切换（在职中 / 离职教师 / 全部） ===== */
+.tch-status-tabs { display:flex; gap:6px; margin:2px 0 8px; flex-wrap:wrap; }
+.tch-tab { padding:5px 14px; border:1px solid var(--border); border-radius:999px; background:var(--bg); color:var(--text-muted); font-size:13px; font-weight:600; cursor:pointer; transition:all .15s ease; }
+.tch-tab:hover { border-color:var(--accent); color:var(--text); }
+.tch-tab.active { background:var(--accent); border-color:var(--accent); color:#fff; box-shadow:0 2px 6px rgba(79,70,229,.25); }
+.tch-status-hint { margin:0 0 12px; font-size:12px; }
+
+/* 离职教师专属视图 */
+.teacher-table.leave-table .row-leave-view td:first-child { box-shadow: inset 3px 0 0 #94A3B8; }
+.teacher-table .leave-at { color:var(--text-muted); white-space:nowrap; }
+.teacher-table .leave-reason { color:var(--text-secondary); max-width:240px; white-space:normal; overflow-wrap:break-word; }
+
+/* 历史待办弹窗 */
+.hist-block { margin-bottom:14px; }
+.hist-h { font-size:13px; font-weight:700; color:var(--text); margin:0 0 6px; padding-bottom:4px; border-bottom:1px solid var(--border); }
+.hist-table { width:100%; font-size:12px; }
+.hist-table th { text-align:left; color:var(--text-muted); font-weight:600; padding:4px 8px; }
+.hist-table td { padding:4px 8px; border-top:1px solid var(--border); color:var(--text); }
+
+/* 小按钮（查看历史待办入口） */
+.btn-xs { padding:3px 10px; font-size:12px; line-height:1.5; }

@@ -18,6 +18,57 @@
 
   function backupKey() { return '_migration_backup_teacherComm_v1'; }
 
+  function hasTagLocal(t, tag) { return Array.isArray(t.tags) && t.tags.indexOf(tag) >= 0; }
+
+  // 教师状态结构化迁移：旧 离职/待离职 标签 → status 字段（单一事实来源），并剥离旧标签
+  function migrateTeacherStatus(store) {
+    var KEY = 'settings.migratedTeacherStatus_r1';
+    if (store.get(KEY)) return;
+    var teachers = store.get('teachers');
+    if (!Array.isArray(teachers)) { store.set(KEY, true); return; }
+    // 备份（可回滚）
+    store.set('_migration_backup_teacherStatus_r1', {
+      ts: new Date().toISOString(),
+      teachers: teachers.slice(),
+      version: 'r1'
+    });
+    var changed = 0;
+    var next = teachers.map(function (t) {
+      var nt = Object.assign({}, t);
+      if (!nt.status) {
+        if (hasTagLocal(nt, '离职')) nt.status = 'left';
+        else if (hasTagLocal(nt, '待离职')) nt.status = 'pending';
+        else nt.status = 'active';
+        changed++;
+      }
+      // 状态已由 status 字段统一管理，剥离旧 离职/待离职 标签避免重复展示
+      if (Array.isArray(nt.tags)) {
+        var before = nt.tags.length;
+        nt.tags = nt.tags.filter(function (x) { return x !== '离职' && x !== '待离职'; });
+        if (nt.tags.length !== before) changed++;
+      }
+      return nt;
+    });
+    store.set('teachers', next);
+    store.set(KEY, true);
+    if (changed) console.log('[migration:teacherStatus] 已迁移 ' + changed + ' 处（补充 status 字段 / 剥离旧 离职·待离职 标签）');
+  }
+
+  // 回滚：恢复迁移前的 teachers（控制台调用 App.restoreTeacherStatusMigration()）
+  App.restoreTeacherStatusMigration = function () {
+    try {
+      var store = App.store;
+      var b = store.get('_migration_backup_teacherStatus_r1');
+      if (!b) { if (App.util && App.util.toast) App.util.toast('没有可恢复的状态迁移备份', 'warn'); return; }
+      if (Array.isArray(b.teachers) && b.teachers.length) store.set('teachers', b.teachers);
+      store.set('settings.migratedTeacherStatus_r1', false);
+      if (App.util && App.util.toast) App.util.toast('已回滚教师状态迁移（' + (b.teachers ? b.teachers.length : 0) + ' 位）', 'ok');
+      console.log('[migration] restored teacherStatus', b);
+    } catch (e) {
+      console.error('[migration] teacherStatus restore failed', e);
+    }
+  };
+
   // 老用户补发「听课安排」提取规则（幂等；与 store.js 种子保持一致）
   var LISTEN_RULE = {
     id: 'rule_listen',
@@ -57,6 +108,7 @@
     try {
       var store = App.store;
       ensureListenRule(store);   // 幂等：老用户补发「听课安排」提取规则
+      migrateTeacherStatus(store); // 幂等：旧 离职/待离职 标签 → 结构化 status 字段
       if (store.get('settings.migratedTeacherComm_r1')) return;
 
       // 数据是否就绪：未加载（三个关键 key 均为 undefined）则本次跳过，等下次 init
