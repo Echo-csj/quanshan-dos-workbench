@@ -64,6 +64,7 @@
 
   var SOURCE = 'teacher-milestone'; // 用于待办/时间轴的来源标识，便于筛选与追踪
   var RELEVANCE_WINDOW_DAYS = 7;    // 里程碑截止后仍视为可处理的宽限天数；超过此窗口的历史节点不再生成/保留，防止历史数据批量生成过期待办
+  var SUPPRESS_KEY = 'teacherMilestoneSuppressed'; // settings 下存储「已手动删除/抑制再生」的里程碑 ID 数组
 
   // ---------- 日期工具 ----------
   function parse(d) { return new Date(d + 'T00:00:00'); }
@@ -123,6 +124,39 @@
   function teacherKey(t) { return t.id || (t.name + '｜' + t.subjectGroup); }
   function isSub() { return !!(App.isSub && App.isSub()); }
 
+  // ---------- 抑制再生（手动删除的里程碑持久化） ----------
+  function getSuppressed() {
+    var s = App.store.get('settings') || {};
+    var arr = s[SUPPRESS_KEY];
+    if (!Array.isArray(arr)) return [];
+    return arr.slice();
+  }
+  function isSuppressed(id) {
+    var arr = getSuppressed();
+    return arr.indexOf(id) !== -1;
+  }
+  function addSuppressed(id) {
+    var s = App.store.get('settings') || {};
+    var arr = s[SUPPRESS_KEY];
+    if (!Array.isArray(arr)) arr = [];
+    if (arr.indexOf(id) === -1) {
+      arr.push(id);
+      s[SUPPRESS_KEY] = arr;
+      App.store.set('settings', s);
+    }
+  }
+  function removeSuppressed(id) {
+    var s = App.store.get('settings') || {};
+    var arr = s[SUPPRESS_KEY];
+    if (!Array.isArray(arr)) return;
+    var idx = arr.indexOf(id);
+    if (idx !== -1) {
+      arr.splice(idx, 1);
+      s[SUPPRESS_KEY] = arr;
+      App.store.set('settings', s);
+    }
+  }
+
   // ---------- 生成（幂等） ----------
   // 仅在「触发日期 <= 今天」时生成（即对应时间节点已到达），符合"在对应时间节点自动生成提示"
   function generate() {
@@ -131,6 +165,8 @@
     var existing = getMilestones();
     var byId = {};
     existing.forEach(function (m) { byId[m.id] = m; });
+    var suppressed = {};
+    getSuppressed().forEach(function (id) { suppressed[id] = true; });
     var today = todayStr();
     var created = 0;
 
@@ -142,6 +178,7 @@
         var due = addDays(trigger, def.dueDays);
         if (addDays(due, RELEVANCE_WINDOW_DAYS) < today) return; // 已过期太久，不再生成，避免历史数据批量生成过期待办
         var id = 'ms_' + teacherKey(t) + '_' + def.type;
+        if (suppressed[id]) return; // 已被用户手动删除并抑制再生
         if (byId[id]) return; // 已存在，幂等跳过
 
         var m = {
@@ -214,11 +251,14 @@
     var tasks = App.store.get('tasks') || [];
     var nodes = App.store.get('timeline.customNodes') || [];
     var changed = false;
+    var suppressed = {};
+    getSuppressed().forEach(function (id) { suppressed[id] = true; });
 
     var taskIdx = {}; tasks.forEach(function (t, i) { taskIdx[t.id] = i; });
     var nodeIdx = {}; nodes.forEach(function (n, i) { nodeIdx[n.id] = i; });
 
     ms.forEach(function (m) {
+      if (suppressed[m.id]) return; // 被抑制的里程碑不再重建 tasks/nodes，由 cleanup 统一清理
       var ti = taskIdx[m.taskId];
       var ni = nodeIdx[m.timelineNodeId];
 
@@ -256,10 +296,14 @@
     // 孤儿时间轴节点的触发日期阈值：due = trigger + 7，故 trigger 早于 cutoff-7 即视为过期
     var nodeTriggerCutoff = addDays(cutoff, -7);
 
+    var suppressed = {};
+    getSuppressed().forEach(function (id) { suppressed[id] = true; });
+
     var ms = getMilestones() || [];
     var removeIds = [];
     var kept = [];
     ms.forEach(function (m) {
+      if (suppressed[m.id]) { removeIds.push(m.id); return; } // 被手动删除/抑制的里程碑：彻底清除
       if (m.status !== 'done' && addDays(m.dueDate, RELEVANCE_WINDOW_DAYS) < today) {
         removeIds.push(m.id);
         return;
@@ -336,6 +380,60 @@
     App.util.toast('已标记完成，并同步更新时间轴与待办', 'ok');
   }
 
+  // ---------- 删除里程碑（持久化抑制再生） ----------
+  function deleteMilestone(id, silent) {
+    if (isSub()) { App.util.toast('子工作台只读，请在总工作台删除', 'warn'); return; }
+    var ms = getMilestones();
+    var m = ms.find(function (x) { return x.id === id; });
+    if (!m) { if (!silent) App.util.toast('未找到该里程碑', 'warn'); return; }
+
+    // 1) 写入抑制集合，保证 generate/reconcile 后续不会把它复活
+    addSuppressed(id);
+
+    // 2) 立即清理该里程碑下的任务、时间轴节点、里程碑记录
+    var tasks = (App.store.get('tasks') || []).filter(function (t) { return t.milestoneId !== id; });
+    var nodes = (App.store.get('timeline.customNodes') || []).filter(function (n) { return n.milestoneId !== id; });
+    var kept = ms.filter(function (x) { return x.id !== id; });
+
+    App.store.set('teacherMilestones', kept);
+    App.store.set('tasks', tasks);
+    App.store.set('timeline.customNodes', nodes);
+
+    if (!silent) App.util.toast('已删除「' + (m.title || m.label) + '」并抑制再生', 'ok');
+    if (App.views.teachers && App.views.teachers.render) App.views.teachers.render();
+  }
+
+  function confirmDeleteMilestone(id) {
+    var ms = getMilestones();
+    var m = ms.find(function (x) { return x.id === id; });
+    if (!m) return;
+    App.util.modal({
+      title: '确认删除里程碑提醒',
+      content: '确定删除「' + App.util.escapeHtml(m.title || m.label) + '」？删除后该提醒不会再生。',
+      confirmText: '删除', confirmStyle: 'danger',
+      onConfirm: function (close) { deleteMilestone(id); close(); }
+    });
+  }
+
+  // 一次性清理：按教师姓名+节点类型删除所有匹配里程碑（兼容 key 变化导致的重复 ID）
+  function deleteByTeacherAndType(teacherName, type) {
+    if (isSub()) { App.util.toast('子工作台只读，请在总工作台删除', 'warn'); return 0; }
+    var ms = getMilestones();
+    var matched = ms.filter(function (m) {
+      return m.teacherName === teacherName && m.type === type;
+    });
+    if (!matched.length) { App.util.toast('未找到匹配的里程碑', 'warn'); return 0; }
+    matched.forEach(function (m) { deleteMilestone(m.id, true); });
+    App.util.toast('已删除 ' + matched.length + ' 条「' + teacherName + '」的' + (MS_DEFS.find(function(d){ return d.type === type; }) || {}).label + '提醒并抑制再生', 'ok');
+    if (App.views.teachers && App.views.teachers.render) App.views.teachers.render();
+    return matched.length;
+  }
+
+  function findMilestoneByTaskId(taskId) {
+    var ms = getMilestones();
+    return ms.find(function (m) { return m.taskId === taskId; });
+  }
+
   function pendingCount() {
     ensure();
     return getMilestones().filter(function (m) { return m.status !== 'done'; }).length;
@@ -396,7 +494,16 @@
         html += '<td class="mono">' + m.dueDate + '</td>';
         html += '<td>' + esc(m.owner) + '</td>';
         html += '<td>' + (m.status === 'done' ? '<span class="tag status-done">已完成</span>' : '<span class="tag status-todo">待处理</span>') + '</td>';
-        html += '<td>' + (m.status === 'done' ? '<span class="muted">已同步</span>' : (isSub() ? '<span class="muted">只读</span>' : '<button class="btn btn-primary btn-xs" onclick="App.views.teacherMilestones.complete(\'' + escA(m.id) + '\')">标记完成</button>')) + '</td>';
+        html += '<td>';
+        if (isSub()) {
+          html += '<span class="muted">只读</span>';
+        } else if (m.status === 'done') {
+          html += '<button class="btn btn-secondary btn-xs" onclick="App.views.teacherMilestones.confirmDeleteMilestone(\'' + escA(m.id) + '\')">删除</button>';
+        } else {
+          html += '<button class="btn btn-primary btn-xs" onclick="App.views.teacherMilestones.complete(\'' + escA(m.id) + '\')">标记完成</button>';
+          html += '<button class="btn btn-ghost btn-xs" style="margin-left:6px" onclick="App.views.teacherMilestones.confirmDeleteMilestone(\'' + escA(m.id) + '\')">删除</button>';
+        }
+        html += '</td>';
         html += '</tr>';
       });
       html += '</tbody></table></div>';
@@ -525,6 +632,10 @@
     generate: generate,
     reconcile: reconcile,
     complete: complete,
+    deleteMilestone: deleteMilestone,
+    confirmDeleteMilestone: confirmDeleteMilestone,
+    deleteByTeacherAndType: deleteByTeacherAndType,
+    findMilestoneByTaskId: findMilestoneByTaskId,
     pendingCount: pendingCount,
     panelHtml: panelHtml,
     setFilter: setFilter,

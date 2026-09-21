@@ -893,6 +893,22 @@
     if (all && all._readOnly) { App.util.toast('子工作台任务不可在主台删除', 'warn'); return; }
     var t = localTasks().filter(function(x) { return x.id === id; })[0];
     if (!t || !isEditable(t)) { App.util.toast('总台任务不可删除', 'warn'); return; }
+
+    // 教师里程碑任务：不能只删 task，必须到 teacherMilestones 层抑制再生
+    if (t.source === 'teacher-milestone' && t.milestoneId && App.views.teacherMilestones && App.views.teacherMilestones.deleteMilestone) {
+      App.util.modal({
+        title: '确认删除里程碑提醒',
+        content: '确定删除任务「' + App.util.escapeHtml(t.title) + '」？该里程碑提醒将被永久移除，刷新后不会再生。',
+        confirmText: '删除', confirmStyle: 'danger',
+        onConfirm: function(close) {
+          App.views.teacherMilestones.deleteMilestone(t.milestoneId);
+          close();
+          App.router.resolve();
+        }
+      });
+      return;
+    }
+
     App.util.modal({
       title: '确认删除任务',
       content: '确定删除任务「' + App.util.escapeHtml(t.title) + '」？此操作不可撤销。',
@@ -975,8 +991,21 @@
       confirmText: '删除', confirmStyle: 'danger',
       onConfirm: function(close) {
         var removeSet = {};
-        removable.forEach(function(t) { removeSet[t.id] = true; });
-        var tasks = all.filter(function(t) { return !removeSet[t.id]; });
+        var milestoneIds = {};
+        removable.forEach(function(t) {
+          if (t.source === 'teacher-milestone' && t.milestoneId && App.views.teacherMilestones && App.views.teacherMilestones.deleteMilestone) {
+            milestoneIds[t.milestoneId] = true;
+          } else {
+            removeSet[t.id] = true;
+          }
+        });
+        // 先抑制里程碑（会清理对应 task + node + milestone）
+        Object.keys(milestoneIds).forEach(function(mid) {
+          try { App.views.teacherMilestones.deleteMilestone(mid); } catch (e) {}
+        });
+        // 再删除普通任务
+        var tasks = App.store.get('tasks') || [];
+        tasks = tasks.filter(function(t) { return !removeSet[t.id]; });
         App.store.set('tasks', tasks);
         ids.forEach(function(id) { delete _selected[id]; });
         _selectMode = false;
