@@ -1327,6 +1327,18 @@ body.auth-locked .sync-widget{display:none}
 @keyframes ag-spin{to{transform:rotate(360deg)}}
 .ag-ok{font-size:13px;color:#22c55e;font-weight:600}
 
+/* 备案信息展示（登录门禁页 + 全局底部） */
+.ag-foot { margin-top:8px; font-size:12px; color:var(--text-faint); line-height:1.5; }
+.ag-foot a { color:var(--text-muted); text-decoration:none; }
+.ag-foot a:hover { text-decoration:underline; }
+
+.site-foot { position:fixed; left:0; right:0; bottom:0; z-index:9998; padding:8px 16px; text-align:center; font-size:12px; color:var(--text-faint); background:var(--bg); border-top:1px solid var(--border); }
+.site-foot a { color:var(--text-muted); text-decoration:none; }
+.site-foot a:hover { text-decoration:underline; }
+
+/* 底部备案条占位，避免内容被固定 footer 遮挡 */
+body { padding-bottom:34px; }
+
 /* ===== 教师职业发展关键节点提醒面板 ===== */
 .stat-ms { color:var(--accent-text); border-color:color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .ms-card { margin-top:18px; }
