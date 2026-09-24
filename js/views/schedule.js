@@ -16,6 +16,10 @@
   var _dismissedKey = null;   // 已忽略的抓取时间戳，避免重复弹横幅
   var _fetchChannel = null;   // 抓取结果共享行的实时订阅
 
+  // AI 周课次饱和度分析：教师选择状态 + 基准
+  var SAT_BASE = 16;          // 16 次课 = 100% 满负荷基准
+  var _selNames = null;       // 选中教师（name -> bool；null 表示全部选中）
+
   // 把常见星期写法归一到 周一..周日
   function normDay(d) {
     var map = {
@@ -96,6 +100,7 @@
     if (syncEnabled()) {
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.syncNow()">' + U.svgIcon('refresh-cw', 14) + '同步抓取</button>';
     }
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.schedule.computeSaturation()">' + U.svgIcon('zap', 14) + ' AI 计算饱和度</button>';
     html += '</div></div>';
     html += '<div id="schedule-fetch-banner"></div>';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:6px">上次更新：' + U.escapeHtml(updatedAt) + U.escapeHtml(srcInfo) + '</p>';
@@ -134,7 +139,16 @@
     html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.addPeriod()">+ 添加节次</button>';
     html += '</div></div>';
 
+    // 教师选择条（控制 AI 饱和度计算覆盖范围）
+    html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--text-muted)">';
+    html += '<span>参与饱和度计算的教师：</span>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.schedule.selectAllTeachers(true)">全选</button>';
+    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.schedule.selectAllTeachers(false)">全不选</button>';
+    html += '<span>（勾选每位教师卡片左上角的「选」方框，默认全部参与）</span>';
+    html += '</div>';
+
     html += '<div id="schedule-teachers"></div>';
+    html += '<div id="schedule-saturation"></div>';
     html += '<input type="file" id="schedule-file" accept="image/*" multiple style="display:none" onchange="App.views.schedule.onFiles(this)">';
     html += '</div>';
 
@@ -143,6 +157,7 @@
   }
 
   function renderTeachers(teachers, periods) {
+    syncSel(teachers || []);
     var wrap = document.getElementById('schedule-teachers');
     if (!wrap) return;
     var html = '';
@@ -160,6 +175,7 @@
     html += '<div class="card" style="margin-bottom:16px" data-teacher-index="' + index + '">';
     // 教师信息行
     html += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">';
+    html += '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--text-muted);margin-right:6px"><input type="checkbox" ' + (isSel(t.name || '') ? 'checked' : '') + ' onchange="App.views.schedule.toggleTeacher(' + index + ', this.checked)"> 选</label>';
     html += teacherInput(index, 'name', t.name, '教师姓名', '140px');
     html += teacherInput(index, 'code', t.code, '工号/编码', '110px');
     html += teacherInput(index, 'subject', t.subject, '学科', '110px');
@@ -620,6 +636,160 @@
     renderShell(document.getElementById('view-container'), data);
   }
 
+  /* ---------------- AI 周课次饱和度分析 ---------------- */
+  // 学科组归一（与 teachers.js canonSubject 保持一致：数学/英语/文综/理综）
+  function canonSubjectLocal(s) {
+    s = String(s || '').trim();
+    if (!s) return '';
+    s = s.replace(/科组$|教研组$|备课组$|学科组$|组$|学科$/, '');
+    if (s.indexOf('数学') >= 0) return '数学';
+    if (s.indexOf('英语') >= 0) return '英语';
+    if (s.indexOf('文综') >= 0) return '文综';
+    if (s.indexOf('理综') >= 0) return '理综';
+    return s;
+  }
+
+  // 选择状态管理（以教师姓名为键；null = 全部选中）
+  function syncSel(teachers) {
+    var cur = {};
+    (teachers || []).forEach(function (t) {
+      var n = t.name || '';
+      cur[n] = (_selNames && _selNames[n] === false) ? false : true;
+    });
+    _selNames = cur;
+  }
+  function isSel(name) { return _selNames ? (_selNames[name] !== false) : true; }
+  function setSel(name, val) { if (!_selNames) _selNames = {}; _selNames[name] = val; }
+  function selectAll(val, teachers) { (teachers || []).forEach(function (t) { setSel(t.name || '', val); }); }
+
+  function toggleTeacher(idx, val) {
+    var t = getSchedule().teachers[idx];
+    if (!t) return;
+    setSel(t.name || '', val);
+  }
+  function selectAllTeachers(val) {
+    var teachers = getSchedule().teachers || [];
+    selectAll(val, teachers);
+    renderTeachers(teachers, getSchedule().periods);
+  }
+
+  function isRest(v) { return v == null || (String(v).trim()).length === 0 || String(v).trim() === '休息'; }
+  function isLeave(v) { return String(v).indexOf('[请假]') >= 0; }
+
+  function satPct(v) { if (v == null || isNaN(v)) return '-'; return (v * 100).toFixed(0) + '%'; }
+  function satColor(v) {
+    if (v == null || isNaN(v)) return 'var(--text-muted)';
+    if (v > 1) return 'var(--bad)';      // 超饱和（>100%）
+    if (v >= 0.75) return 'var(--ok)';   // 饱满
+    if (v >= 0.5) return 'var(--warn)';  // 中等
+    return 'var(--text-muted)';          // 偏低
+  }
+
+  // 一键计算：读取所选教师课次 → 按教师 + 按科组 汇总饱和度
+  function computeSaturation() {
+    var data = getSchedule();
+    var teachers = data.teachers || [];
+    if (!teachers.length) { App.util.toast('暂无教师课程表，无法计算', 'warn'); return; }
+
+    // 教师管理板块：姓名 → 归一科组（用于按科组聚合）
+    var tchAll = (App.viewData && App.viewData().teachers) || [];
+    var groupMap = {};
+    tchAll.forEach(function (t) { if (t && t.name) groupMap[t.name] = canonSubjectLocal(t.subjectGroup); });
+
+    var rows = [];
+    teachers.forEach(function (t) {
+      var name = t.name || '（未命名）';
+      if (!isSel(name)) return;
+      var classes = t.classes || {};
+      var pre = 0, leave = 0;
+      Object.keys(classes).forEach(function (k) {
+        var v = String(classes[k] || '').trim();
+        if (isRest(v)) return;           // 空 / 休息 不计入预排
+        pre++;
+        if (isLeave(v)) leave++;          // 请假课次
+      });
+      var actual = pre - leave;
+      var subj = groupMap[name];
+      if (!subj) subj = canonSubjectLocal(t.subject) || '未分组';
+      rows.push({
+        name: name, group: subj,
+        pre: pre, leave: leave, actual: actual,
+        preSat: SAT_BASE ? pre / SAT_BASE : 0,
+        actualSat: SAT_BASE ? actual / SAT_BASE : 0
+      });
+    });
+
+    if (!rows.length) { App.util.toast('未选择任何教师，请至少勾选一位', 'warn'); return; }
+
+    // 按科组聚合（科组饱和度 = 科组周课次 / 16 / 科组教师数）
+    var groups = {};
+    rows.forEach(function (r) {
+      if (!groups[r.group]) groups[r.group] = { group: r.group, teachers: 0, pre: 0, actual: 0 };
+      groups[r.group].teachers++;
+      groups[r.group].pre += r.pre;
+      groups[r.group].actual += r.actual;
+    });
+    var groupRows = Object.keys(groups).map(function (k) {
+      var g = groups[k];
+      return {
+        group: g.group, teachers: g.teachers, pre: g.pre, actual: g.actual,
+        preSat: g.teachers ? g.pre / SAT_BASE / g.teachers : 0,
+        actualSat: g.teachers ? g.actual / SAT_BASE / g.teachers : 0
+      };
+    });
+
+    renderSaturation(rows, groupRows);
+    App.util.toast('已计算 ' + rows.length + ' 位教师的周课次饱和度', 'ok');
+  }
+
+  function renderSaturation(rows, groupRows) {
+    var wrap = document.getElementById('schedule-saturation');
+    if (!wrap) return;
+    var U = App.util;
+    var html = '';
+    html += '<div class="card" style="margin-top:18px">';
+    html += '<div class="card-header"><h3 class="card-title">' + U.svgIcon('bar-chart-2', 18) + 'AI 周课次饱和度分析</h3>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">基准：每周 ' + SAT_BASE + ' 次课 = 100% 满负荷</span></div>';
+
+    // 教师明细
+    html += '<h4 style="font-size:13px;margin:6px 0 8px">按教师</h4>';
+    html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:660px"><thead><tr>';
+    ['教师', '科组', '预排周课次', '请假课次', '实际周课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
+    html += '</tr></thead><tbody>';
+    rows.forEach(function (r) {
+      html += '<tr>';
+      html += '<td>' + U.escapeHtml(r.name) + '</td>';
+      html += '<td>' + U.escapeHtml(r.group) + '</td>';
+      html += '<td class="mono">' + r.pre + '</td>';
+      html += '<td class="mono">' + r.leave + '</td>';
+      html += '<td class="mono">' + r.actual + '</td>';
+      html += '<td class="mono" style="color:' + satColor(r.preSat) + ';font-weight:600">' + satPct(r.preSat) + '</td>';
+      html += '<td class="mono" style="color:' + satColor(r.actualSat) + ';font-weight:600">' + satPct(r.actualSat) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    // 科组汇总
+    html += '<h4 style="font-size:13px;margin:18px 0 8px">按科组（科组饱和度 = 科组周课次 / ' + SAT_BASE + ' / 科组教师数）</h4>';
+    html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:660px"><thead><tr>';
+    ['科组', '教师数', '预排周课次', '实际周课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
+    html += '</tr></thead><tbody>';
+    groupRows.forEach(function (g) {
+      html += '<tr>';
+      html += '<td>' + U.escapeHtml(g.group) + '</td>';
+      html += '<td class="mono">' + g.teachers + '</td>';
+      html += '<td class="mono">' + g.pre + '</td>';
+      html += '<td class="mono">' + g.actual + '</td>';
+      html += '<td class="mono" style="color:' + satColor(g.preSat) + ';font-weight:600">' + satPct(g.preSat) + '</td>';
+      html += '<td class="mono" style="color:' + satColor(g.actualSat) + ';font-weight:600">' + satPct(g.actualSat) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    html += '</div>';
+    wrap.innerHTML = html;
+  }
+
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.schedule = {
@@ -639,7 +809,11 @@
     normalizeImport: normalizeData,
     // 日期选择模式（周度 / 月度）
     setScheduleMode: setScheduleMode,
-    onMonthChange: onMonthChange
+    onMonthChange: onMonthChange,
+    // AI 周课次饱和度分析
+    computeSaturation: computeSaturation,
+    toggleTeacher: toggleTeacher,
+    selectAllTeachers: selectAllTeachers
   };
 
 })();
