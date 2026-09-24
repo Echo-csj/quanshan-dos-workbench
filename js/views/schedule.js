@@ -502,6 +502,36 @@
     if (banner) banner.innerHTML = '';
   }
 
+  // 取当前用户会话 JWT；失败返回空字符串
+  async function getSessionJWT() {
+    try {
+      var sb = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
+      if (sb && sb.auth && sb.auth.getSession) {
+        var s = await sb.auth.getSession();
+        return (s && s.data && s.session && s.session.access_token) || '';
+      }
+    } catch (e) {}
+    return '';
+  }
+  // 尝试刷新会话并返回新 JWT
+  async function refreshSessionJWT() {
+    try {
+      var sb = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
+      if (sb && sb.auth && sb.auth.refreshSession) {
+        var r = await sb.auth.refreshSession();
+        return (r && r.data && r.data.session && r.data.session.access_token) || '';
+      }
+    } catch (e) {}
+    return '';
+  }
+  async function doFetch(url, jwt) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
+      body: '{}'
+    });
+  }
+
   // 触发 fetch-schedule 立即抓取一次（腾讯云 Node 服务，路径反代）
   async function syncNow() {
     var url = (window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL) || '';
@@ -510,24 +540,21 @@
       return;
     }
     // 手动触发：用当前登录用户的 Supabase 会话 JWT 鉴权（前端不再下发任何密钥，避免 cron secret 暴露）
-    var jwt = '';
-    try {
-      var sb = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
-      if (sb && sb.auth && sb.auth.getSession) {
-        var s = await sb.auth.getSession();
-        jwt = (s && s.data && s.session && s.session.access_token) || '';
-      }
-    } catch (e) { jwt = ''; }
+    var jwt = await getSessionJWT();
     App.util.toast('正在从源站抓取课程表…');
     try {
-      var res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
-        body: '{}'
-      });
+      var res = await doFetch(url, jwt);
       var j = await res.json().catch(function () { return {}; });
+      // 401 可能是 access_token 过期，尝试刷新会话后重试一次
       if (res.status === 401) {
-        App.util.toast('服务端尚未启用 JWT 鉴权，请先部署 server.mjs 更新', 'bad');
+        var fresh = await refreshSessionJWT();
+        if (fresh && fresh !== jwt) {
+          res = await doFetch(url, fresh);
+          j = await res.json().catch(function () { return {}; });
+        }
+      }
+      if (res.status === 401) {
+        App.util.toast('会话已过期或无效，请退出登录后重新登录再试', 'bad');
         return;
       }
       if (!res.ok || (j && j.ok === false)) {
