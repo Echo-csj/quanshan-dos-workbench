@@ -119,7 +119,8 @@
     if (status() === 'disabled') renderDisabled();
 
     if (App.sync && App.sync.onStatus) {
-      App.sync.onStatus(function (s, msg) {
+      var cb = function (s, msg) {
+        console.log('[auth-gate] status', s, msg || '');
         if (s === 'disabled') renderDisabled();
         if (s === 'signingin') { setLoading(true); }
         else if (s === 'error') { showError(msg); }
@@ -137,14 +138,22 @@
           apply();   // 退出登录 → 立即重新锁屏并清空已渲染内容
         }
         prevStatus = s;
-      });
+      };
+      App.sync.onStatus(cb);
+      // 防御：注册回调时同步用当前状态补发一次，避免 sync.js 在 auth-gate 注册前就已 setStatus('ok') 导致漏事件
+      cb(status());
     }
     apply();
+    // 防御：页面加载会话恢复存在竞态，延迟再检查几次确保解锁
+    setTimeout(apply, 300);
+    setTimeout(apply, 800);
+    setTimeout(apply, 1600);
   }
 
   // 锁定 / 解锁整个应用（body.auth-locked 控制 CSS：隐藏 app-shell，显示登录屏）
   function apply() {
     var locked = !isAuthed();
+    console.log('[auth-gate] apply locked=', locked, 'status=', status(), 'bodyHasLock=', document.body.classList.contains('auth-locked'));
     if (locked) {
       document.body.classList.add('auth-locked');
       // 清除已渲染内容，避免 DOM 残留（防御：即便用 devtools 去掉锁定类也看不到数据）
