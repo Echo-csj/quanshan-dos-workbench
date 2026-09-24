@@ -379,7 +379,7 @@
       { label: '预排周课次', w: 130, num: true }, { label: '实际周课次', w: 130, num: true },
       { label: '预排饱和度', w: 150, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 150, pct: true, key: 'actualSat' }
     ];
-    function tableH(count) { return 44 + Math.max(count, 1) * 34 + 10; }
+    function tableH(count) { return 22 + 44 + Math.max(count, 1) * 34 + 10; }
     var t1h = tableH(rows.length), t2h = tableH(groups.length);
     var H = pad + 58 + 28 + 16 + t1h + 20 + t2h + pad;
 
