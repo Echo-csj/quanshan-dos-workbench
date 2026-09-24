@@ -1,0 +1,515 @@
+/* ============================================
+   weekly-kpi.js — 教师周度 KPI（关键绩效指标）
+   数据来源：课程表（App.store.schedule）的每周课次
+            + 教师管理板块（App.viewData().teachers）的科组映射
+   指标：预排周课次 / 请假课次 / 实际周课次（=预排−请假）
+         / 预排饱和度（=预排/16）/ 实际饱和度（=实际/16）
+   支持：按周查看（本周实时 + 历史快照）/ 按科组筛选 / 教师勾选纳入科组聚合
+   导出：Excel（XLSX，两张表）/ 图片（canvas 绘制 PNG，零外部依赖）
+   ============================================ */
+
+(function() {
+
+  var SUBJECT_GROUPS = ['数学', '英语', '文综', '理综'];
+  var BASE = 16; // 16 次课 = 100% 满负荷
+
+  // ---------- 页面状态 ----------
+  var _selNames = null;        // 选中教师（name -> bool；null = 全部选中）
+  var _mode = '__live__';      // '__live__' 或 某周起始日 ISO（快照）
+  var _filterGroup = 'all';    // 科组筛选
+  var _displayedRows = [];     // 当前展示（受筛选）的按教师行
+  var _lastRows = [];          // 导出用：最近一次按教师行
+  var _lastGroups = [];        // 导出用：最近一次按科组行
+  var _lastWeek = 'export';    // 导出用文件名片段
+
+  // ---------- 工具 ----------
+  // 学科组归一（与 teachers.js canonSubject 保持一致：数学/英语/文综/理综）
+  function canonSubject(s) {
+    s = String(s || '').trim();
+    if (!s) return '';
+    s = s.replace(/科组$|教研组$|备课组$|学科组$|组$|学科$/, '');
+    if (s.indexOf('数学') >= 0) return '数学';
+    if (s.indexOf('英语') >= 0) return '英语';
+    if (s.indexOf('文综') >= 0) return '文综';
+    if (s.indexOf('理综') >= 0) return '理综';
+    return s;
+  }
+  function thisMonday() {
+    var d = new Date();
+    var day = (d.getDay() + 6) % 7; // 周一=0
+    d.setDate(d.getDate() - day);
+    return d.toISOString().slice(0, 10);
+  }
+  function thisSunday() {
+    var d = new Date(thisMonday());
+    d.setDate(d.getDate() + 6);
+    return d.toISOString().slice(0, 10);
+  }
+  function isRest(v) { return v == null || (String(v).trim()).length === 0 || String(v).trim() === '休息'; }
+  function isLeave(v) { return String(v).indexOf('[请假]') >= 0; }
+  function pct(v) { if (v == null || isNaN(v)) return '-'; return (v * 100).toFixed(0) + '%'; }
+
+  // HTML/屏幕用饱和度配色（CSS 变量）
+  function satColor(v) {
+    if (v == null || isNaN(v)) return 'var(--text-muted)';
+    if (v > 1) return 'var(--bad)';       // 超饱和（>100%）
+    if (v >= 0.75) return 'var(--ok)';    // 饱满
+    if (v >= 0.5) return 'var(--warn)';   // 中等
+    return 'var(--text-muted)';           // 偏低
+  }
+  // canvas 用饱和度配色（十六进制）
+  var SAT_HEX = { bad: '#EF4444', ok: '#16A34A', warn: '#F59E0B', low: '#6B7280' };
+  function satHex(v) {
+    if (v == null || isNaN(v)) return SAT_HEX.low;
+    if (v > 1) return SAT_HEX.bad;
+    if (v >= 0.75) return SAT_HEX.ok;
+    if (v >= 0.5) return SAT_HEX.warn;
+    return SAT_HEX.low;
+  }
+
+  function buildGroupMap() {
+    var tchAll = (App.viewData && App.viewData().teachers) || [];
+    var m = {};
+    tchAll.forEach(function (t) { if (t && t.name) m[t.name] = canonSubject(t.subjectGroup); });
+    return m;
+  }
+
+  function readSchedule() {
+    var d = App.store.get('schedule') || {};
+    return {
+      weekStartDate: d.weekStartDate || null,
+      weekEndDate: d.weekEndDate || null,
+      teachers: (d.teachers && d.teachers.length) ? d.teachers.slice() : []
+    };
+  }
+
+  // 选择状态（以教师姓名为键；null = 全部选中）
+  function syncSel(teachers) {
+    var cur = {};
+    (teachers || []).forEach(function (t) {
+      var n = t.name || '';
+      cur[n] = (_selNames && _selNames[n] === false) ? false : true;
+    });
+    _selNames = cur;
+  }
+  function isSel(name) { return _selNames ? (_selNames[name] !== false) : true; }
+  function setSel(name, val) { if (!_selNames) _selNames = {}; _selNames[name] = val; }
+
+  // 计算每位教师 KPI（受科组筛选；selected 由 _selNames 决定）
+  function computeRows(filterGroup) {
+    var sch = readSchedule();
+    var groupMap = buildGroupMap();
+    var rows = [];
+    (sch.teachers || []).forEach(function (t) {
+      var name = t.name || '（未命名）';
+      var subj = groupMap[name] || canonSubject(t.subject) || '未分组';
+      if (filterGroup && filterGroup !== 'all' && subj !== filterGroup) return;
+      var classes = t.classes || {};
+      var pre = 0, leave = 0;
+      Object.keys(classes).forEach(function (k) {
+        var v = String(classes[k] || '').trim();
+        if (isRest(v)) return;            // 空 / 休息 不计入预排
+        pre++;
+        if (isLeave(v)) leave++;          // 请假课次
+      });
+      var actual = pre - leave;
+      rows.push({
+        name: name, group: subj,
+        pre: pre, leave: leave, actual: actual,
+        preSat: pre / BASE, actualSat: actual / BASE,
+        selected: isSel(name)
+      });
+    });
+    return rows;
+  }
+
+  // 按科组聚合（仅统计已勾选教师）：科组周课次 / 16 / 科组教师数
+  function computeGroups(rows) {
+    var groups = {};
+    rows.forEach(function (r) {
+      if (!r.selected) return;
+      if (!groups[r.group]) groups[r.group] = { group: r.group, teachers: 0, pre: 0, actual: 0 };
+      groups[r.group].teachers++;
+      groups[r.group].pre += r.pre;
+      groups[r.group].actual += r.actual;
+    });
+    return Object.keys(groups).map(function (k) {
+      var g = groups[k];
+      return {
+        group: g.group, teachers: g.teachers, pre: g.pre, actual: g.actual,
+        preSat: g.teachers ? g.pre / BASE / g.teachers : 0,
+        actualSat: g.teachers ? g.actual / BASE / g.teachers : 0
+      };
+    });
+  }
+
+  // ---------- 快照（支持按周查看历史）----------
+  function getSnapshots() { return App.store.get('kpiSnapshots') || {}; }
+  function liveWeekKey() { var sch = readSchedule(); return sch.weekStartDate || thisMonday(); }
+
+  function saveSnapshot() {
+    var sch = readSchedule();
+    var rows = computeRows('all');     // 存全量（含 selected 标记），查看时再按筛选显示
+    var groups = computeGroups(rows);
+    var wk = sch.weekStartDate || thisMonday();
+    var snaps = getSnapshots();
+    snaps[wk] = {
+      weekStart: wk,
+      weekEnd: sch.weekEndDate || thisSunday(),
+      rows: rows,
+      groups: groups,
+      createdAt: new Date().toISOString()
+    };
+    App.store.set('kpiSnapshots', snaps);
+    _mode = wk;
+    render();
+    App.util.toast('已保存本周 KPI 快照（' + wk + '）', 'ok');
+  }
+
+  function deleteSnapshot(wk) {
+    var snaps = getSnapshots();
+    if (!snaps[wk]) { render(); return; }
+    App.util.modal({
+      title: '删除 KPI 快照',
+      content: '将删除 ' + wk + ' 周的 KPI 快照，此操作不可恢复。',
+      confirmText: '删除',
+      onConfirm: function (close) {
+        var s = getSnapshots();
+        delete s[wk];
+        App.store.set('kpiSnapshots', s);
+        if (_mode === wk) _mode = '__live__';
+        render();
+        close();
+        App.util.toast('已删除该周快照', 'ok');
+      }
+    });
+  }
+
+  // ---------- 渲染 ----------
+  function render() {
+    var container = document.getElementById('view-container');
+    if (!container) return;
+    var U = App.util;
+
+    var sch = readSchedule();
+    var liveWeek = sch.weekStartDate || thisMonday();
+    var liveEnd = sch.weekEndDate || thisSunday();
+    var isLive = (_mode === '__live__');
+    var snap = isLive ? null : (getSnapshots()[_mode] || null);
+
+    var rows, groups, weekStart, weekEnd, sourceText;
+    if (isLive) {
+      syncSel(sch.teachers);
+      rows = computeRows(_filterGroup);
+      groups = computeGroups(rows);
+      weekStart = liveWeek; weekEnd = liveEnd;
+      sourceText = '数据来源：课程表（' + liveWeek + ' ~ ' + liveEnd + '）';
+    } else if (snap) {
+      rows = (snap.rows || []).filter(function (r) {
+        return (_filterGroup === 'all') || (r.group === _filterGroup);
+      });
+      groups = snap.groups || [];
+      weekStart = snap.weekStart; weekEnd = snap.weekEnd;
+      var when = snap.createdAt ? new Date(snap.createdAt).toLocaleString('zh-CN') : '未知';
+      sourceText = '数据来源：KPI 快照（保存于 ' + when + '）';
+    } else {
+      rows = []; groups = [];
+      weekStart = liveWeek; weekEnd = liveEnd;
+      sourceText = '未找到该周快照，已回退到本周实时数据';
+      isLive = true;
+    }
+
+    _displayedRows = rows;
+    _lastRows = rows;
+    _lastGroups = groups;
+    _lastWeek = weekStart + '_' + weekEnd;
+
+    var html = '';
+    html += '<div class="page-head"><h1 class="page-title">教师周度 KPI</h1>';
+    html += '<p class="page-sub">教师每周关键绩效指标（课次与饱和度）· 基准：每周 ' + BASE + ' 次课 = 100% 满负荷</p></div>';
+
+    // 工具栏：左侧筛选，右侧操作
+    html += '<div class="teacher-toolbar">';
+    html += '<div class="teacher-filters">';
+    html += '<select class="form-input form-input-sm" id="kpi-week" onchange="App.views.weeklyKpi.onWeekChange(this.value)">';
+    html += '<option value="__live__"' + (isLive ? ' selected' : '') + '>本周（实时）</option>';
+    var snaps = getSnapshots();
+    Object.keys(snaps).sort().reverse().forEach(function (wk) {
+      html += '<option value="' + wk + '"' + ((!isLive && _mode === wk) ? ' selected' : '') + '>' + wk + ' 周</option>';
+    });
+    html += '</select>';
+    html += '<select class="form-input form-input-sm" id="kpi-group" onchange="App.views.weeklyKpi.onFilterChange(this.value)">';
+    html += '<option value="all"' + (_filterGroup === 'all' ? ' selected' : '') + '>全部科组</option>';
+    SUBJECT_GROUPS.forEach(function (sg) {
+      html += '<option value="' + sg + '"' + (_filterGroup === sg ? ' selected' : '') + '>' + sg + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+
+    html += '<div class="teacher-actions">';
+    if (isLive) {
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(true)">全选</button>';
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(false)">全不选</button>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.saveSnapshot()">' + U.svgIcon('save', 14) + ' 保存本周快照</button>';
+    } else {
+      html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.deleteSnapshot(\'' + weekStart + '\')">删除该周快照</button>';
+    }
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.weeklyKpi.exportImage()">' + U.svgIcon('image', 14) + ' 导出图片</button>';
+    html += '<button class="btn btn-primary btn-sm" onclick="App.views.weeklyKpi.exportXLSX()">' + U.svgIcon('download', 14) + ' 导出表格</button>';
+    html += '</div>';
+    html += '</div>';
+
+    html += '<p class="form-hint" style="margin-bottom:14px">' + U.escapeHtml(sourceText)
+      + ' · 当前周度范围：' + U.escapeHtml(weekStart) + ' ~ ' + U.escapeHtml(weekEnd)
+      + (isLive ? '（调整周范围请到「课程表」修改后保存，再硬刷新本页）' : '') + '</p>';
+
+    html += renderTeacherTable(rows, isLive);
+    html += renderGroupTable(groups);
+
+    container.innerHTML = html;
+  }
+
+  function renderTeacherTable(rows, isLive) {
+    var U = App.util;
+    var html = '';
+    html += '<div class="card" style="margin-bottom:18px"><div class="card-header"><h3 class="card-title">' + U.svgIcon('users', 18) + '按教师</h3>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">勾选「选」决定该教师是否纳入科组汇总</span></div>';
+    if (!rows.length) {
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无教师课次数据' + (isLive ? '（请先在「课程表」导入 / 填写并保存）' : '') + '</div>';
+    } else {
+      html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:680px"><thead><tr>';
+      if (isLive) html += '<th style="width:44px">选</th>';
+      ['教师', '科组', '预排周课次', '请假课次', '实际周课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(function (r, idx) {
+        html += '<tr>';
+        if (isLive) {
+          html += '<td><input type="checkbox" ' + (r.selected ? 'checked' : '') + ' onchange="App.views.weeklyKpi.toggleTeacher(' + idx + ', this.checked)"></td>';
+        }
+        html += '<td>' + U.escapeHtml(r.name) + '</td>';
+        html += '<td>' + U.escapeHtml(r.group) + '</td>';
+        html += '<td class="mono">' + r.pre + '</td>';
+        html += '<td class="mono">' + r.leave + '</td>';
+        html += '<td class="mono">' + r.actual + '</td>';
+        html += '<td class="mono" style="color:' + satColor(r.preSat) + ';font-weight:600">' + pct(r.preSat) + '</td>';
+        html += '<td class="mono" style="color:' + satColor(r.actualSat) + ';font-weight:600">' + pct(r.actualSat) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderGroupTable(groups) {
+    var U = App.util;
+    var html = '';
+    html += '<div class="card"><div class="card-header"><h3 class="card-title">' + U.svgIcon('bar-chart-2', 18) + '按科组</h3>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">科组饱和度 = 科组周课次 / ' + BASE + ' / 科组教师数（仅统计已勾选教师）</span></div>';
+    if (!groups.length) {
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无科组数据</div>';
+    } else {
+      html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:680px"><thead><tr>';
+      ['科组', '教师数', '预排周课次', '实际周课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
+      html += '</tr></thead><tbody>';
+      groups.forEach(function (g) {
+        html += '<tr>';
+        html += '<td>' + U.escapeHtml(g.group) + '</td>';
+        html += '<td class="mono">' + g.teachers + '</td>';
+        html += '<td class="mono">' + g.pre + '</td>';
+        html += '<td class="mono">' + g.actual + '</td>';
+        html += '<td class="mono" style="color:' + satColor(g.preSat) + ';font-weight:600">' + pct(g.preSat) + '</td>';
+        html += '<td class="mono" style="color:' + satColor(g.actualSat) + ';font-weight:600">' + pct(g.actualSat) + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  // ---------- 交互 ----------
+  function onWeekChange(v) { _mode = v; render(); }
+  function onFilterChange(v) { _filterGroup = v; render(); }
+  function toggleTeacher(idx, val) {
+    var r = _displayedRows[idx];
+    if (!r) return;
+    setSel(r.name, val);
+    render();
+  }
+  function selectAll(val) {
+    var sch = readSchedule();
+    syncSel(sch.teachers);
+    (sch.teachers || []).forEach(function (t) { setSel(t.name || '', val); });
+    render();
+  }
+
+  // ---------- 导出：Excel ----------
+  function exportXLSX() {
+    if (typeof XLSX === 'undefined') { App.util.toast('表格组件未加载，无法导出', 'bad'); return; }
+    var rows = _lastRows || [], groups = _lastGroups || [];
+    if (!rows.length) { App.util.toast('暂无可导出的数据', 'warn'); return; }
+    var wb = XLSX.utils.book_new();
+    var aoa1 = [['教师', '科组', '预排周课次', '请假课次', '实际周课次', '预排饱和度', '实际饱和度']];
+    rows.forEach(function (r) { aoa1.push([r.name, r.group, r.pre, r.leave, r.actual, pct(r.preSat), pct(r.actualSat)]); });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), '按教师');
+    var aoa2 = [['科组', '教师数', '预排周课次', '实际周课次', '预排饱和度', '实际饱和度']];
+    groups.forEach(function (g) { aoa2.push([g.group, g.teachers, g.pre, g.actual, pct(g.preSat), pct(g.actualSat)]); });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '按科组');
+    XLSX.writeFile(wb, '教师周度KPI_' + (_lastWeek || 'export') + '.xlsx');
+    App.util.toast('已导出 Excel', 'ok');
+  }
+
+  // ---------- 导出：图片（canvas 绘制，零外部依赖）----------
+  function exportImage() {
+    var rows = _lastRows || [], groups = _lastGroups || [];
+    if (!rows.length) { App.util.toast('暂无可导出的数据', 'warn'); return; }
+
+    var scale = 2;
+    var W = 980, pad = 30;
+    var fontStack = '-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif';
+
+    var teacherCols = [
+      { label: '教师', w: 140 }, { label: '科组', w: 80 },
+      { label: '预排周课次', w: 104, num: true }, { label: '请假课次', w: 104, num: true }, { label: '实际周课次', w: 104, num: true },
+      { label: '预排饱和度', w: 130, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 130, pct: true, key: 'actualSat' }
+    ];
+    var groupCols = [
+      { label: '科组', w: 150 }, { label: '教师数', w: 96, num: true },
+      { label: '预排周课次', w: 130, num: true }, { label: '实际周课次', w: 130, num: true },
+      { label: '预排饱和度', w: 150, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 150, pct: true, key: 'actualSat' }
+    ];
+    function tableH(count) { return 44 + Math.max(count, 1) * 34 + 10; }
+    var t1h = tableH(rows.length), t2h = tableH(groups.length);
+    var H = pad + 58 + 28 + 16 + t1h + 20 + t2h + pad;
+
+    var canvas = document.createElement('canvas');
+    canvas.width = W * scale;
+    canvas.height = H * scale;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+
+    // 背景
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+    // 标题
+    ctx.fillStyle = '#111827';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.font = '700 24px ' + fontStack;
+    ctx.fillText('教师周度 KPI · 课次饱和度分析', pad, pad + 26);
+    // 副标题
+    ctx.fillStyle = '#6B7280';
+    ctx.font = '400 13px ' + fontStack;
+    ctx.fillText('周度范围：' + (_lastWeek || '') + '　·　基准：每周 ' + BASE + ' 次课 = 100%　·　生成于 ' + new Date().toLocaleString('zh-CN'), pad, pad + 50);
+
+    var y = pad + 58 + 28 + 16;
+    y = drawTable(ctx, pad, y, '按教师', teacherCols, rows, false);
+    y += 20;
+    drawTable(ctx, pad, y, '按科组', groupCols, groups, true);
+
+    canvas.toBlob(function (blob) {
+      if (!blob) { App.util.toast('图片生成失败', 'bad'); return; }
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = '教师周度KPI_' + (_lastWeek || 'export') + '.png';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+      App.util.toast('已导出图片', 'ok');
+    });
+  }
+
+  // 在 (x, y) 绘制一张带标题的表格，返回绘制结束后的 y（已含底部留白）
+  function drawTable(ctx, x, y, title, cols, rows, isGroup) {
+    var fontStack = '-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif';
+    var headerH = 44, rowH = 34;
+    var tableW = 0; cols.forEach(function (c) { tableW += c.w; });
+    var rowsH = rows.length ? rows.length * rowH : rowH;
+    var totalH = headerH + rowsH;
+    var top = y;
+
+    // 标题
+    ctx.fillStyle = '#111827';
+    ctx.font = '700 16px ' + fontStack;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(title, x, y + 16);
+    y += 22;
+
+    // 表头
+    ctx.fillStyle = '#4F46E5';
+    ctx.fillRect(x, y, tableW, headerH);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '600 13px ' + fontStack;
+    ctx.textBaseline = 'middle';
+    var hx = x;
+    cols.forEach(function (c) {
+      ctx.textAlign = c.num || c.pct ? 'right' : 'left';
+      ctx.fillText(c.label, c.num || c.pct ? (hx + c.w - 12) : (hx + 12), y + headerH / 2);
+      hx += c.w;
+    });
+    y += headerH;
+
+    // 数据行
+    if (!rows.length) {
+      ctx.fillStyle = '#F3F4F6';
+      ctx.fillRect(x, y, tableW, rowH);
+      ctx.fillStyle = '#9CA3AF';
+      ctx.font = '400 12px ' + fontStack;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText('暂无数据', x + 12, y + rowH / 2);
+      y += rowH;
+    } else {
+      rows.forEach(function (r, ri) {
+        ctx.fillStyle = (ri % 2 === 0) ? '#FFFFFF' : '#F8F9FB';
+        ctx.fillRect(x, y, tableW, rowH);
+        var rx = x;
+        ctx.font = '400 13px ' + fontStack;
+        ctx.textBaseline = 'middle';
+        cols.forEach(function (c) {
+          var val, color = null;
+          if (c.pct) { val = pct(r[c.key]); color = satHex(r[c.key]); }
+          else if (c.num) { val = (r[c.key] != null ? r[c.key] : ''); }
+          else { val = r[c.key]; }
+          ctx.fillStyle = color || '#1F2937';
+          ctx.textAlign = c.num || c.pct ? 'right' : 'left';
+          ctx.fillText(String(val), c.num || c.pct ? (rx + c.w - 12) : (rx + 12), y + rowH / 2);
+          rx += c.w;
+        });
+        y += rowH;
+      });
+    }
+
+    // 外框 + 内部分隔线
+    ctx.strokeStyle = '#E5E7EB';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, top + 21.5, tableW, totalH); // 标题下方起始
+    // 列分隔线（浅）
+    var cx = x;
+    ctx.strokeStyle = '#F0F1F3';
+    for (var i = 0; i < cols.length - 1; i++) {
+      cx += cols[i].w;
+      ctx.beginPath();
+      ctx.moveTo(cx, top + 22 + headerH);
+      ctx.lineTo(cx, top + 22 + totalH);
+      ctx.stroke();
+    }
+
+    return y + 10;
+  }
+
+  // ---------- 路由 + 对外 ----------
+  App.router.register('/weekly-kpi', function () { render(); });
+
+  App.views = App.views || {};
+  App.views.weeklyKpi = {
+    onWeekChange: onWeekChange,
+    onFilterChange: onFilterChange,
+    toggleTeacher: toggleTeacher,
+    selectAll: selectAll,
+    saveSnapshot: saveSnapshot,
+    deleteSnapshot: deleteSnapshot,
+    exportImage: exportImage,
+    exportXLSX: exportXLSX
+  };
+
+})();
