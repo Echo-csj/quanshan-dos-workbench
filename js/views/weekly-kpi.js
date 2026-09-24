@@ -21,6 +21,7 @@
   var _lastRows = [];          // 导出用：最近一次按教师行
   var _lastGroups = [];        // 导出用：最近一次按科组行
   var _lastWeek = 'export';    // 导出用文件名片段
+  var _lastSummary = null;     // 导出用：最近一次校区汇总
 
   // ---------- 工具 ----------
   // 学科组归一（与 teachers.js canonSubject 保持一致：数学/英语/文综/理综）
@@ -143,6 +144,21 @@
     });
   }
 
+  // 校区汇总（基于已勾选教师的所有科组聚合）
+  function computeCampusSummary(groups) {
+    var summary = { label: '校区汇总', teachers: 0, pre: 0, actual: 0, preSat: 0, actualSat: 0 };
+    groups.forEach(function (g) {
+      summary.teachers += g.teachers;
+      summary.pre += g.pre;
+      summary.actual += g.actual;
+    });
+    if (summary.teachers) {
+      summary.preSat = summary.pre / BASE / summary.teachers;
+      summary.actualSat = summary.actual / BASE / summary.teachers;
+    }
+    return summary;
+  }
+
   // ---------- 快照（支持按周查看历史）----------
   function getSnapshots() { return App.store.get('kpiSnapshots') || {}; }
   function liveWeekKey() { var sch = readSchedule(); return sch.weekStartDate || thisMonday(); }
@@ -151,6 +167,7 @@
     var sch = readSchedule();
     var rows = computeRows('all');     // 存全量（含 selected 标记），查看时再按筛选显示
     var groups = computeGroups(rows);
+    var summary = computeCampusSummary(groups);
     var wk = sch.weekStartDate || thisMonday();
     var snaps = getSnapshots();
     snaps[wk] = {
@@ -158,6 +175,7 @@
       weekEnd: sch.weekEndDate || thisSunday(),
       rows: rows,
       groups: groups,
+      summary: summary,
       createdAt: new Date().toISOString()
     };
     App.store.set('kpiSnapshots', snaps);
@@ -197,11 +215,12 @@
     var isLive = (_mode === '__live__');
     var snap = isLive ? null : (getSnapshots()[_mode] || null);
 
-    var rows, groups, weekStart, weekEnd, sourceText;
+    var rows, groups, summary, weekStart, weekEnd, sourceText;
     if (isLive) {
       syncSel(sch.teachers);
       rows = computeRows(_filterGroup);
       groups = computeGroups(rows);
+      summary = computeCampusSummary(computeGroups(computeRows('all')));
       weekStart = liveWeek; weekEnd = liveEnd;
       sourceText = '数据来源：课程表（' + liveWeek + ' ~ ' + liveEnd + '）';
     } else if (snap) {
@@ -209,11 +228,13 @@
         return (_filterGroup === 'all') || (r.group === _filterGroup);
       });
       groups = snap.groups || [];
+      summary = snap.summary || computeCampusSummary(groups);
       weekStart = snap.weekStart; weekEnd = snap.weekEnd;
       var when = snap.createdAt ? new Date(snap.createdAt).toLocaleString('zh-CN') : '未知';
       sourceText = '数据来源：KPI 快照（保存于 ' + when + '）';
     } else {
       rows = []; groups = [];
+      summary = computeCampusSummary(groups);
       weekStart = liveWeek; weekEnd = liveEnd;
       sourceText = '未找到该周快照，已回退到本周实时数据';
       isLive = true;
@@ -222,6 +243,7 @@
     _displayedRows = rows;
     _lastRows = rows;
     _lastGroups = groups;
+    _lastSummary = summary;
     _lastWeek = weekStart + '_' + weekEnd;
 
     var html = '';
@@ -264,7 +286,7 @@
       + (isLive ? '（调整周范围请到「课程表」修改后保存，再硬刷新本页）' : '') + '</p>';
 
     html += renderTeacherTable(rows, isLive);
-    html += renderGroupTable(groups);
+    html += renderGroupTable(groups, summary);
 
     container.innerHTML = html;
   }
@@ -301,7 +323,7 @@
     return html;
   }
 
-  function renderGroupTable(groups) {
+  function renderGroupTable(groups, summary) {
     var U = App.util;
     var html = '';
     html += '<div class="card"><div class="card-header"><h3 class="card-title">' + U.svgIcon('bar-chart-2', 18) + '按科组</h3>';
@@ -322,6 +344,16 @@
         html += '<td class="mono" style="color:' + satColor(g.actualSat) + ';font-weight:600">' + pct(g.actualSat) + '</td>';
         html += '</tr>';
       });
+      if (summary && summary.teachers) {
+        html += '<tr style="font-weight:600;background:#EEF2FF;border-top:2px solid #4F46E5">';
+        html += '<td>' + U.escapeHtml(summary.label) + '</td>';
+        html += '<td class="mono">' + summary.teachers + '</td>';
+        html += '<td class="mono">' + summary.pre + '</td>';
+        html += '<td class="mono">' + summary.actual + '</td>';
+        html += '<td class="mono" style="color:' + satColor(summary.preSat) + '">' + pct(summary.preSat) + '</td>';
+        html += '<td class="mono" style="color:' + satColor(summary.actualSat) + '">' + pct(summary.actualSat) + '</td>';
+        html += '</tr>';
+      }
       html += '</tbody></table></div>';
     }
     html += '</div>';
@@ -347,7 +379,7 @@
   // ---------- 导出：Excel ----------
   function exportXLSX() {
     if (typeof XLSX === 'undefined') { App.util.toast('表格组件未加载，无法导出', 'bad'); return; }
-    var rows = _lastRows || [], groups = _lastGroups || [];
+    var rows = _lastRows || [], groups = _lastGroups || [], summary = _lastSummary;
     if (!rows.length) { App.util.toast('暂无可导出的数据', 'warn'); return; }
     var wb = XLSX.utils.book_new();
     var aoa1 = [['教师', '科组', '预排周课次', '请假课次', '实际周课次', '预排饱和度', '实际饱和度']];
@@ -355,6 +387,9 @@
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), '按教师');
     var aoa2 = [['科组', '教师数', '预排周课次', '实际周课次', '预排饱和度', '实际饱和度']];
     groups.forEach(function (g) { aoa2.push([g.group, g.teachers, g.pre, g.actual, pct(g.preSat), pct(g.actualSat)]); });
+    if (summary && summary.teachers) {
+      aoa2.push([summary.label, summary.teachers, summary.pre, summary.actual, pct(summary.preSat), pct(summary.actualSat)]);
+    }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '按科组');
     XLSX.writeFile(wb, '教师周度KPI_' + (_lastWeek || 'export') + '.xlsx');
     App.util.toast('已导出 Excel', 'ok');
@@ -362,7 +397,7 @@
 
   // ---------- 导出：图片（canvas 绘制，零外部依赖）----------
   function exportImage() {
-    var rows = _lastRows || [], groups = _lastGroups || [];
+    var rows = _lastRows || [], groups = _lastGroups || [], summary = _lastSummary;
     if (!rows.length) { App.util.toast('暂无可导出的数据', 'warn'); return; }
 
     var scale = 2;
@@ -370,17 +405,17 @@
     var fontStack = '-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif';
 
     var teacherCols = [
-      { label: '教师', w: 140 }, { label: '科组', w: 80 },
-      { label: '预排周课次', w: 104, num: true }, { label: '请假课次', w: 104, num: true }, { label: '实际周课次', w: 104, num: true },
+      { label: '教师', w: 140, key: 'name' }, { label: '科组', w: 80, key: 'group' },
+      { label: '预排周课次', w: 104, num: true, key: 'pre' }, { label: '请假课次', w: 104, num: true, key: 'leave' }, { label: '实际周课次', w: 104, num: true, key: 'actual' },
       { label: '预排饱和度', w: 130, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 130, pct: true, key: 'actualSat' }
     ];
     var groupCols = [
-      { label: '科组', w: 150 }, { label: '教师数', w: 96, num: true },
-      { label: '预排周课次', w: 130, num: true }, { label: '实际周课次', w: 130, num: true },
+      { label: '科组', w: 150, key: 'group' }, { label: '教师数', w: 96, num: true, key: 'teachers' },
+      { label: '预排周课次', w: 130, num: true, key: 'pre' }, { label: '实际周课次', w: 130, num: true, key: 'actual' },
       { label: '预排饱和度', w: 150, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 150, pct: true, key: 'actualSat' }
     ];
-    function tableH(count) { return 22 + 44 + Math.max(count, 1) * 34 + 10; }
-    var t1h = tableH(rows.length), t2h = tableH(groups.length);
+    function tableH(count, hasSummary) { return 22 + 44 + Math.max(count, 1) * 34 + (hasSummary ? 34 : 0) + 10; }
+    var t1h = tableH(rows.length, false), t2h = tableH(groups.length, true);
     var H = pad + 58 + 28 + 16 + t1h + 20 + t2h + pad;
 
     var canvas = document.createElement('canvas');
@@ -403,9 +438,9 @@
     ctx.fillText('周度范围：' + (_lastWeek || '') + '　·　基准：每周 ' + BASE + ' 次课 = 100%　·　生成于 ' + new Date().toLocaleString('zh-CN'), pad, pad + 50);
 
     var y = pad + 58 + 28 + 16;
-    y = drawTable(ctx, pad, y, '按教师', teacherCols, rows, false);
+    y = drawTable(ctx, pad, y, '按教师', teacherCols, rows, false, null);
     y += 20;
-    drawTable(ctx, pad, y, '按科组', groupCols, groups, true);
+    drawTable(ctx, pad, y, '按科组', groupCols, groups, true, summary);
 
     canvas.toBlob(function (blob) {
       if (!blob) { App.util.toast('图片生成失败', 'bad'); return; }
@@ -420,11 +455,11 @@
   }
 
   // 在 (x, y) 绘制一张带标题的表格，返回绘制结束后的 y（已含底部留白）
-  function drawTable(ctx, x, y, title, cols, rows, isGroup) {
+  function drawTable(ctx, x, y, title, cols, rows, isGroup, summary) {
     var fontStack = '-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif';
     var headerH = 44, rowH = 34;
     var tableW = 0; cols.forEach(function (c) { tableW += c.w; });
-    var rowsH = rows.length ? rows.length * rowH : rowH;
+    var rowsH = (rows.length ? rows.length * rowH : rowH) + (summary ? rowH : 0);
     var totalH = headerH + rowsH;
     var top = y;
 
@@ -477,6 +512,33 @@
         });
         y += rowH;
       });
+    }
+
+    // 汇总行
+    if (summary) {
+      ctx.fillStyle = '#EEF2FF';
+      ctx.fillRect(x, y, tableW, rowH);
+      ctx.strokeStyle = '#4F46E5';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, y + 0.5);
+      ctx.lineTo(x + tableW - 0.5, y + 0.5);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      var sx = x;
+      ctx.font = '600 13px ' + fontStack;
+      ctx.textBaseline = 'middle';
+      cols.forEach(function (c) {
+        var val, color = null;
+        if (c.pct) { val = pct(summary[c.key]); color = satHex(summary[c.key]); }
+        else if (c.num) { val = (summary[c.key] != null ? summary[c.key] : ''); }
+        else { val = summary.label || '校区汇总'; }
+        ctx.fillStyle = color || '#1F2937';
+        ctx.textAlign = c.num || c.pct ? 'right' : 'left';
+        ctx.fillText(String(val), c.num || c.pct ? (sx + c.w - 12) : (sx + 12), y + rowH / 2);
+        sx += c.w;
+      });
+      y += rowH;
     }
 
     // 外框 + 内部分隔线
