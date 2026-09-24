@@ -941,24 +941,30 @@
     var all = getTasks().filter(function(x) { return x.id === id; })[0];
     // 子台不可删除主台下发的只读任务
     if (isSubView() && all && all._readOnly) { App.util.toast('该任务来自主台，不可在子台删除', 'warn'); return; }
-    // 主台删除「聚合的子台任务」：本地先移除，并写回子台整档
+    // 主台删除「聚合的子台任务」：先写回子台整档，成功后才从本地移除
     if (all && all._subUserId && !isSubView()) {
       App.util.modal({
         title: '确认删除子台任务',
         content: '确定删除任务「' + App.util.escapeHtml(all.title) + '」？该操作会同步从「' + App.util.escapeHtml(all._subName || '子台') + '」的工作台移除。',
         confirmText: '删除', confirmStyle: 'danger',
         onConfirm: function(close) {
-          _subTasksCache = _subTasksCache.filter(function(x) { return x.id !== id; });
           close();
+          function doRemove() { _subTasksCache = _subTasksCache.filter(function(x) { return x.id !== id; }); }
           if (App.masterHub && App.masterHub.deleteMemberTask) {
             App.masterHub.deleteMemberTask(all._subUserId, id).then(function(r) {
-              if (!r || !r.ok) App.util.toast('已在本台移除，但写回子台失败（权限受限）', 'warn');
-              else App.util.toast('已删除并同步到子台', 'ok');
+              if (!r || !r.ok) {
+                App.util.toast('删除失败：写回子台被拒（权限受限，需执行 allow_owner_update_member_dw.sql）', 'warn');
+              } else {
+                doRemove();
+                App.util.toast('已删除并同步到子台', 'ok');
+              }
+              App.router.resolve();
             });
           } else {
+            doRemove();
             App.util.toast('已删除', 'ok');
+            App.router.resolve();
           }
-          App.router.resolve();
         }
       });
       return;
