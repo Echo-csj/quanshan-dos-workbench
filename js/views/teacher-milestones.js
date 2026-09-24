@@ -105,8 +105,8 @@
     var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {});
     var teachers = d.teachers || [];
     // 子台只看本科组（与教师管理过滤规则一致）
-    if (isSub() && App.subContext && App.subContext.myName) {
-      var nm = App.subContext.myName();
+    if (isSub() && App.subContext && App.subContext.mySubjectGroup) {
+      var nm = App.subContext.mySubjectGroup();
       if (nm) teachers = teachers.filter(function(t) { return canonSubject(t.subjectGroup) === canonSubject(nm); });
     }
     return teachers;
@@ -115,8 +115,8 @@
     var d = App.viewData ? App.viewData() : (App.store.getData ? App.store.getData() : {});
     var ms = d.teacherMilestones || [];
     // 子台只看本科组的提醒
-    if (isSub() && App.subContext && App.subContext.myName) {
-      var nm = App.subContext.myName();
+    if (isSub() && App.subContext && App.subContext.mySubjectGroup) {
+      var nm = App.subContext.mySubjectGroup();
       if (nm) ms = ms.filter(function(m) { return canonSubject(m.subjectGroup) === canonSubject(nm); });
     }
     return ms;

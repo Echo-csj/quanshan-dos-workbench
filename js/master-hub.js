@@ -162,7 +162,7 @@
     return r.data || [];
   }
 
-  async function addSub(email, name, role) {
+  async function addSub(email, subjectGroup, displayName, role) {
     var orgId = await getMyOrgId();
     var c = client();
     if (!c || !orgId) { App.util.toast('请先创建组织', 'warn'); return null; }
@@ -177,13 +177,54 @@
       return null;
     }
     role = role || 'subject_lead';   // 默认归属「学科组长」
+    var realName = displayName || email.split('@')[0];
     var r = await c.from('org_member')
-      .upsert({ org_id: orgId, user_id: targetId, name: name || email.split('@')[0], email: email, role: role, status: 'active' },
-              { onConflict: 'org_id,user_id' })
+      .upsert({
+        org_id: orgId, user_id: targetId,
+        name: realName,                       // 成员真实姓名（显示用）
+        display_name: displayName || null,    // 成员真实姓名（任务负责人取此字段）
+        subject_group: subjectGroup || null,  // 学科组（教师/里程碑过滤取此字段）
+        email: email, role: role, status: 'active'
+      }, { onConflict: 'org_id,user_id' })
       .select().maybeSingle();
+    if (r.error) {
+      // 兼容尚未执行迁移 SQL（缺 display_name/subject_group 列）的旧表：仅写旧字段
+      if (/display_name|subject_group|column/i.test(r.error.message || '')) {
+        r = await c.from('org_member')
+          .upsert({ org_id: orgId, user_id: targetId, name: realName, email: email, role: role, status: 'active' }, { onConflict: 'org_id,user_id' })
+          .select().maybeSingle();
+      }
+    }
     if (r.error) { App.util.toast('纳管失败：' + (r.error.message || ''), 'warn'); return null; }
-    await log('member_added', { orgId: orgId, targetUserId: targetId, detail: { email: email, name: name, role: role } });
+    await log('member_added', { orgId: orgId, targetUserId: targetId, detail: { email: email, display_name: displayName, subject_group: subjectGroup, role: role } });
     App.util.toast('已纳管子工作台', 'ok');
+    return r.data;
+  }
+
+  // 编辑子工作台成员信息（真实姓名 / 学科组 / 角色）。name 同步为真实姓名，保证显示一致。
+  async function updateSub(memberId, patch) {
+    var c = client(); if (!c) return null;
+    patch = patch || {};
+    var cur = await c.from('org_member').select('email').eq('id', memberId).maybeSingle();
+    if (cur.error) { App.util.toast('未找到该成员', 'warn'); return null; }
+    var row = {};
+    if (patch.displayName !== undefined) {
+      row.display_name = patch.displayName || null;
+      row.name = patch.displayName || (cur.data ? (cur.data.email || '').split('@')[0] : '未命名');
+    }
+    if (patch.subjectGroup !== undefined) row.subject_group = patch.subjectGroup || null;
+    if (patch.role !== undefined) row.role = patch.role;
+    var r = await c.from('org_member').update(row).eq('id', memberId).select().maybeSingle();
+    if (r.error && /display_name|subject_group|column/i.test(r.error.message || '')) {
+      // 兼容旧表（缺新列）：仅更新可用字段
+      var legacy = {};
+      if (patch.displayName !== undefined) legacy.name = row.name;
+      if (patch.role !== undefined) legacy.role = patch.role;
+      r = await c.from('org_member').update(legacy).eq('id', memberId).select().maybeSingle();
+    }
+    if (r.error) { App.util.toast('更新失败：' + (r.error.message || ''), 'warn'); return null; }
+    await log('member_updated', { targetUserId: r.data && r.data.user_id, detail: patch });
+    App.util.toast('已更新成员信息', 'ok');
     return r.data;
   }
 
@@ -395,9 +436,54 @@
       var s = subs[i];
       if (s.status && s.status !== 'active') continue;
       var data = await fetchMemberData(s.user_id);
-      out.push({ userId: s.user_id, name: s.name || '未命名', data: data || {} });
+      out.push({
+        userId: s.user_id,
+        name: s.display_name || s.name || '未命名',
+        displayName: s.display_name || null,
+        subjectGroup: s.subject_group || s.name || null,
+        data: data || {}
+      });
     }
     return out;
+  }
+
+  // 总台直接修改子工作台整档中的某条任务（写回子台）。
+  // 依赖 RLS：主台 owner 对成员 dos_workbench 行是否可 UPDATE 取决于 schema 授权；
+  // 若 RLS 拒绝（返回 error），返回 { ok:false, error }，由调用方做「本地忽略」兜底（主台仍可见自己的编辑）。
+  async function updateMemberTask(userId, taskId, patch) {
+    var c = client(); if (!c || !uid()) return { ok: false, error: 'no-client' };
+    try {
+      var r = await c.from('dos_workbench').select('data,updated_at').eq('user_id', userId).maybeSingle();
+      if (r.error) return { ok: false, error: r.error };
+      var data = (r.data && r.data.data) || {};
+      var tasks = data.tasks || [];
+      var idx = -1;
+      for (var i = 0; i < tasks.length; i++) { if (String(tasks[i].id) === String(taskId)) { idx = i; break; } }
+      if (idx === -1) return { ok: false, error: 'task-not-found' };
+      Object.keys(patch || {}).forEach(function (k) { if (k !== 'id') tasks[idx][k] = patch[k]; });
+      tasks[idx].updatedAt = new Date().toISOString();
+      data.tasks = tasks;
+      var up = await c.from('dos_workbench').update({ data: data }).eq('user_id', userId);
+      if (up.error) return { ok: false, error: up.error };
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e && e.message ? e.message : e }; }
+  }
+
+  // 总台直接删除子工作台整档中的某条任务（写回子台）。返回 { ok } 或 { ok:false, error }。
+  async function deleteMemberTask(userId, taskId) {
+    var c = client(); if (!c || !uid()) return { ok: false, error: 'no-client' };
+    try {
+      var r = await c.from('dos_workbench').select('data,updated_at').eq('user_id', userId).maybeSingle();
+      if (r.error) return { ok: false, error: r.error };
+      var data = (r.data && r.data.data) || {};
+      var tasks = data.tasks || [];
+      var next = tasks.filter(function (t) { return String(t.id) !== String(taskId); });
+      if (next.length === tasks.length) return { ok: false, error: 'task-not-found' };
+      data.tasks = next;
+      var up = await c.from('dos_workbench').update({ data: data }).eq('user_id', userId);
+      if (up.error) return { ok: false, error: up.error };
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e && e.message ? e.message : e }; }
   }
 
   // 总台对子工作台内容发「标注提示」（只读 + 标注，不直接修改子台数据）
@@ -435,6 +521,7 @@
     createOrg: createOrg,
     listSubs: listSubs,
     addSub: addSub,
+    updateSub: updateSub,
     setSubRole: setSubRole,
     setSubProjectTags: setSubProjectTags,
     suspendSub: suspendSub,
@@ -451,6 +538,8 @@
     listLogs: listLogs,
     fetchMemberData: fetchMemberData,
     fetchAllMembersData: fetchAllMembersData,
+    updateMemberTask: updateMemberTask,
+    deleteMemberTask: deleteMemberTask,
     sendAnnotation: sendAnnotation,
     // 工具（供视图复用）
     extractItems: extractItems,

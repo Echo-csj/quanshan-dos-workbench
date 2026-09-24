@@ -35,7 +35,11 @@
   }
 
   function isSub() { return !!identity; }
-  function myName() { return identity && identity.member ? identity.member.name : null; }
+  // 真实姓名（成员真名）：优先 display_name，兼容旧数据（旧 name 字段被复用为学科组）
+  function myName() { return identity && identity.member ? (identity.member.display_name || identity.member.name || null) : null; }
+  // 学科组：独立字段 subject_group，兼容旧数据回退到 name（旧 name 曾承载学科组）
+  function mySubjectGroup() { return identity && identity.member ? (identity.member.subject_group || identity.member.name || null) : null; }
+  function myUserId() { return identity && identity.member ? identity.member.user_id : null; }
   function myOrgId() { return identity && identity.org ? identity.org.id : null; }
   function ownerUserId() { return identity && identity.org ? identity.org.owner_user_id : null; }
   function getMasterData() { return masterData || {}; }
@@ -197,6 +201,7 @@
     try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
     await loadMaster();
     cleanupStaleMilestoneTasks(); // 清理子台本地脏数据：教师里程碑任务不应由子台持有
+    cleanupSubTimelineDupes();    // 清理子台本地「从时间轴生成」的重复任务（生成权已收归主台）
     subscribeRealtime();
     startPolling();
     fireReady();
@@ -330,6 +335,23 @@
     return before - cleaned.length;
   }
 
+  // 清理子台本地「从时间轴生成」的任务：生成权已收归主台（主台统一从时间轴生成并分发），
+  // 子台历史上自行生成的同类任务属于重复数据，启动时自动清理（本地），避免主台聚合后重复出现。
+  function cleanupSubTimelineDupes() {
+    if (!isSub()) return 0;
+    var tasks = App.store.get('tasks') || [];
+    var before = tasks.length;
+    var cleaned = tasks.filter(function (t) {
+      if (!t) return true;
+      // 仅清理「子台自建 + 由时间轴生成」的任务（带 timelineNodeId 标记）
+      return !(t.source === 'sub' && t.timelineNodeId);
+    });
+    if (cleaned.length === before) return 0;
+    App.store.set('tasks', cleaned);
+    console.log('[subContext] cleanupSubTimelineDupes removed', before - cleaned.length, 'sub-timeline duplicate tasks');
+    return before - cleaned.length;
+  }
+
   // 取总台某字段（全量模块用），支持点路径
   function masterField(path, fallback) {
     var md = masterData || {};
@@ -369,6 +391,8 @@
     start: start,
     isSub: isSub,
     myName: myName,
+    mySubjectGroup: mySubjectGroup,
+    myUserId: myUserId,
     myOrgId: myOrgId,
     ownerUserId: ownerUserId,
     getMasterData: getMasterData,

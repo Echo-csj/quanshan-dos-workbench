@@ -58,11 +58,21 @@
   // 写入用：总是操作本地 store（子台自建任务存这里）
   function localTasks() { return App.store.get('tasks') || []; }
   function isSubView() { return !!(App.subContext && App.subContext.isSub && App.subContext.isSub()); }
-  // 该任务当前账号是否可编辑：主台可编辑本地全部；子台只读任务（_readOnly）不可编辑；子台只能编辑自建任务（source='sub'）
+  // 该任务当前账号是否可编辑：
+  //  - 主台：可编辑全部（含聚合的子台任务 _readOnly，编辑/删除会写回子台整档）
+  //  - 子台：仅可编辑自建任务（source='sub'）；主台下发的只读任务不可编辑
   function isEditable(t) {
-    if (t && t._readOnly) return false;
-    if (!isSubView()) return true;
-    return !!(t && t.source === 'sub');
+    if (isSubView()) {
+      if (t && t._readOnly) return false;
+      return !!(t && t.source === 'sub');
+    }
+    return true;
+  }
+
+  // 当前操作者的「创建人」标识（写入任务 creator 字段）
+  function currentCreator() {
+    if (isSubView()) return (App.subContext && App.subContext.myName && App.subContext.myName()) || '(子台成员)';
+    return 'DOS（主台）';
   }
 
   // 多选删除：选择状态（module 级，跨重渲染保留）
@@ -87,7 +97,7 @@
         if (!t || !t.id) return;
         // 子工作台不应持有「教师里程碑」任务（早期版本脏数据），总台聚合时排除，避免主工作台出现不可删除的只读里程碑
         if (t.source === 'teacher-milestone' || t.milestoneId) return;
-        out.push(Object.assign({}, t, { _readOnly: true, _subName: name }));
+        out.push(Object.assign({}, t, { _readOnly: true, _subName: name, _subUserId: m.userId }));
       });
     });
     _subTasksCache = out;
@@ -286,14 +296,16 @@
       : (view.mode === 'date' ? '按截止日折叠分组：逾期 / 今日 / 未来 7 天 / 更远 / 无截止'
       : '按优先级分组：紧急 / 高 / 普通'));
     html += '<div class="page-head"><h1 class="page-title">事项看板</h1>';
-    html += '<p class="page-sub">' + modeHint + (_subTasksCache.length ? ' · 已汇总 ' + _subTasksCache.length + ' 条子工作台任务（只读）' : '') + '</p></div>';
+    html += '<p class="page-sub">' + modeHint + (_subTasksCache.length ? ' · 已汇总 ' + _subTasksCache.length + ' 条子工作台任务（可编辑·写回子台）' : '') + '</p></div>';
 
     // 工具条
     html += renderToolbar(view, filtered, archivedCount, doneVisible);
 
     if (filtered.length === 0) {
       var emptyBody = tasks.length === 0
-        ? '<p>点击「新建任务」手动添加，或点「从时间轴生成」把周/月节律节点一键转为待办。</p><button class="btn btn-primary btn-sm" onclick="App.views.tasks.generateFromTimeline()">从时间轴生成</button>'
+        ? (isSubView()
+            ? '<p>点击「新建任务」手动添加待办（时间轴生成由主工作台统一处理，避免重复）。</p>'
+            : '<p>点击「新建任务」手动添加，或点「从时间轴生成」把周/月节律节点一键转为待办。</p><button class="btn btn-primary btn-sm" onclick="App.views.tasks.generateFromTimeline()">从时间轴生成</button>')
         : '<p>当前筛选/搜索条件下没有匹配的任务，试试调整搜索词或清空筛选。</p><button class="btn btn-ghost btn-sm" onclick="App.views.tasks.clearFilters()">清空筛选</button>';
       html += '<div class="empty-state" style="padding:50px"><h4>' + (tasks.length === 0 ? '暂无任务' : '没有匹配的任务') + '</h4>' + emptyBody + '</div>';
       return html;
@@ -317,7 +329,7 @@
     // Row 1: 主操作 + 视图 tabs + 搜索 + 计数
     html += '<div class="tasks-toolbar-row">';
     html += '<button class="btn btn-primary" onclick="App.views.tasks.openTaskModal()">' + App.util.svgIcon('plus', 15) + ' 新建任务</button>';
-    html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
+    if (!isSubView()) html += '<button class="btn btn-secondary" onclick="App.views.tasks.generateFromTimeline()">' + App.util.svgIcon('refresh-cw', 15) + ' 从时间轴生成</button>';
     html += '<button class="btn btn-secondary" onclick="App.views.tasks.openPasteModal()">📋 粘贴提取</button>';
     html += '<button class="btn btn-ghost" onclick="App.views.tasks.openRulesModal()">⚙ 提取规则</button>';
     html += '<span class="toolbar-sep"></span>';
@@ -520,11 +532,11 @@
     html += '</td>';
     html += '<td><span class="tag status-' + t.status + '">' + App.util.statusLabel(t.status) + '</span></td>';
     html += '<td><span class="tag priority-' + (t.priority || 'normal') + '">' + App.util.priorityLabel(t.priority) + '</span></td>';
-    html += '<td>' + (t.assignee ? App.util.escapeHtml(t.assignee) : '<span style="color:var(--text-faint)">—</span>') + '</td>';
+    html += '<td>' + (t.assignee ? App.util.escapeHtml(t.assignee) : '<span style="color:var(--text-faint)">—</span>') + (t.creator ? ' <span class="muted">· ' + App.util.escapeHtml(t.creator) + ' 创建</span>' : '') + '</td>';
     html += '<td style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">' + (t.dueDate || '<span style="color:var(--text-faint)">—</span>') + '</td>';
     html += '<td><span style="font-size:11px;color:var(--text-muted)">' + srcLabel + '</span></td>';
     html += '<td class="list-actions">';
-    if (readonly) {
+    if (readonly && !t._subUserId) {
       html += '<span class="tag scope-tag-unassigned">只读</span>';
     } else {
       html += '<button class="btn-icon" title="编辑" onclick="App.views.tasks.editTask(\'' + t.id + '\')">' + App.util.svgIcon('edit', 14) + '</button>';
@@ -656,6 +668,7 @@
     if (t.scope === 'team') html += '<span class="tag scope-team">团队</span>';
     else if (!t.scope) html += '<span class="tag scope-unassigned">未分配</span>';
     if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
+    if (t.creator) html += '<span class="muted">· 创建 ' + App.util.escapeHtml(t.creator) + '</span>';
     if (t.dueDate) html += '<span style="color:' + (overdue ? 'var(--bad)' : 'var(--text-faint)') + '">📅 ' + App.util.escapeHtml(t.dueDate) + '</span>';
     html += '</div>';
     if (t.source === 'timeline') html += '<div class="kanban-card-note">⏱ 来自时间轴</div>';
@@ -803,6 +816,9 @@
     html += '<div class="form-group"><label class="form-label">截止日期</label><input class="form-input" id="task-due" type="date" value="' + App.util.escapeAttr(data.dueDate) + '"></div>';
     html += '</div>';
     if (!isSubView()) html += permTagsEditor(data);
+    if (isEdit && data.creator) {
+      html += '<div class="form-group"><label class="form-label">创建人</label><div style="padding:7px 0;color:var(--text-muted);font-size:13px">' + App.util.escapeHtml(data.creator) + '</div></div>';
+    }
     html += '<div class="form-group"><label class="form-label">备注</label><textarea class="form-input" id="task-note" placeholder="补充说明（可选）">' + App.util.escapeHtml(data.note || '') + '</textarea></div>';
     html += '</div>';
 
@@ -812,6 +828,13 @@
       confirmText: isEdit ? '保存修改' : '创建任务',
       onConfirm: function(close) { saveTask(isEdit ? id : null, close); }
     });
+  }
+
+  // 主台本地先行更新聚合缓存中的某条子台任务（保证主台即时可见，写回结果异步补偿）
+  function applySubTaskPatch(taskId, patch) {
+    for (var i = 0; i < _subTasksCache.length; i++) {
+      if (_subTasksCache[i].id === taskId) { Object.assign(_subTasksCache[i], patch); break; }
+    }
   }
 
   function saveTask(id, close) {
@@ -835,8 +858,31 @@
       if (permTags.indexOf('project') === -1) projGroup = '';
     }
     if (id) {
+      // 主台编辑「聚合的子台任务」：本地缓存先行更新，并写回子台整档
+      var existing = getTasks().filter(function(x) { return x.id === id; })[0];
+      if (existing && existing._subUserId && !isSub) {
+        var patch = {
+          title: title, priority: priority, status: status, assignee: assignee,
+          dueDate: dueDate, note: note, scope: App.util.deriveScope(assignee),
+          permTags: permTags, projGroup: projGroup, updatedAt: new Date().toISOString()
+        };
+        applySubTaskPatch(id, patch);
+        if (App.masterHub && App.masterHub.updateMemberTask) {
+          App.masterHub.updateMemberTask(existing._subUserId, id, patch).then(function (r) {
+            if (!r || !r.ok) App.util.toast('已在本台更新，但写回子台失败（权限受限），子台可能看不到此修改', 'warn');
+            else App.util.toast('已保存并同步到子台', 'ok');
+            if (close) close();
+            App.router.resolve();
+          });
+        } else {
+          if (close) close();
+          App.router.resolve();
+        }
+        return;
+      }
+      // 本地任务（主台普通任务 / 子台自建任务）
       var t = tasks.filter(function(x) { return x.id === id; })[0];
-      if (t && !isEditable(t)) { App.util.toast('总台任务不可编辑', 'warn'); return; }
+      if (t && !isEditable(t)) { App.util.toast('该任务不可编辑', 'warn'); return; }
       if (t) {
         var scope = isSub ? 'personal' : App.util.deriveScope(assignee);
         Object.assign(t, { title: title, priority: priority, status: status, assignee: assignee, dueDate: dueDate, note: note, scope: scope, permTags: permTags, projGroup: projGroup, updatedAt: new Date().toISOString() });
@@ -852,6 +898,7 @@
         scope: isSub ? 'personal' : App.util.deriveScope(assignee),
         permTags: permTags, projGroup: projGroup,
         source: isSub ? 'sub' : 'manual',
+        creator: currentCreator(),
         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
       });
     }
@@ -892,9 +939,32 @@
 
   function deleteTask(id) {
     var all = getTasks().filter(function(x) { return x.id === id; })[0];
-    if (all && all._readOnly) { App.util.toast('子工作台任务不可在主台删除', 'warn'); return; }
+    // 子台不可删除主台下发的只读任务
+    if (isSubView() && all && all._readOnly) { App.util.toast('该任务来自主台，不可在子台删除', 'warn'); return; }
+    // 主台删除「聚合的子台任务」：本地先移除，并写回子台整档
+    if (all && all._subUserId && !isSubView()) {
+      App.util.modal({
+        title: '确认删除子台任务',
+        content: '确定删除任务「' + App.util.escapeHtml(all.title) + '」？该操作会同步从「' + App.util.escapeHtml(all._subName || '子台') + '」的工作台移除。',
+        confirmText: '删除', confirmStyle: 'danger',
+        onConfirm: function(close) {
+          _subTasksCache = _subTasksCache.filter(function(x) { return x.id !== id; });
+          close();
+          if (App.masterHub && App.masterHub.deleteMemberTask) {
+            App.masterHub.deleteMemberTask(all._subUserId, id).then(function(r) {
+              if (!r || !r.ok) App.util.toast('已在本台移除，但写回子台失败（权限受限）', 'warn');
+              else App.util.toast('已删除并同步到子台', 'ok');
+            });
+          } else {
+            App.util.toast('已删除', 'ok');
+          }
+          App.router.resolve();
+        }
+      });
+      return;
+    }
     var t = localTasks().filter(function(x) { return x.id === id; })[0];
-    if (!t || !isEditable(t)) { App.util.toast('总台任务不可删除', 'warn'); return; }
+    if (!t || !isEditable(t)) { App.util.toast('该任务不可删除', 'warn'); return; }
 
     // 教师里程碑任务：不能只删 task，必须到 teacherMilestones 层抑制再生
     if (t.source === 'teacher-milestone' && t.milestoneId && App.views.teacherMilestones && App.views.teacherMilestones.deleteMilestone) {
@@ -1086,6 +1156,7 @@
         html += '<div class="archive-row-meta">';
         html += '<span class="tag priority-' + (t.priority || 'normal') + '">' + App.util.priorityLabel(t.priority) + '</span>';
         if (t.assignee) html += '<span>👤 ' + App.util.escapeHtml(t.assignee) + '</span>';
+    if (t.creator) html += '<span class="muted">· 创建 ' + App.util.escapeHtml(t.creator) + '</span>';
         if (t.completedAt) html += '<span>✅ 完成于 ' + App.util.formatDate(new Date(t.completedAt), 'YYYY-MM-DD') + '</span>';
         html += '</div></div>';
         html += '<div class="archive-row-actions">';
@@ -1246,6 +1317,7 @@
 
   // 入口：打开范围选择弹窗
   function generateFromTimeline() {
+    if (isSubView()) { App.util.toast('时间轴生成已收归主台，请在主工作台操作', 'warn'); return; }
     var wr = weekRangeThisWeek();
     var defStart = App.util.formatDate(wr.start, 'YYYY-MM-DD');
     var defEnd = App.util.formatDate(wr.end, 'YYYY-MM-DD');
@@ -1306,6 +1378,7 @@
 
   // 实际生成（按范围，结果按日期排序）
   function generateFromTimelineRange(start, end, label) {
+    if (isSubView()) { App.util.toast('时间轴生成已收归主台，请在主工作台操作', 'warn'); return; }
     var data = App.store.getData();
     var nodes = ((data.timeline && data.timeline.fixedNodes) || []).concat((data.timeline && data.timeline.customNodes) || []);
     var tasks = localTasks();
@@ -1342,6 +1415,7 @@
           scope: 'personal',
           timelineNodeId: occId,
           note: (node.note ? node.note : ''),
+          creator: 'DOS（主台）',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
@@ -1568,6 +1642,7 @@
         note: timeVal ? ('时间 ' + timeVal) : '',
         source: isSub ? 'sub' : 'paste',
         scope: isSub ? 'personal' : App.util.deriveScope(assignee),
+        creator: currentCreator(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       });

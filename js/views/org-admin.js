@@ -86,8 +86,8 @@
     var p = _profiles[s.user_id] || {};
     var active = s.user_id === _selected ? ' active' : '';
     return '<div class="oa-sub-item' + active + '" onclick="App.views.orgAdmin.select(\'' + s.user_id + '\')">' +
-      '<div class="oa-sub-name">' + esc(s.name || (s.email || p.email || '子工作台')) + '</div>' +
-      '<div class="oa-sub-mail">' + esc(s.email || p.email || s.user_id) + '</div>' +
+      '<div class="oa-sub-name">' + esc(s.display_name || s.name || (s.email || p.email || '子工作台')) + '</div>' +
+      '<div class="oa-sub-mail">' + esc(s.email || p.email || s.user_id) + (s.subject_group ? '　·　' + esc(s.subject_group) + '组' : '') + '</div>' +
       '<span class="oa-badge oa-badge-role">' + esc(roleLabel(s.role)) + '</span>' +
       (s.status === 'suspended' ? '<span class="oa-badge">已停用</span>' : '') +
       '</div>';
@@ -104,6 +104,7 @@
       '<div><strong>' + esc(s.name || (s.email || p.email || '')) + '</strong>' +
       '<div class="oa-sub-mail">' + esc(s.email || p.email || s.user_id) + '</div></div>' +
       '<div class="oa-detail-actions">' +
+      '<button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.openEditSub(\'' + s.id + '\')">编辑</button>' +
       '<button class="btn btn-secondary btn-sm" onclick="App.views.orgAdmin.toggleSuspend(\'' + s.id + '\',' + (s.status === 'suspended') + ')">' + (s.status === 'suspended' ? '启用' : '停用') + '</button>' +
       '<button class="btn btn-danger btn-sm" onclick="App.views.orgAdmin.removeSub(\'' + s.id + '\')">移除</button>' +
       '</div></div>';
@@ -237,19 +238,50 @@
       content: '<div style="display:flex;flex-direction:column;gap:12px">' +
         '<div class="form-group"><label class="form-label">下属的登录邮箱</label>' +
         '<input class="form-input" id="oa-sub-email" type="email" placeholder="需先在 Supabase 建好该账号"></div>' +
-        '<div class="form-group"><label class="form-label">子工作台名称（＝学科组，须与「教师管理」科组一致）</label>' +
-        '<input class="form-input" id="oa-sub-name" placeholder="如：数学 / 英语 / 文综 / 理综"></div>' +
+        '<div class="form-group"><label class="form-label">成员姓名（真实姓名）</label>' +
+        '<input class="form-input" id="oa-sub-name" placeholder="如：王静静（用于任务负责人显示）"></div>' +
+        '<div class="form-group"><label class="form-label">学科组</label>' +
+        '<input class="form-input" id="oa-sub-group" placeholder="如：数学 / 英语 / 文综 / 理综（须与教师管理科组一致）"></div>' +
         '<div class="form-group"><label class="form-label">权限角色</label>' +
         '<select class="form-input" id="oa-sub-role">' + roleOptions('subject_lead') + '</select></div>' +
-        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。名称须为学科组名称（数学/英语/文综/理综，可带「科组/组」后缀），子台据此筛选本科组教师与转正提醒。角色决定子台可见模块与任务同步范围（默认「学科组长」）。</div>' +
+        '<div class="oa-hint">账号创建：Supabase 控制台 → Authentication → Users → Add user（勾选 Auto Confirm User）。<b>成员姓名</b>为该下属的真实姓名（其生成/认领的任务负责人将显示此名）；<b>学科组</b>用于子台筛选本科组教师与转正提醒（与教师管理科组一致）。两者相互独立，避免混淆。</div>' +
         '</div>',
       confirmText: '纳管',
       onConfirm: function (close) {
         var e = document.getElementById('oa-sub-email').value.trim();
         var n = document.getElementById('oa-sub-name').value.trim();
+        var g = document.getElementById('oa-sub-group').value.trim();
         var role = document.getElementById('oa-sub-role').value;
         if (!e) { App.util.toast('请填写邮箱', 'warn'); return; }
-        App.masterHub.addSub(e, n, role).then(function (r) { if (r) { close(); loadAll().then(render); } });
+        App.masterHub.addSub(e, g, n, role).then(function (r) { if (r) { close(); loadAll().then(render); } });
+      }
+    });
+  }
+
+  // 编辑成员：修正真实姓名 / 学科组 / 角色（用于修复历史上把人名误填为学科组等情况）
+  function openEditSub(memberId) {
+    var s = _subs.filter(function(x) { return x.id === memberId; })[0];
+    if (!s) return;
+    App.util.modal({
+      title: '编辑成员信息',
+      content: '<div style="display:flex;flex-direction:column;gap:12px">' +
+        '<div class="form-group"><label class="form-label">登录邮箱（不可改）</label>' +
+        '<input class="form-input" value="' + esc(s.email || '') + '" disabled></div>' +
+        '<div class="form-group"><label class="form-label">成员姓名（真实姓名）</label>' +
+        '<input class="form-input" id="oa-edit-name" value="' + esc(s.display_name || s.name || '') + '" placeholder="真实姓名"></div>' +
+        '<div class="form-group"><label class="form-label">学科组</label>' +
+        '<input class="form-input" id="oa-edit-group" value="' + esc(s.subject_group || s.name || '') + '" placeholder="如：数学 / 英语"></div>' +
+        '<div class="form-group"><label class="form-label">权限角色</label>' +
+        '<select class="form-input" id="oa-edit-role">' + roleOptions(s.role || 'subject_lead') + '</select></div>' +
+        '</div>',
+      confirmText: '保存',
+      onConfirm: function (close) {
+        var n = document.getElementById('oa-edit-name').value.trim();
+        var g = document.getElementById('oa-edit-group').value.trim();
+        var role = document.getElementById('oa-edit-role').value;
+        App.masterHub.updateSub(s.id, { displayName: n, subjectGroup: g, role: role }).then(function (r) {
+          if (r) { close(); loadAll().then(render); }
+        });
       }
     });
   }
@@ -333,6 +365,7 @@
   App.views.orgAdmin = {
     openCreateOrg: openCreateOrg,
     openAddSub: openAddSub,
+    openEditSub: openEditSub,
     select: select,
     sendAnno: sendAnno,
     toggleSuspend: toggleSuspend,
