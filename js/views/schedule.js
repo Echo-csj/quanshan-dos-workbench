@@ -286,7 +286,7 @@
       }) + '</label>';
     html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.newThisWeek()">' + U.svgIcon('plus', 14) + '新建周</button>';
     html += '<button class="btn btn-danger btn-ghost btn-sm" onclick="App.views.schedule.deleteWeek()">' + U.svgIcon('trash-2', 14) + '删除当前周</button>';
-    html += '<span style="font-size:12px;color:var(--text-muted)">（切换月份/周次编辑历史周，新建周默认本周一~本周日，历史周可在 KPI 视图实时重算）</span>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">（切换月份/周次编辑历史周；「同步抓取」抓的是当前正在查看的周，可在 KPI 视图实时重算）</span>';
     html += '</div>';
     html += '<div id="schedule-fetch-banner"></div>';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:6px">上次更新：' + U.escapeHtml(updatedAt) + U.escapeHtml(srcInfo) + '</p>';
@@ -659,10 +659,12 @@
     var U = App.util;
     var when = fetched._fetchedAt ? new Date(fetched._fetchedAt).toLocaleString('zh-CN') : '未知时间';
     var n = (fetched.teachers || []).length;
+    var wkLabel = (fetched.weekStartDate ? (fetched.weekStartDate + ' ~ ' + (fetched.weekEndDate || '')) : '本周');
     wrap.innerHTML = '<div class="card" style="margin-bottom:14px;border:1px solid var(--indigo,#4F46E5);background:color-mix(in srgb,var(--indigo,#4F46E5) 7%,var(--surface))">'
       + '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
       + '<div style="flex:1;min-width:200px"><div style="font-weight:600">检测到自动抓取的课程表</div>'
       + '<div style="font-size:12px;color:var(--text-muted)">抓取于 ' + U.escapeHtml(when) + ' · ' + n + ' 位教师'
+      + ' · 周次：' + U.escapeHtml(wkLabel)
       + (fetched.sourceUrl ? (' · 来源：' + U.escapeHtml(fetched.sourceUrl)) : '') + '</div></div>'
       + '<button class="btn btn-primary btn-sm" onclick="App.views.schedule.applyFetchedFromBanner()">应用抓取结果</button>'
       + '<button class="btn btn-ghost btn-sm" onclick="App.views.schedule.dismissFetchBanner()">忽略</button>'
@@ -704,7 +706,7 @@
       var sb = (App.sync && App.sync.getClient) ? App.sync.getClient() : null;
       if (sb && sb.auth && sb.auth.getSession) {
         var s = await sb.auth.getSession();
-        return (s && s.data && s.session && s.session.access_token) || '';
+        return (s && s.data && s.data.session && s.data.session.access_token) || '';
       }
     } catch (e) {}
     return '';
@@ -720,32 +722,38 @@
     } catch (e) {}
     return '';
   }
-  async function doFetch(url, jwt) {
+  async function doFetch(url, jwt, bodyObj) {
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + jwt },
-      body: '{}'
+      body: JSON.stringify(bodyObj || {})
     });
   }
 
   // 触发 fetch-schedule 立即抓取一次（腾讯云 Node 服务，路径反代）
+  // 抓取「当前正在查看的周」（含历史周）：从活动 schedule 取 weekStartDate/weekEndDate 传给后端
   async function syncNow() {
     var url = (window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL) || '';
     if (!url) {
       App.util.toast('课表自动抓取尚未配置，无法触发', 'warn');
       return;
     }
+    // 目标周 = 当前查看周（看历史周就抓历史周，看本周就抓本周）
+    var cur = App.store.get('schedule') || {};
+    var ws = /^\d{4}-\d{2}-\d{2}$/.test(cur.weekStartDate) ? cur.weekStartDate : thisMonday();
+    var we = /^\d{4}-\d{2}-\d{2}$/.test(cur.weekEndDate) ? cur.weekEndDate : thisSunday();
+    var body = { weekStartDate: ws, weekEndDate: we };
     // 手动触发：用当前登录用户的 Supabase 会话 JWT 鉴权（前端不再下发任何密钥，避免 cron secret 暴露）
     var jwt = await getSessionJWT();
-    App.util.toast('正在从源站抓取课程表…');
+    App.util.toast('正在从源站抓取 ' + ws + ' ~ ' + we + ' 周课程表…');
     try {
-      var res = await doFetch(url, jwt);
+      var res = await doFetch(url, jwt, body);
       var j = await res.json().catch(function () { return {}; });
       // 401 可能是 access_token 过期，尝试刷新会话后重试一次
       if (res.status === 401) {
         var fresh = await refreshSessionJWT();
         if (fresh && fresh !== jwt) {
-          res = await doFetch(url, fresh);
+          res = await doFetch(url, fresh, body);
           j = await res.json().catch(function () { return {}; });
         }
       }
