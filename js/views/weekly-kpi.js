@@ -17,6 +17,7 @@
   var _selNames = null;        // 选中教师（name -> bool；null = 全部选中）
   var _artMonth = null;        // 当前所选人工月（YYYY-MM）
   var _weekNo = 1;             // 当前所选周次（1..N）
+  var _curWeekStart = null;    // 当前所选周起始日（供 saveSnapshot/archive 使用）
   var _filterGroup = 'all';    // 科组筛选
   var _displayedRows = [];     // 当前展示（受筛选）的按教师行
   var _lastRows = [];          // 导出用：最近一次按教师行
@@ -73,6 +74,16 @@
     };
   }
 
+  // 取某周的课程表：优先 schedules 多周存档；其次活动 schedule 恰为该周；否则 null
+  // 这样任意已存档周都能在 KPI 视图实时重算（而非只读归档）
+  function scheduleForWeek(weekStart) {
+    var map = App.store.get('schedules') || {};
+    if (map[weekStart]) return map[weekStart];
+    var s = App.store.get('schedule') || {};
+    if (s.weekStartDate === weekStart) return s;
+    return null;
+  }
+
   // 选择状态（以教师姓名为键；null = 全部选中）
   function syncSel(teachers) {
     var cur = {};
@@ -87,8 +98,8 @@
 
   // 计算每位教师 KPI（受科组筛选；selected 由 _selNames 决定）
   // 委托 kpi-engine，确保与数据中心归档口径一致（零回归）
-  function computeRows(filterGroup) {
-    var sch = readSchedule();
+  function computeRows(filterGroup, schOverride) {
+    var sch = schOverride || readSchedule();
     var tchAll = (App.viewData && App.viewData().teachers) || [];
     return App.kpiEngine.computeRows(sch, tchAll, { filterGroup: filterGroup, selNames: _selNames });
   }
@@ -103,9 +114,9 @@
   function getSnapshots() { return App.store.get('kpiSnapshots') || {}; }
 
   function saveSnapshot() {
-    var sch = readSchedule();
-    if (!sch.weekStartDate) { App.util.toast('请先在「课程表」设置并保存本周', 'warn'); return; }
-    var rows = computeRows('all');     // 存全量（含 selected 标记），查看时再按筛选显示
+    var sch = scheduleForWeek(_curWeekStart);   // 用当前所选周的课程表（活动周或历史存档周）
+    if (!sch || !sch.weekStartDate) { App.util.toast('请先在「课程表」设置并保存该周', 'warn'); return; }
+    var rows = computeRows('all', sch);     // 存全量（含 selected 标记），查看时再按筛选显示
     var groups = computeGroups(rows);
     var summary = computeCampusSummary(groups);
     var wk = sch.weekStartDate;
@@ -141,13 +152,20 @@
     });
   }
 
-  // 归档当前查看的「实时周」到周度数据中心（weeklyData），便于锁定/月度汇总
+  // 归档当前查看的周（活动周或历史存档周）到周度数据中心（weeklyData），便于锁定/月度汇总
   function archiveToDataCenter() {
     if (!App.weeklyData) { App.util.toast('数据中心模块未加载', 'bad'); return; }
-    var rec = App.weeklyData.computeFromLive(_artMonth, _weekNo, {});
+    var sch = scheduleForWeek(_curWeekStart);
+    if (!sch || !sch.weekStartDate) { App.util.toast('请先在「课程表」设置并保存该周', 'warn'); return; }
+    var teachers = (App.viewData && App.viewData().teachers) || [];
+    var wk = App.weeklyCycle.resolveWeek(_artMonth, _weekNo);
+    if (!wk) { App.util.toast('周次无效', 'bad'); return; }
+    var rec = App.kpiEngine.computeRecord(sch, teachers, wk.start, wk.end, _artMonth, _weekNo, {
+      dataSource: 'live', includeRoster: true, selNames: null
+    });
     if (!rec) { App.util.toast('计算失败', 'bad'); return; }
     App.weeklyData.upsert(rec);
-    App.util.toast('已归档 ' + rec.weekStart + ' 周到数据中心（来源：实时课程表）', 'ok');
+    App.util.toast('已归档 ' + rec.weekStart + ' 周到数据中心（来源：课程表）', 'ok');
   }
 
   // ---------- 渲染 ----------
@@ -172,18 +190,21 @@
       return;
     }
     var weekStart = wk.start, weekEnd = wk.end;
+    _curWeekStart = weekStart;
 
-    var sch = readSchedule();
-    var isLive = (sch.weekStartDate === weekStart);
+    var sch = scheduleForWeek(weekStart);
+    var isLive = !!sch;     // 该周有课程表存档（活动周或历史周）即可实时重算
+    var activeWeekStart = (App.store.get('schedule') || {}).weekStartDate;
+    var isActiveWeek = !!(sch && sch.weekStartDate === activeWeekStart);
     var snap = isLive ? null : (getSnapshots()[weekStart] || null);
 
     var rows, groups, summary, sourceText;
     if (isLive) {
       syncSel(sch.teachers);
-      rows = computeRows(_filterGroup);
+      rows = computeRows(_filterGroup, sch);
       groups = computeGroups(rows);
-      summary = computeCampusSummary(computeGroups(computeRows('all')));
-      sourceText = '数据来源：课程表（' + weekStart + ' ~ ' + weekEnd + '）';
+      summary = computeCampusSummary(computeGroups(computeRows('all', sch)));
+      sourceText = '数据来源：课程表（' + weekStart + ' ~ ' + weekEnd + '）' + (isActiveWeek ? '' : '（历史周·课程表存档）');
     } else if (snap) {
       rows = (snap.rows || []).filter(function (r) {
         return (_filterGroup === 'all') || (r.group === _filterGroup);
@@ -257,7 +278,7 @@
 
     html += '<p class="form-hint" style="margin-bottom:14px">' + U.escapeHtml(sourceText)
       + ' · 当前周度范围：' + U.escapeHtml(weekStart) + ' ~ ' + U.escapeHtml(weekEnd)
-      + (isLive ? '（调整周范围请到「课程表」修改后保存，再硬刷新本页）' : '') + '</p>';
+      + (isLive ? (isActiveWeek ? '（调整周范围请到「课程表」修改后保存，再硬刷新本页）' : '（历史周·课程表存档，可在「课程表」切换该周后编辑保存）') : '') + '</p>';
 
     html += renderTeacherTable(rows, isLive);
     html += renderGroupTable(groups, summary);

@@ -175,7 +175,9 @@ window.App = window.App || {};
         selMonth: null,             // 月度模式选中的月份 YYYY-MM（仅月度模式使用）
         periods: ['08:00-10:00','10:10-12:10','12:50-14:50','15:00-17:00','17:30-19:30','19:40-21:40'],
         teachers: []
-      }
+      },
+      // 多周课程表存档：{ [weekStart]: schedule对象 }（与 schedule 同结构，按周一并存多周，支持历史周重算）
+      schedules: {}
     };
   }
 

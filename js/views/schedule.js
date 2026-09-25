@@ -69,6 +69,103 @@
     };
   }
 
+  /* ---------------- 多周并存：周次存档（schedules 映射） ---------------- */
+  // 懒迁移：schedules 为空且活动 schedule 已有周起始日时，把当前活动周种子化进 schedules
+  function ensureSchedules() {
+    var map = App.store.get('schedules');
+    if (map && typeof map === 'object' && Object.keys(map).length) return; // 已有数据
+    var s = App.store.get('schedule') || {};
+    if (s && s.weekStartDate && /^\d{4}-\d{2}-\d{2}$/.test(s.weekStartDate)) {
+      var m2 = {}; m2[s.weekStartDate] = s;
+      App.store.set('schedules', m2);
+    } else {
+      App.store.set('schedules', {});
+    }
+  }
+
+  // 写入/更新某周存档（按 weekStartDate 为键）
+  function writeSchedule(data) {
+    if (!data || !data.weekStartDate || !/^\d{4}-\d{2}-\d{2}$/.test(data.weekStartDate)) return;
+    var map = App.store.get('schedules') || {};
+    map[data.weekStartDate] = data;
+    App.store.set('schedules', map);
+  }
+
+  // 所有已存周（按 weekStart 倒序），用于周次切换下拉
+  function getScheduleWeeks() {
+    var map = App.store.get('schedules') || {};
+    var keys = Object.keys(map).filter(function (k) { return /^\d{4}-\d{2}-\d{2}$/.test(k); });
+    keys.sort().reverse();
+    return keys.map(function (k) {
+      var w = map[k];
+      var we = w.weekEndDate || '';
+      var label = k + ' ~ ' + we;
+      if (App.weeklyCycle && App.weeklyCycle.artMonthOfDate) {
+        var info = App.weeklyCycle.artMonthOfDate(k);
+        if (info) label = '第' + info.weekNo + '周 (' + k.slice(5) + '~' + String(we).slice(5) + ')';
+      }
+      return { weekStart: k, weekEnd: we, label: label };
+    });
+  }
+
+  // 切换周次：选中已存周 → 载入编辑器；"新建周" → 清空为本周一开始的空周
+  function switchWeek(val) {
+    var container = document.getElementById('view-container');
+    if (val === '__new__') {
+      var cur = getSchedule();
+      var nd = {
+        updatedAt: null, source: '', sourceUrl: '', fetchedAt: null, screenshotsCount: 0,
+        weekStartDate: thisMonday(), weekEndDate: thisSunday(),
+        scheduleMode: 'weekly', selMonth: null,
+        periods: (cur.periods && cur.periods.length) ? cur.periods.slice() : DEFAULT_PERIODS.slice(),
+        teachers: []
+      };
+      App.store.set('schedule', nd);
+      renderShell(container, nd);
+      App.util.toast('已新建一周（本周一 ~ 本周日），填写后保存', 'ok');
+      return;
+    }
+    var map = App.store.get('schedules') || {};
+    var wd = map[val];
+    if (!wd) return;
+    var data = JSON.parse(JSON.stringify(wd)); // 克隆，避免直接引用存档对象
+    App.store.set('schedule', data);
+    renderShell(container, data);
+  }
+
+  // 删除当前周存档（带确认）
+  function deleteWeek() {
+    var container = document.getElementById('view-container');
+    var cur = getSchedule();
+    var ws = cur.weekStartDate;
+    if (!ws || !/^\d{4}-\d{2}-\d{2}$/.test(ws)) { App.util.toast('当前没有可删除的周', 'warn'); return; }
+    App.util.modal({
+      title: '删除当前周课程表',
+      content: '将删除「' + ws + ' ~ ' + (cur.weekEndDate || '') + '」这周的课表存档（不可恢复）。该周在 KPI / 数据中心中若已引用，将回退为快照/归档数据。',
+      confirmText: '删除',
+      onConfirm: function (close) {
+        var map = App.store.get('schedules') || {};
+        delete map[ws];
+        App.store.set('schedules', map);
+        if (cur.weekStartDate === ws) {
+          var nd = {
+            updatedAt: null, source: '', sourceUrl: '', fetchedAt: null, screenshotsCount: 0,
+            weekStartDate: null, weekEndDate: null,
+            scheduleMode: 'weekly', selMonth: null,
+            periods: (cur.periods && cur.periods.length) ? cur.periods.slice() : DEFAULT_PERIODS.slice(),
+            teachers: []
+          };
+          App.store.set('schedule', nd);
+          renderShell(container, nd);
+        } else {
+          renderShell(container, getSchedule());
+        }
+        App.util.toast('已删除该周存档', 'ok');
+        close();
+      }
+    });
+  }
+
   App.router.register('/schedule', function() {
     var container = document.getElementById('view-container');
     if (!container) return;
@@ -98,6 +195,24 @@
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.syncNow()">' + U.svgIcon('refresh-cw', 14) + '同步抓取</button>';
     }
     html += '</div></div>';
+    // 周次切换（多周并存）：列出所有存档周 + 新建周
+    var weeks = getScheduleWeeks();
+    var activeWs = data.weekStartDate || '';
+    html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
+    html += '<label style="font-size:12px;color:var(--text-muted)">周次<select class="form-input" id="schedule-week-select" onchange="App.views.schedule.switchWeek(this.value)" style="width:auto;display:inline-block;margin-left:6px">';
+    if (!weeks.length) {
+      html += '<option value="">（暂无存档周）</option>';
+    } else {
+      weeks.forEach(function (w) {
+        var sel = (w.weekStart === activeWs) ? ' selected' : '';
+        html += '<option value="' + w.weekStart + '"' + sel + '>' + U.escapeHtml(w.label) + '</option>';
+      });
+    }
+    html += '<option value="__new__">＋ 新建周</option>';
+    html += '</select></label>';
+    html += '<button class="btn btn-danger btn-ghost btn-sm" onclick="App.views.schedule.deleteWeek()">' + U.svgIcon('trash-2', 14) + '删除当前周</button>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">（切换/新建/删除周次，历史周可在 KPI 视图实时重算）</span>';
+    html += '</div>';
     html += '<div id="schedule-fetch-banner"></div>';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:6px">上次更新：' + U.escapeHtml(updatedAt) + U.escapeHtml(srcInfo) + '</p>';
     html += '<p class="form-hint" style="margin-bottom:14px">按教师分块排布（每位教师一行组，周一至周日 7 列、时间节次为行）。导入：选择多张课表截图，由 AI（DeepSeek 视觉模型，复用现有密钥）识别为可编辑课程表；识别后请在网页里核对修正，再点「保存课程表」。无密钥或识别异常时，可直接手动添加教师与节次填写。</p>';
@@ -247,7 +362,9 @@
     data.updatedAt = new Date().toISOString();
     if (!data.source) data.source = 'manual';
     App.store.set('schedule', data);
+    writeSchedule(data);
     App.util.toast('课程表已保存', 'ok');
+    renderShell(document.getElementById('view-container'), getSchedule());
   }
 
   function addTeacher() {
@@ -357,6 +474,7 @@
       nd.sourceUrl = '';
       nd.fetchedAt = null;
       App.store.set('schedule', nd);
+      writeSchedule(nd);
       renderShell(document.getElementById('view-container'), nd);
       App.util.toast('识别完成，请核对后点「保存课程表」', 'ok');
     }).catch(function (e) {
@@ -489,6 +607,7 @@
       teachers: sched.teachers || []
     };
     App.store.set('schedule', data);
+    writeSchedule(data);
     renderShell(document.getElementById('view-container'), data);
     App.util.toast('已应用抓取的课程表', 'ok');
     var banner = document.getElementById('schedule-fetch-banner');
@@ -641,6 +760,14 @@
     // 日期选择模式（周度 / 月度）
     setScheduleMode: setScheduleMode,
     onMonthChange: onMonthChange,
+    // 多周并存：周次切换 / 删除
+    switchWeek: switchWeek,
+    deleteWeek: deleteWeek,
+    getScheduleWeeks: getScheduleWeeks,
+    ensureSchedules: ensureSchedules,
   };
+
+  // 首次加载即确保 schedules 映射存在（懒迁移活动周）
+  ensureSchedules();
 
 })();
