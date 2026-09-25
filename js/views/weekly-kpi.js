@@ -4,7 +4,7 @@
             + 教师管理板块（App.viewData().teachers）的科组映射
    指标：预排周课次 / 请假课次 / 实际周课次（=预排−请假）
          / 预排饱和度（=预排/16）/ 实际饱和度（=实际/16）
-   支持：按周查看（本周实时 + 历史快照）/ 按科组筛选 / 教师勾选纳入科组聚合
+   支持：按人工月+周次查看（本周实时 + 历史快照）/ 按科组筛选 / 教师勾选纳入科组聚合
    导出：Excel（XLSX，两张表）/ 图片（canvas 绘制 PNG，零外部依赖）
    ============================================ */
 
@@ -15,7 +15,8 @@
 
   // ---------- 页面状态 ----------
   var _selNames = null;        // 选中教师（name -> bool；null = 全部选中）
-  var _mode = '__live__';      // '__live__' 或 某周起始日 ISO（快照）
+  var _artMonth = null;        // 当前所选人工月（YYYY-MM）
+  var _weekNo = 1;             // 当前所选周次（1..N）
   var _filterGroup = 'all';    // 科组筛选
   var _displayedRows = [];     // 当前展示（受筛选）的按教师行
   var _lastRows = [];          // 导出用：最近一次按教师行
@@ -159,16 +160,16 @@
     return summary;
   }
 
-  // ---------- 快照（支持按周查看历史）----------
+  // ---------- 快照（历史留存，按 weekStart 归档）----------
   function getSnapshots() { return App.store.get('kpiSnapshots') || {}; }
-  function liveWeekKey() { var sch = readSchedule(); return sch.weekStartDate || thisMonday(); }
 
   function saveSnapshot() {
     var sch = readSchedule();
+    if (!sch.weekStartDate) { App.util.toast('请先在「课程表」设置并保存本周', 'warn'); return; }
     var rows = computeRows('all');     // 存全量（含 selected 标记），查看时再按筛选显示
     var groups = computeGroups(rows);
     var summary = computeCampusSummary(groups);
-    var wk = sch.weekStartDate || thisMonday();
+    var wk = sch.weekStartDate;
     var snaps = getSnapshots();
     snaps[wk] = {
       weekStart: wk,
@@ -179,9 +180,8 @@
       createdAt: new Date().toISOString()
     };
     App.store.set('kpiSnapshots', snaps);
-    _mode = wk;
     render();
-    App.util.toast('已保存本周 KPI 快照（' + wk + '）', 'ok');
+    App.util.toast('已保存 ' + wk + ' 周 KPI 快照', 'ok');
   }
 
   function deleteSnapshot(wk) {
@@ -195,7 +195,6 @@
         var s = getSnapshots();
         delete s[wk];
         App.store.set('kpiSnapshots', s);
-        if (_mode === wk) _mode = '__live__';
         render();
         close();
         App.util.toast('已删除该周快照', 'ok');
@@ -204,40 +203,51 @@
   }
 
   // ---------- 渲染 ----------
+  // 首次进入时，默认选中「当前日期所属人工月 + 当前周次」
+  function ensureSelection() {
+    if (_artMonth && _weekNo) return;
+    var cur = App.weeklyCycle.artMonthOfDate(new Date());
+    _artMonth = cur.artMonthId;
+    _weekNo = cur.weekNo;
+  }
+
   function render() {
     var container = document.getElementById('view-container');
     if (!container) return;
     var U = App.util;
 
-    var sch = readSchedule();
-    var liveWeek = sch.weekStartDate || thisMonday();
-    var liveEnd = sch.weekEndDate || thisSunday();
-    var isLive = (_mode === '__live__');
-    var snap = isLive ? null : (getSnapshots()[_mode] || null);
+    ensureSelection();
+    var wk = App.weeklyCycle.resolveWeek(_artMonth, _weekNo);
+    if (!wk) {
+      container.innerHTML = '<div class="page-head"><h1 class="page-title">教师周度 KPI</h1></div>' +
+        '<div style="padding:24px;color:var(--text-muted)">所选周次无效</div>';
+      return;
+    }
+    var weekStart = wk.start, weekEnd = wk.end;
 
-    var rows, groups, summary, weekStart, weekEnd, sourceText;
+    var sch = readSchedule();
+    var isLive = (sch.weekStartDate === weekStart);
+    var snap = isLive ? null : (getSnapshots()[weekStart] || null);
+
+    var rows, groups, summary, sourceText;
     if (isLive) {
       syncSel(sch.teachers);
       rows = computeRows(_filterGroup);
       groups = computeGroups(rows);
       summary = computeCampusSummary(computeGroups(computeRows('all')));
-      weekStart = liveWeek; weekEnd = liveEnd;
-      sourceText = '数据来源：课程表（' + liveWeek + ' ~ ' + liveEnd + '）';
+      sourceText = '数据来源：课程表（' + weekStart + ' ~ ' + weekEnd + '）';
     } else if (snap) {
       rows = (snap.rows || []).filter(function (r) {
         return (_filterGroup === 'all') || (r.group === _filterGroup);
       });
-      groups = snap.groups || [];
+      groups = (_filterGroup === 'all') ? (snap.groups || []) : (snap.groups || []).filter(function (g) { return g.group === _filterGroup; });
       summary = snap.summary || computeCampusSummary(groups);
-      weekStart = snap.weekStart; weekEnd = snap.weekEnd;
       var when = snap.createdAt ? new Date(snap.createdAt).toLocaleString('zh-CN') : '未知';
       sourceText = '数据来源：KPI 快照（保存于 ' + when + '）';
     } else {
       rows = []; groups = [];
       summary = computeCampusSummary(groups);
-      weekStart = liveWeek; weekEnd = liveEnd;
-      sourceText = '未找到该周快照，已回退到本周实时数据';
-      isLive = true;
+      sourceText = '当前所选周次（' + weekStart + ' ~ ' + weekEnd + '）暂无数据：请先在「课程表」设置该周并保存，或保存该周 KPI 快照';
     }
 
     _displayedRows = rows;
@@ -250,16 +260,16 @@
     html += '<div class="page-head"><h1 class="page-title">教师周度 KPI</h1>';
     html += '<p class="page-sub">教师每周关键绩效指标（课次与饱和度）· 基准：每周 ' + BASE + ' 次课 = 100% 满负荷</p></div>';
 
-    // 工具栏：左侧筛选，右侧操作
+    // 工具栏：左侧 人工月 + 周次 + 科组筛选，右侧操作
     html += '<div class="teacher-toolbar">';
     html += '<div class="teacher-filters">';
-    html += '<select class="form-input form-input-sm" id="kpi-week" onchange="App.views.weeklyKpi.onWeekChange(this.value)">';
-    html += '<option value="__live__"' + (isLive ? ' selected' : '') + '>本周（实时）</option>';
-    var snaps = getSnapshots();
-    Object.keys(snaps).sort().reverse().forEach(function (wk) {
-      html += '<option value="' + wk + '"' + ((!isLive && _mode === wk) ? ' selected' : '') + '>' + wk + ' 周</option>';
+    html += App.components.monthWeekPicker.html({
+      month: _artMonth,
+      week: _weekNo,
+      months: App.weeklyCycle.recentMonths(12),
+      monthCb: 'App.views.weeklyKpi.onMonthChange(this.value)',
+      weekCb: 'App.views.weeklyKpi.onWeekChange(this.value)'
     });
-    html += '</select>';
     html += '<select class="form-input form-input-sm" id="kpi-group" onchange="App.views.weeklyKpi.onFilterChange(this.value)">';
     html += '<option value="all"' + (_filterGroup === 'all' ? ' selected' : '') + '>全部科组</option>';
     SUBJECT_GROUPS.forEach(function (sg) {
@@ -273,7 +283,7 @@
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(true)">全选</button>';
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(false)">全不选</button>';
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.saveSnapshot()">' + U.svgIcon('save', 14) + ' 保存本周快照</button>';
-    } else {
+    } else if (snap) {
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.deleteSnapshot(\'' + weekStart + '\')">删除该周快照</button>';
     }
     html += '<button class="btn btn-primary btn-sm" onclick="App.views.weeklyKpi.exportImage()">' + U.svgIcon('image', 14) + ' 导出图片</button>';
@@ -361,7 +371,8 @@
   }
 
   // ---------- 交互 ----------
-  function onWeekChange(v) { _mode = v; render(); }
+  function onMonthChange(v) { _artMonth = v; _weekNo = 1; render(); }
+  function onWeekChange(v) { _weekNo = parseInt(v, 10) || 1; render(); }
   function onFilterChange(v) { _filterGroup = v; render(); }
   function toggleTeacher(idx, val) {
     var r = _displayedRows[idx];
@@ -564,6 +575,7 @@
 
   App.views = App.views || {};
   App.views.weeklyKpi = {
+    onMonthChange: onMonthChange,
     onWeekChange: onWeekChange,
     onFilterChange: onFilterChange,
     toggleTeacher: toggleTeacher,
