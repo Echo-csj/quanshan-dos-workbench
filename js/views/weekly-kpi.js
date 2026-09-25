@@ -26,16 +26,8 @@
 
   // ---------- 工具 ----------
   // 学科组归一（与 teachers.js canonSubject 保持一致：数学/英语/文综/理综）
-  function canonSubject(s) {
-    s = String(s || '').trim();
-    if (!s) return '';
-    s = s.replace(/科组$|教研组$|备课组$|学科组$|组$|学科$/, '');
-    if (s.indexOf('数学') >= 0) return '数学';
-    if (s.indexOf('英语') >= 0) return '英语';
-    if (s.indexOf('文综') >= 0) return '文综';
-    if (s.indexOf('理综') >= 0) return '理综';
-    return s;
-  }
+  // 统一委托 kpi-engine，确保与数据中心归档口径一致（零回归）
+  function canonSubject(s) { return App.kpiEngine.canonSubject(s); }
   function thisMonday() {
     var d = new Date();
     var day = (d.getDay() + 6) % 7; // 周一=0
@@ -47,8 +39,6 @@
     d.setDate(d.getDate() + 6);
     return d.toISOString().slice(0, 10);
   }
-  function isRest(v) { return v == null || (String(v).trim()).length === 0 || String(v).trim() === '休息'; }
-  function isLeave(v) { return String(v).indexOf('[请假]') >= 0; }
   function pct(v) { if (v == null || isNaN(v)) return '-'; return (v * 100).toFixed(0) + '%'; }
 
   // HTML/屏幕用饱和度配色（CSS 变量）
@@ -71,9 +61,7 @@
 
   function buildGroupMap() {
     var tchAll = (App.viewData && App.viewData().teachers) || [];
-    var m = {};
-    tchAll.forEach(function (t) { if (t && t.name) m[t.name] = canonSubject(t.subjectGroup); });
-    return m;
+    return App.kpiEngine.buildGroupMap(tchAll);
   }
 
   function readSchedule() {
@@ -98,67 +86,18 @@
   function setSel(name, val) { if (!_selNames) _selNames = {}; _selNames[name] = val; }
 
   // 计算每位教师 KPI（受科组筛选；selected 由 _selNames 决定）
+  // 委托 kpi-engine，确保与数据中心归档口径一致（零回归）
   function computeRows(filterGroup) {
     var sch = readSchedule();
-    var groupMap = buildGroupMap();
-    var rows = [];
-    (sch.teachers || []).forEach(function (t) {
-      var name = t.name || '（未命名）';
-      var subj = groupMap[name] || canonSubject(t.subject) || '未分组';
-      if (filterGroup && filterGroup !== 'all' && subj !== filterGroup) return;
-      var classes = t.classes || {};
-      var pre = 0, leave = 0;
-      Object.keys(classes).forEach(function (k) {
-        var v = String(classes[k] || '').trim();
-        if (isRest(v)) return;            // 空 / 休息 不计入预排
-        pre++;
-        if (isLeave(v)) leave++;          // 请假课次
-      });
-      var actual = pre - leave;
-      rows.push({
-        name: name, group: subj,
-        pre: pre, leave: leave, actual: actual,
-        preSat: pre / BASE, actualSat: actual / BASE,
-        selected: isSel(name)
-      });
-    });
-    return rows;
+    var tchAll = (App.viewData && App.viewData().teachers) || [];
+    return App.kpiEngine.computeRows(sch, tchAll, { filterGroup: filterGroup, selNames: _selNames });
   }
 
   // 按科组聚合（仅统计已勾选教师）：科组周课次 / 16 / 科组教师数
-  function computeGroups(rows) {
-    var groups = {};
-    rows.forEach(function (r) {
-      if (!r.selected) return;
-      if (!groups[r.group]) groups[r.group] = { group: r.group, teachers: 0, pre: 0, actual: 0 };
-      groups[r.group].teachers++;
-      groups[r.group].pre += r.pre;
-      groups[r.group].actual += r.actual;
-    });
-    return Object.keys(groups).map(function (k) {
-      var g = groups[k];
-      return {
-        group: g.group, teachers: g.teachers, pre: g.pre, actual: g.actual,
-        preSat: g.teachers ? g.pre / BASE / g.teachers : 0,
-        actualSat: g.teachers ? g.actual / BASE / g.teachers : 0
-      };
-    });
-  }
+  function computeGroups(rows) { return App.kpiEngine.computeGroups(rows); }
 
   // 校区汇总（基于已勾选教师的所有科组聚合）
-  function computeCampusSummary(groups) {
-    var summary = { label: '校区汇总', teachers: 0, pre: 0, actual: 0, preSat: 0, actualSat: 0 };
-    groups.forEach(function (g) {
-      summary.teachers += g.teachers;
-      summary.pre += g.pre;
-      summary.actual += g.actual;
-    });
-    if (summary.teachers) {
-      summary.preSat = summary.pre / BASE / summary.teachers;
-      summary.actualSat = summary.actual / BASE / summary.teachers;
-    }
-    return summary;
-  }
+  function computeCampusSummary(groups) { return App.kpiEngine.computeCampusSummary(groups); }
 
   // ---------- 快照（历史留存，按 weekStart 归档）----------
   function getSnapshots() { return App.store.get('kpiSnapshots') || {}; }
@@ -200,6 +139,15 @@
         App.util.toast('已删除该周快照', 'ok');
       }
     });
+  }
+
+  // 归档当前查看的「实时周」到周度数据中心（weeklyData），便于锁定/月度汇总
+  function archiveToDataCenter() {
+    if (!App.weeklyData) { App.util.toast('数据中心模块未加载', 'bad'); return; }
+    var rec = App.weeklyData.computeFromLive(_artMonth, _weekNo, {});
+    if (!rec) { App.util.toast('计算失败', 'bad'); return; }
+    App.weeklyData.upsert(rec);
+    App.util.toast('已归档 ' + rec.weekStart + ' 周到数据中心（来源：实时课程表）', 'ok');
   }
 
   // ---------- 渲染 ----------
@@ -283,6 +231,7 @@
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(true)">全选</button>';
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(false)">全不选</button>';
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.saveSnapshot()">' + U.svgIcon('save', 14) + ' 保存本周快照</button>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.archiveToDataCenter()">' + U.svgIcon('database', 14) + ' 归档到数据中心</button>';
     } else if (snap) {
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.deleteSnapshot(\'' + weekStart + '\')">删除该周快照</button>';
     }
@@ -582,6 +531,7 @@
     selectAll: selectAll,
     saveSnapshot: saveSnapshot,
     deleteSnapshot: deleteSnapshot,
+    archiveToDataCenter: archiveToDataCenter,
     exportImage: exportImage,
     exportXLSX: exportXLSX
   };

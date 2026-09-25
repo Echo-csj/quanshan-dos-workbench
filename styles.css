@@ -1696,3 +1696,7 @@ body { padding-bottom:34px; }
 
 /* 小按钮（查看历史待办入口） */
 .btn-xs { padding:3px 10px; font-size:12px; line-height:1.5; }
+
+/* 周度数据中心：操作列不换行 */
+.wd-actions { white-space: nowrap; }
+.wd-actions .btn-xs { margin: 1px 2px; }

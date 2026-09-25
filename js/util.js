@@ -285,6 +285,7 @@ window.App = window.App || {};
       'check': '<polyline points="20 6 9 17 4 12"/>',
       'copy': '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>',
       'info': '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+      'database': '<ellipse cx="12" cy="5" rx="9" ry="3"/><line x1="3" y1="5" x2="3" y2="19"/><path d="M21 5v14c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/>',
     };
     var path = icons[name] || icons['info'];
     return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + path + '</svg>';

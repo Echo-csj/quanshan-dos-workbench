@@ -366,6 +366,13 @@
   function onStatusChange(val) {
     var wrap = document.getElementById('ed-leave-wrap');
     if (wrap) wrap.style.display = (val === 'left') ? '' : 'none';
+    // 状态切换时同步 statusFrom 默认值：离职→离职日期；其它→入职日期
+    var sf = document.getElementById('ed-statusfrom');
+    if (sf) {
+      var leftAt = (document.getElementById('ed-leftat') || {}).value || '';
+      var entry = (document.getElementById('ed-entry') || {}).value || '';
+      sf.value = (val === 'left' && leftAt) ? leftAt : entry;
+    }
   }
 
   // 离职教师专属表格：留存基础信息 + 离职时间 + 原因 + 历史待办入口
@@ -563,6 +570,11 @@
     html += '<div class="ed-field"><label>离职日期</label><input class="form-input" type="date" id="ed-leftat" value="' + esc(isNew ? '' : (t.leftAt || '')) + '"></div>';
     html += '<div class="ed-field" style="flex:1"><label>离职原因</label><input class="form-input" id="ed-leavereason" value="' + esc(isNew ? '' : (t.leaveReason || '')) + '"></div>';
     html += '</div>';
+    // 状态生效日期（按 week_end 时点判定在职的基准；默认=入职日）
+    html += '<div class="ed-row">';
+    html += '<div class="ed-field"><label>状态生效日期</label><input class="form-input" type="date" id="ed-statusfrom" value="' + esc(isNew ? '' : (t.statusFrom || t.entryDate || '')) + '"></div>';
+    html += '<div class="ed-field" style="flex:1"><span style="font-size:12px;color:var(--text-muted)">状态从该日起生效，用于按周自动判定「在职」参与课次统计（默认=入职日）</span></div>';
+    html += '</div>';
     if (!App.isSub()) {
       html += '<div class="ed-row">';
       html += '<div class="ed-field"><label>毕业院校</label><input class="form-input" id="ed-school" value="' + esc(v('school')) + '"></div>';
@@ -658,6 +670,8 @@
     var leftAt = (document.getElementById('ed-leftat') || {}).value || '';
     var leaveReason = (document.getElementById('ed-leavereason') || {}).value || '';
     if (status !== 'left') { leftAt = ''; leaveReason = ''; } // 非离职状态清空离职信息
+    var statusFrom = (document.getElementById('ed-statusfrom') || {}).value || '';
+    if (!statusFrom) statusFrom = entryDate; // 兜底：空则取入职日（按周判定在职的基准）
 
     // 校验：姓名 + 所属部门（学科组）为必填项
     if (!name.trim() || !subjectGroup) {
@@ -687,6 +701,7 @@
           certificates: splitCerts(certsRaw),
           tags: edTags.slice(),
           status: status,
+          statusFrom: statusFrom,
           leftAt: leftAt,
           leaveReason: leaveReason
         };
@@ -714,6 +729,7 @@
           certificates: splitCerts(certsRaw),
           tags: edTags.slice(),
           status: status,
+          statusFrom: statusFrom,
           leftAt: leftAt,
           leaveReason: leaveReason
         });
@@ -914,6 +930,7 @@
         rec.id = App.store.uid('tr');
         rec.tags = []; // Excel 导入默认无标签（在职）
         rec.status = 'active'; // Excel 批量导入均为在职
+        rec.statusFrom = p.entryDate || ''; // 状态生效=入职日（按周判定在职基准）
         teachers.push(rec);
       }
     });
