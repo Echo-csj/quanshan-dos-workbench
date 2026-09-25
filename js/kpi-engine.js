@@ -33,19 +33,26 @@
   function isLeave(v) { return String(v).indexOf('[请假]') >= 0; }
 
   // schedule: { weekStartDate, weekEndDate, teachers:[{name, subject, classes}] }
+  // teachers: 教师管理板块教师名册（权威来源，决定科组归属与科组教师数）
   // opts: { filterGroup:'all'|组名, selNames:{name->bool}|null（null=全选） }
+  // 规则：科组教师数以教师管理板块为准；课程表缺失该老师数据时，该老师当周课次计为 0（仍计入科组教师数）。
   function computeRows(schedule, teachers, opts) {
     opts = opts || {};
     var filterGroup = opts.filterGroup || 'all';
     var selNames = opts.selNames || null;
     var sch = schedule || {};
     var groupMap = buildGroupMap(teachers);
+    // 课程表教师按姓名索引，用于左连接到教师管理名册（缺失即计 0）
+    var schedByName = {};
+    (sch.teachers || []).forEach(function (t) { if (t && t.name) schedByName[t.name] = t; });
     var rows = [];
-    (sch.teachers || []).forEach(function (t) {
+    (teachers || []).forEach(function (t) {
       var name = t.name || '（未命名）';
-      var subj = groupMap[name] || canonSubject(t.subject) || '未分组';
+      var subj = groupMap[name] || canonSubject(t.subjectGroup) || '未分组';
+      if (SUBJECT_GROUPS.indexOf(subj) < 0) return; // 仅纳入有科组归属的教师（教师管理板块为准）
       if (filterGroup && filterGroup !== 'all' && subj !== filterGroup) return;
-      var classes = t.classes || {};
+      var st = schedByName[name];                 // 该周课程表数据（可能缺失）
+      var classes = (st && st.classes) || {};
       var pre = 0, leave = 0;
       Object.keys(classes).forEach(function (k) {
         var v = String(classes[k] || '').trim();

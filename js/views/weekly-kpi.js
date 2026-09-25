@@ -260,7 +260,7 @@
 
     var rows, groups, summary, sourceText;
     if (isLive) {
-      syncSel(sch.teachers);
+      syncSel(App.viewData().teachers); // 选框以教师管理板块名册为准（与 computeRows 名册一致）
       rows = computeRows(_filterGroup, sch);
       groups = computeGroups(rows);
       summary = computeCampusSummary(computeGroups(computeRows('all', sch)));
