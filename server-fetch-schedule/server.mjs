@@ -11,6 +11,12 @@
 //   2) 内置每日定时（默认 06:00，可用 FETCH_SCHEDULE=HH:MM 改）自动执行同样逻辑
 //   前端「同步抓取」按钮即调用本服务的 /fetch 端点（config.js 的 COURSE_FETCH_WORKER_URL 指向它）。
 //
+// 周次切换抓取（核心）：91paike 站点没有月份/周次下拉，只有"上一周/下一周"链接（GET，靠 y/m/d 参数定位周次）。
+//   请求体可带 { weekStartDate }（目标周周一）指定要抓的周；后端登录后解析页面当前周，
+//   若给定目标周则直接 GET 带 y/m/d 的课表页 URL 拿到该周再解析（无需逐周翻页）。
+//   不带 weekStartDate / 定时抓取 → 抓"当前周"。
+//   调试：POST 时加请求头 x-debug: nav 可仅验证周次导航（返回 currentWeek / targetWeek / finalWeek）。
+//
 // 配置：所有密钥从环境变量读取（见 .env.example）。生产部署用 systemd / pm2 常驻，
 //       或在 docker 容器内直接 `node server.mjs`。端口默认 28888（FETCH_PORT 可改）。
 //
@@ -18,6 +24,8 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { resolve, dirname } from 'node:path';
 
 // ---------- 配置（来自环境变量）----------
 const cleanSecret = (v) => (v || '').replace(/[^\x20-\x7e]/g, '').trim();
@@ -98,16 +106,22 @@ const DAY_ALIAS = {
 };
 const normDay = (d) => DAY_ALIAS[d] || d;
 
+function ymd(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function thisMonday() {
   const d = new Date();
   const day = (d.getDay() + 6) % 7;
   d.setDate(d.getDate() - day);
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
 }
 function thisSunday() {
   const d = new Date(thisMonday());
   d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
+  return ymd(d);
 }
 
 function normalizeSchedule(parsed) {
@@ -159,11 +173,11 @@ function extractInputFields(html) {
   let m;
   while ((m = re.exec(html)) !== null) {
     const tag = m[0];
-    const nameM = tag.match(/\bname=(["'])([^"']+)\1/i);
+    const nameM = tag.match(/\bname\s*=\s*(["'])([^"']+)\1/i) || tag.match(/\bname\s*=\s*([^\s>]+)/i);
     if (!nameM) continue;
-    const name = nameM[2];
-    const valM = tag.match(/\bvalue=(["'])([^"']*)\1/i);
-    fields[name] = valM ? valM[2] : '';
+    const name = nameM[2] !== undefined ? nameM[2] : nameM[1];
+    const valM = tag.match(/\bvalue\s*=\s*(["'])([^"']*)\1/i) || tag.match(/\bvalue\s*=\s*([^\s>]+)/i);
+    fields[name] = valM ? (valM[2] !== undefined ? valM[2] : valM[1]) : '';
   }
   return fields;
 }
@@ -171,6 +185,148 @@ function extractInputFields(html) {
 // 源站地址在运行时由 cfg() 提供；用闭包变量覆盖 parse 内的占位
 let SOURCE_BASE_URL_PLACEHOLDER = 'http://zyg.91paike.com';
 let SOURCE_MODULE_PLACEHOLDER = '400002';
+
+// ---------- 周次导航（91paike 无月份/周次下拉，仅"上一周/下一周"链接）----------
+// 做法：登录后解析页面当前显示的周次（month-nav 的 .currect 文本，如"第39周 （2026-09-21 ~ 2026-09-27）"），
+// 若给定目标周（weekStartDate=目标周周一），直接 GET 带 y/m/d 参数的课表页 URL 即可拿到该周，无需逐周回发。
+// 关键：源站周次切换本质是 schedules.aspx?...&period=week&y=Y&m=M&d=D 的 GET 链接（d 取目标周任意一天）。
+const MAX_WEEK_STEPS = 60; // 最多导航约 14 个月，足够覆盖历史周次
+
+function mondayOf(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const day = (d.getDay() + 6) % 7; // 0=周一
+  d.setDate(d.getDate() - day);
+  return ymd(d); // 用本地日期分量，避免 toISOString 的 UTC 时区偏移（宿主机 UTC+8 会错位一天）
+}
+
+// 以 UTC 历法天数做差值（与时区无关）：同一日历日的 dayNumber 固定
+function dayNumber(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+}
+function weekDiff(targetMon, currentMon) {
+  return Math.round((dayNumber(targetMon) - dayNumber(currentMon)) / 7); // >0 未来(下一周)，<0 过去(上一周)
+}
+
+// 从页面解析当前显示的周起止。优先取 month-nav 里的 .currect 文本（"第39周 （2026-09-21 ~ 2026-09-27）"），
+// 该 span 同时含起止两个日期，最可靠；回退到 day-nav 文本或全页扫描（兼容 "2026年9月21日~9月27日" / "2026/09/21~09/27"）。
+// 从一段 HTML 中解析"周起~周止"日期。支持三种格式：
+//   短横：2026-09-21 ~ 2026-09-27
+//   斜杠：2026/09/21 ~ 09/27（结束缺省年/月）
+//   中文：2026年9月21日 ~ 9月27日（结束缺省年）
+// 无明确结束日时，默认 start + 6 天（一周）。
+function parseDatesFromRegion(region) {
+  const pad2 = (n) => String(n).padStart(2, '0');
+  // 1) 短横
+  const dash = [...region.matchAll(/(\d{4})-(\d{1,2})-(\d{1,2})/g)];
+  if (dash.length >= 2) return { start: `${dash[0][1]}-${pad2(dash[0][2])}-${pad2(dash[0][3])}`, end: `${dash[1][1]}-${pad2(dash[1][2])}-${pad2(dash[1][3])}` };
+  if (dash.length === 1) {
+    const s = `${dash[0][1]}-${pad2(dash[0][2])}-${pad2(dash[0][3])}`;
+    const dt = new Date(`${s}T00:00:00`); dt.setDate(dt.getDate() + 6);
+    return { start: s, end: ymd(dt) };
+  }
+  // 2) 斜杠：2026/09/21 ~ 09/27
+  const slash = [...region.matchAll(/(\d{4})\/(\d{1,2})\/(\d{1,2})/g)];
+  if (slash.length) {
+    const y = +slash[0][1], m = +slash[0][2], d = +slash[0][3];
+    const endM = /(?:~|-|至)\s*(\d{1,2})\/(\d{1,2})/.exec(region);
+    const em = endM ? +endM[1] : m, ed = endM ? +endM[2] : d + 6;
+    return { start: `${y}-${pad2(m)}-${pad2(d)}`, end: `${y}-${pad2(em)}-${pad2(ed)}` };
+  }
+  // 3) 中文：2026年9月21日 ~ 9月27日
+  const cn = /(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(region);
+  if (cn) {
+    const y = +cn[1], m = +cn[2], d = +cn[3];
+    const endM = /(?:~|-|至)\s*(\d{1,2})月(\d{1,2})日/.exec(region);
+    const em = endM ? +endM[1] : m, ed = endM ? +endM[2] : d + 6;
+    return { start: `${y}-${pad2(m)}-${pad2(d)}`, end: `${y}-${pad2(em)}-${pad2(ed)}` };
+  }
+  return null;
+}
+
+function extractWeekDates(html) {
+  // 优先：month-nav 的 .currect span（真实格式 "第39周 （2026-09-21 ~ 2026-09-27）"）
+  // 只解析该 span 内部，避免被页面靠前出现的"今天"日期（如 2026-09-25）干扰。
+  const curIdx = html.indexOf('currect');
+  if (curIdx >= 0) {
+    const open = html.indexOf('>', curIdx); // 跳过 class="currect"
+    const close = open >= 0 ? html.indexOf('</span>', open) : -1;
+    const inner = close > open ? html.slice(open + 1, close) : html.slice(open + 1, open + 400);
+    const r = parseDatesFromRegion(inner);
+    if (r) return r;
+    // .currect 内部未解析出日期 → 继续走下方回退
+  }
+  // 回退：day-nav 区域 或 全文（兼容旧版中文/斜杠格式）
+  const region = html.indexOf('day-nav') >= 0 ? html.slice(html.indexOf('day-nav'), html.indexOf('day-nav') + 4000) : html;
+  return parseDatesFromRegion(region);
+}
+
+// 构建"指定周"的课表页 URL：91paike 的周次切换是普通 GET 链接，靠 y/m/d 查询参数定位周次
+// （真实链接形如 schedules.aspx?module=400002&dept=1&owner=teacher&period=week&y=2026&m=9&d=20，
+//  d=20 是周日）。为兼容"d=周日止"和"d 落在当周自动吸附(Mon 起)"两种源站实现口径，
+// 统一传目标周的【周日=周一+6】作为 d：两种口径都会解析到同一周，避免差一周。
+function buildWeekUrl(C, mondayIso) {
+  const [y, m, d] = mondayIso.split('-').map(Number);
+  const sun = new Date(Date.UTC(y, m - 1, d));
+  sun.setUTCDate(sun.getUTCDate() + 6); // 纯 UTC 运算，避免时区偏移
+  const sy = sun.getUTCFullYear(), sm = sun.getUTCMonth() + 1, sd = sun.getUTCDate();
+  return `${C.SOURCE_BASE_URL}/schedules.aspx?module=${C.SOURCE_MODULE}&dept=1&owner=teacher&period=week&y=${sy}&m=${sm}&d=${sd}`;
+}
+
+// 登录源站，返回已登录的课表页 HTML（当前周，未导航）
+async function doLogin(C) {
+  const loginUrl = `${C.SOURCE_BASE_URL}/login.aspx?return=schedules.aspx%3fmodule%3d${C.SOURCE_MODULE}`;
+  const jar = makeCookieJar();
+  const loginPageRes = await fetchC(loginUrl, { headers: { referer: loginUrl } }, jar);
+  if (!loginPageRes.ok) throw new Error(`源站登录页访问失败：HTTP ${loginPageRes.status}`);
+  const loginPageHtml = await loginPageRes.text();
+  const fields = extractInputFields(loginPageHtml);
+  fields['tb_account'] = C.SOURCE_USER;
+  fields['tb_password'] = C.SOURCE_PASS;
+  fields['btn_submit'] = '登 录';
+  const body = Object.keys(fields)
+    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k] ?? '')}`)
+    .join('&');
+  const loginRes = await fetchC(loginUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded', referer: loginUrl },
+    body, redirect: 'manual',
+  }, jar);
+  let schedHtml = '';
+  let schedUrl = `${C.SOURCE_BASE_URL}/schedules.aspx?module=${C.SOURCE_MODULE}`;
+  if (loginRes.status >= 300 && loginRes.status < 400) {
+    const loc = loginRes.headers.get('location');
+    const target = loc ? (loc.startsWith('http') ? loc : `${C.SOURCE_BASE_URL}/${loc.replace(/^\//, '')}`) : schedUrl;
+    const schedRes = await fetchC(target, { headers: { referer: loginUrl } }, jar);
+    if (!schedRes.ok) throw new Error(`抓取课表失败：HTTP ${schedRes.status}`);
+    schedHtml = await schedRes.text();
+    schedUrl = target;
+  } else {
+    schedHtml = await loginRes.text();
+    schedUrl = loginUrl;
+  }
+  if (!schedHtml || schedHtml.length < 1000) {
+    throw new Error('登录后未取到课表页面（可能账号/密码错误、需要验证码，或会话已失效）');
+  }
+  return { jar, schedHtml, schedUrl };
+}
+
+// 导航到目标周：91paike 周次切换是 GET 链接（y/m/d 参数），直接请求目标周 URL 即可，
+// 无需逐周回发。一次 GET 拿到目标周页面。trace 记录本次请求便于联调。
+async function navigateToWeek(C, jar, schedUrl, schedHtml, targetMon, trace) {
+  const cur = extractWeekDates(schedHtml);
+  const curMon = cur ? mondayOf(cur.start) : thisMonday();
+  const tMon = mondayOf(targetMon);
+  if (tMon === curMon) return schedHtml; // 已是目标周，无需导航
+  const url = buildWeekUrl(C, tMon);
+  if (trace) trace.push({ step: 1, dir: tMon > curMon ? 'next' : 'prev', url, target: tMon });
+  const res = await fetchC(url, { headers: { referer: schedUrl } }, jar);
+  if (!res.ok) throw new Error(`历史周抓取失败：HTTP ${res.status}`);
+  const html = await res.text();
+  const w = extractWeekDates(html);
+  if (!w) throw new Error('历史周页面解析失败（可能周次超出源站可查范围，或页面结构变化）');
+  return html;
+}
 
 function parse91paikeSchedule(html) {
   const teacherMeta = new Map();
@@ -271,17 +427,10 @@ function parse91paikeSchedule(html) {
     throw new Error('HTML 解析：未找到任何教师课表块（.arrange / .calendar）。可能登录失效或页面结构变化。');
   }
 
-  const navIdx = html.indexOf('day-nav');
-  const navEnd = html.indexOf('</ul>', navIdx);
-  const navHtml = navIdx >= 0 ? html.slice(navIdx, navEnd >= 0 ? navEnd : navIdx + 4000) : '';
-  const dateRe = /y=(\d+)&m=(\d+)&d=(\d+)/g;
-  const dates = [];
-  let dm2;
-  while ((dm2 = dateRe.exec(navHtml)) !== null) {
-    dates.push(`${dm2[1]}-${dm2[2].padStart(2, '0')}-${dm2[3].padStart(2, '0')}`);
-  }
-  const ws = dates[0] || null;
-  const we = dates[dates.length - 1] || null;
+  // 周次起止来自页面 day-nav 文本（"2026年9月21日~9月27日" 等），兼容无 y/m/d 参数的 91paike
+  const wk = extractWeekDates(html);
+  const ws = wk ? wk.start : null;
+  const we = wk ? wk.end : null;
   const periods = FIXED_PERIODS;
   const sourceUrl = `${SOURCE_BASE_URL_PLACEHOLDER}/schedules.aspx?module=${SOURCE_MODULE_PLACEHOLDER}`;
   return normalizeSchedule({ teachers, periods, weekStartDate: ws, weekEndDate: we, sourceUrl });
@@ -295,45 +444,19 @@ function endOfPeriod(start) {
   return m[start] || start;
 }
 
-// ---------- 登录并抓取（ASP.NET WebForms）----------
-async function fetchRawHtml(C) {
-  const loginUrl = `${C.SOURCE_BASE_URL}/login.aspx?return=schedules.aspx%3fmodule%3d${C.SOURCE_MODULE}`;
-  const schedUrl = `${C.SOURCE_BASE_URL}/schedules.aspx?module=${C.SOURCE_MODULE}`;
-  const jar = makeCookieJar();
-  const loginPageRes = await fetchC(loginUrl, { headers: { referer: loginUrl } }, jar);
-  if (!loginPageRes.ok) throw new Error(`源站登录页访问失败：HTTP ${loginPageRes.status}`);
-  const loginPageHtml = await loginPageRes.text();
-  const fields = extractInputFields(loginPageHtml);
-  fields['tb_account'] = C.SOURCE_USER;
-  fields['tb_password'] = C.SOURCE_PASS;
-  fields['btn_submit'] = '登 录';
-  const body = Object.keys(fields)
-    .map((k) => `${encodeURIComponent(k)}=${encodeURIComponent(fields[k] ?? '')}`)
-    .join('&');
-  const loginRes = await fetchC(loginUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded', referer: loginUrl },
-    body,
-    redirect: 'manual',
-  }, jar);
-  let schedHtml = '';
-  if (loginRes.status >= 300 && loginRes.status < 400) {
-    const loc = loginRes.headers.get('location');
-    const target = loc ? (loc.startsWith('http') ? loc : `${C.SOURCE_BASE_URL}/${loc.replace(/^\//, '')}`) : schedUrl;
-    const schedRes = await fetchC(target, { headers: { referer: loginUrl } }, jar);
-    if (!schedRes.ok) throw new Error(`抓取课表失败：HTTP ${schedRes.status}`);
-    schedHtml = await schedRes.text();
-  } else {
-    schedHtml = await loginRes.text();
-  }
-  if (!schedHtml || schedHtml.length < 1000) {
-    throw new Error('登录后未取到课表页面（可能账号/密码错误、需要验证码，或会话已失效）');
-  }
-  return schedHtml;
+// ---------- 登录并抓取（ASP.NET WebForms，按"上一周/下一周"按钮导航）----------
+// weekStartDate：可选，目标周周一(YYYY-MM-DD)；给定则导航到该周；缺省=当前周
+async function fetchRawHtml(C, weekStartDate) {
+  const { jar, schedHtml, schedUrl } = await doLogin(C);
+  const cur = extractWeekDates(schedHtml);
+  const targetMon = /^\d{4}-\d{2}-\d{2}$/.test(weekStartDate || '')
+    ? weekStartDate
+    : mondayOf((cur || { start: thisMonday() }).start);
+  return navigateToWeek(C, jar, schedUrl, schedHtml, targetMon);
 }
 
-async function loginAndFetch(C) {
-  const html = await fetchRawHtml(C);
+async function loginAndFetch(C, weekStartDate) {
+  const html = await fetchRawHtml(C, weekStartDate);
   SOURCE_BASE_URL_PLACEHOLDER = C.SOURCE_BASE_URL;
   SOURCE_MODULE_PLACEHOLDER = C.SOURCE_MODULE;
   return parse91paikeSchedule(html);
@@ -360,13 +483,16 @@ async function upsertShared(C, userId, payload) {
 }
 
 // ---------- 主逻辑 ----------
-async function runFetch(debug) {
+// opts.weekStartDate：可选，目标周周一(YYYY-MM-DD)；缺省=当前周
+async function runFetch(debug, opts) {
   const C = cfg();
   if (!C.SOURCE_USER || !C.SOURCE_PASS) throw new Error('源站账号未配置（SOURCE_USER / SOURCE_PASS）');
   if (!(C.SERVICE_ROLE && C.OWNER_USER_ID)) throw new Error('Supabase 配置缺失（SERVICE_ROLE_KEY / OWNER_USER_ID）');
 
+  const ws = (opts && /^\d{4}-\d{2}-\d{2}$/.test(opts.weekStartDate || '')) ? opts.weekStartDate : null;
+
   if (debug === 'hint_all') {
-    const html = await fetchRawHtml(C);
+    const html = await fetchRawHtml(C, ws);
     const hintRe = /<span class='hint([^']*)'>([^<]+)<\/span>/g;
     const counts = {}; const samples = {}; let hm;
     while ((hm = hintRe.exec(html)) !== null) {
@@ -380,12 +506,22 @@ async function runFetch(debug) {
     }
     return { ok: true, hintCounts: counts, hintSamples: samples, htmlLen: html.length };
   }
+  if (debug === 'nav') {
+    // 仅验证周次导航：登录→按目标周逐周点击"上一周/下一周"，返回经过的周次轨迹
+    const { jar, schedHtml, schedUrl } = await doLogin(C);
+    const cur = extractWeekDates(schedHtml);
+    const targetMon = ws || mondayOf((cur || { start: thisMonday() }).start);
+    const trace = [];
+    const finalHtml = await navigateToWeek(C, jar, schedUrl, schedHtml, targetMon, trace);
+    const finalWk = extractWeekDates(finalHtml);
+    return { ok: true, currentWeek: cur, targetWeek: targetMon, steps: trace, finalWeek: finalWk, htmlLen: finalHtml.length };
+  }
   if (debug === 'first_teacher') {
-    const parsed = await loginAndFetch(C);
+    const parsed = await loginAndFetch(C, ws);
     return { ok: true, teacher: parsed.teachers[0] };
   }
   if (debug === 'stats') {
-    const parsed = await loginAndFetch(C);
+    const parsed = await loginAndFetch(C, ws);
     const stats = {};
     for (const t of parsed.teachers) {
       const s = { total: 0, 请假: 0, 寒假: 0, 暑假: 0, 调课: 0, 待定: 0 };
@@ -406,10 +542,10 @@ async function runFetch(debug) {
     return { ok: true, totals, perTeacher: stats };
   }
 
-  const schedule = await loginAndFetch(C);
+  const schedule = await loginAndFetch(C, ws);
   const payload = { schedule, fetchedAt: schedule.fetchedAt, source: 'fetch' };
   await upsertShared(C, C.OWNER_USER_ID, payload);
-  return { ok: true, teachers: schedule.teachers.length, fetchedAt: schedule.fetchedAt };
+  return { ok: true, teachers: schedule.teachers.length, fetchedAt: schedule.fetchedAt, weekStartDate: schedule.weekStartDate, weekEndDate: schedule.weekEndDate };
 }
 
 // ---------- HTTP 服务 ----------
@@ -430,6 +566,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
     if (req.method !== 'POST') { res.writeHead(405, { 'content-type': 'application/json', ...cors }); res.end(JSON.stringify({ error: 'method not allowed' })); return; }
 
+    // 读取请求体（前端「同步抓取」会带 { weekStartDate, weekEndDate } 指定目标周）
+    let bodyStr = '';
+    try { for await (const chunk of req) bodyStr += chunk; } catch { /* 忽略读取异常 */ }
+    let bodyObj = {};
+    try { bodyObj = JSON.parse(bodyStr || '{}'); } catch { bodyObj = {}; }
+    const reqWeek = /^\d{4}-\d{2}-\d{2}$/.test(bodyObj.weekStartDate) ? bodyObj.weekStartDate : null;
+
     const C = cfg();
     const cronSecret = req.headers['x-cron-secret'] || '';
     const authHeader = req.headers['authorization'] || '';
@@ -448,7 +591,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const debug = req.headers['x-debug'] || '';
-    const result = await runFetch(debug);
+    const result = await runFetch(debug, { weekStartDate: reqWeek });
     res.writeHead(200, { 'content-type': 'application/json', ...cors });
     res.end(JSON.stringify(result));
   } catch (e) {
@@ -458,21 +601,34 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[schedule-fetch] listening on http://0.0.0.0:${PORT}  (ALLOW_ORIGIN=${ALLOW_ORIGIN.join(',')})`);
-});
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
-// ---------- 内置每日定时（默认 06:00）----------
-const sched = (process.env.FETCH_SCHEDULE || '06:00').split(':').map((x) => parseInt(x, 10));
-const sh = sched[0] ?? 6, sm = sched[1] ?? 0;
-console.log(`[schedule-fetch] 每日定时：${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')} 自动抓取`);
-setInterval(() => {
-  const d = new Date();
-  if (d.getHours() === sh && d.getMinutes() === sm) {
-    runFetch().then((r) => console.log('[schedule-fetch] 定时抓取完成:', r)).catch((e) => console.error('[schedule-fetch] 定时抓取失败:', e.message));
-  }
-}, 60 * 1000);
+if (isMain) {
+  // 若存在同目录 .env 则自动加载（Node 20.12+；缺失/失败不影响已通过环境变量注入的场景，如 pm2 env_file / systemd EnvironmentFile / --env-file）
+  try { if (typeof process.loadEnvFile === 'function') process.loadEnvFile(resolve(dirname(fileURLToPath(import.meta.url)), '.env')); } catch { /* 忽略 */ }
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[schedule-fetch] listening on http://0.0.0.0:${PORT}  (ALLOW_ORIGIN=${ALLOW_ORIGIN.join(',')})`);
+  });
 
-// 进程退出前打印
-process.on('SIGINT', () => { console.log('[schedule-fetch] bye'); process.exit(0); });
-process.on('SIGTERM', () => { console.log('[schedule-fetch] bye'); process.exit(0); });
+  // ---------- 内置每日定时（默认 06:00）----------
+  const sched = (process.env.FETCH_SCHEDULE || '06:00').split(':').map((x) => parseInt(x, 10));
+  const sh = sched[0] ?? 6, sm = sched[1] ?? 0;
+  console.log(`[schedule-fetch] 每日定时：${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')} 自动抓取`);
+  setInterval(() => {
+    const d = new Date();
+    if (d.getHours() === sh && d.getMinutes() === sm) {
+      runFetch().then((r) => console.log('[schedule-fetch] 定时抓取完成:', r)).catch((e) => console.error('[schedule-fetch] 定时抓取失败:', e.message));
+    }
+  }, 60 * 1000);
+
+  // 进程退出前打印
+  process.on('SIGINT', () => { console.log('[schedule-fetch] bye'); process.exit(0); });
+  process.on('SIGTERM', () => { console.log('[schedule-fetch] bye'); process.exit(0); });
+}
+
+// 导出纯函数 / 导航函数，供单元测试（import 时不会启动 HTTP 服务，因已做 isMain 守卫）
+export {
+  mondayOf, weekDiff, extractWeekDates, buildWeekUrl,
+  extractInputFields, navigateToWeek, doLogin, parse91paikeSchedule,
+  normalizeSchedule, thisMonday, thisSunday, MAX_WEEK_STEPS,
+};
