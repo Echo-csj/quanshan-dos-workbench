@@ -266,6 +266,7 @@
     if (isLive) {
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(true)">全选</button>';
       html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.selectAll(false)">全不选</button>';
+      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.editSchedule()">' + U.svgIcon('edit', 14) + ' 编辑此周课程表</button>';
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.saveSnapshot()">' + U.svgIcon('save', 14) + ' 保存本周快照</button>';
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.archiveToDataCenter()">' + U.svgIcon('database', 14) + ' 归档到数据中心</button>';
     } else if (snap) {
@@ -278,7 +279,7 @@
 
     html += '<p class="form-hint" style="margin-bottom:14px">' + U.escapeHtml(sourceText)
       + ' · 当前周度范围：' + U.escapeHtml(weekStart) + ' ~ ' + U.escapeHtml(weekEnd)
-      + (isLive ? (isActiveWeek ? '（调整周范围请到「课程表」修改后保存，再硬刷新本页）' : '（历史周·课程表存档，可在「课程表」切换该周后编辑保存）') : '') + '</p>';
+      + (isLive ? (isActiveWeek ? '（调整课表请点上方「编辑此周课程表」）' : '（历史周·课程表存档，点上方「编辑此周课程表」可直接改并存）') : '') + '</p>';
 
     html += renderTeacherTable(rows, isLive);
     html += renderGroupTable(groups, summary);
@@ -370,6 +371,21 @@
     syncSel(sch.teachers);
     (sch.teachers || []).forEach(function (t) { setSel(t.name || '', val); });
     render();
+  }
+
+  // 从 KPI 视图直接跳转到课程表并载入当前所选周（活动周或历史存档周）进行编辑
+  // 复用课程表成熟编辑器：switchWeek 把该周装载进活动编辑态，再导航过去；保存后回 KPI 即重算
+  function editSchedule() {
+    if (!_curWeekStart) { App.util.toast('请先选择周次', 'warn'); return; }
+    if (App.views.schedule && App.views.schedule.switchWeek) {
+      App.views.schedule.switchWeek(_curWeekStart); // 历史周从 schedules 载入；当前周本就是活动周（无 schedules 命中时 no-op，仍可导航）
+    }
+    if (App.router && App.router.navigate) {
+      App.router.navigate('/schedule');
+      App.util.toast('已切换到「课程表」并载入该周，改完保存即可在 KPI 重算', 'ok');
+    } else if (App.views.schedule && App.views.schedule.render) {
+      App.views.schedule.render();
+    }
   }
 
   // ---------- 导出：Excel ----------
@@ -565,6 +581,7 @@
     onFilterChange: onFilterChange,
     toggleTeacher: toggleTeacher,
     selectAll: selectAll,
+    editSchedule: editSchedule,
     saveSnapshot: saveSnapshot,
     deleteSnapshot: deleteSnapshot,
     archiveToDataCenter: archiveToDataCenter,
