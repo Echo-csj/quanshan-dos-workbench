@@ -38,6 +38,13 @@
     d.setDate(d.getDate() + 6);
     return d.toISOString().slice(0, 10);
   }
+  // 本地日期加 N 天（用于由周一推周日），避免 toISOString 的 UTC 偏移
+  function addDays(iso, n) {
+    var d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    var y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + dd;
+  }
   function fmtRange(s, e) {
     if (s && e) return s + ' ~ ' + e;
     return '未设置周范围';
@@ -732,6 +739,46 @@
 
   // 触发 fetch-schedule 立即抓取一次（腾讯云 Node 服务，路径反代）
   // 抓取「当前正在查看的周」（含历史周）：从活动 schedule 取 weekStartDate/weekEndDate 传给后端
+  // 轮询从 shared_link 拉回抓取结果，并校验周次精确对应（后端可能略有写入延迟）
+  async function pullFetchedWithRetry(weekStart, tries, delay) {
+    for (var i = 0; i < tries; i++) {
+      var s = await pullFetched();
+      if (s && s.weekStartDate === weekStart) return s;
+      if (i < tries - 1) await new Promise(function (r) { setTimeout(r, delay); });
+    }
+    return null;
+  }
+
+  // 自动抓取指定周课程表（供教师周度 KPI 视图联动）：
+  //   POST 后端 fetch-schedule（带 weekStartDate=该周周一，后端 GET 导航到该周）→
+  //   后端写回 Supabase shared_link → 前端 pullFetched 拉回 → 仅写入 schedules[W] 缓存。
+  // 注意：只写「多周存档」schedules[W]，不改「当前编辑周」(store.schedule)，
+  //       课程表模块视图与 KPI 视图互不干扰；两端数据同源、精确对应。
+  async function fetchWeek(weekStart) {
+    var url = (typeof window !== 'undefined' && window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL) || '';
+    if (!url) throw new Error('课表自动抓取尚未配置');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) throw new Error('周次格式无效');
+    var weekEnd = addDays(weekStart, 6);
+    var body = { weekStartDate: weekStart, weekEndDate: weekEnd };
+    var jwt = await getSessionJWT();
+    App.util.toast('正在自动抓取 ' + weekStart + ' 周课程表…');
+    var res = await doFetch(url, jwt, body);
+    var j = await res.json().catch(function () { return {}; });
+    if (res.status === 401) { // access_token 过期，刷新会话重试一次
+      var fresh = await refreshSessionJWT();
+      if (fresh && fresh !== jwt) {
+        res = await doFetch(url, fresh, body);
+        j = await res.json().catch(function () { return {}; });
+      }
+    }
+    if (res.status === 401) throw new Error('会话已过期，请重新登录后重试');
+    if (!res.ok || (j && j.ok === false)) throw new Error((j && (j.error || j.message)) || ('HTTP ' + res.status));
+    var sched = await pullFetchedWithRetry(weekStart, 6, 400);
+    if (!sched) throw new Error('抓取结果未回写，请稍后重试');
+    writeSchedule(sched); // 仅缓存，不改当前编辑周
+    return sched;
+  }
+
   async function syncNow() {
     var url = (window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL) || '';
     if (!url) {
@@ -836,6 +883,7 @@
     clearGrid: clearGrid,
     // 自动抓取
     syncNow: syncNow,
+    fetchWeek: fetchWeek,
     applyFetchedFromBanner: applyFetchedFromBanner,
     dismissFetchBanner: dismissFetchBanner,
     // 供未来「自动抓取」接入：把抓取/视觉模型返回的 JSON 归一到标准结构

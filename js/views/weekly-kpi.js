@@ -25,6 +25,12 @@
   var _lastWeek = 'export';    // 导出用文件名片段
   var _lastSummary = null;     // 导出用：最近一次校区汇总
 
+  // 自动抓取（KPI 选周联动课程表）状态
+  var _loadingWeek = null;        // 正在自动抓取的周（防止重复触发）
+  var _fetchFailedWeeks = {};     // 抓取失败的周（防无限重试，提供重试按钮）
+  var _fetchAttempted = {};       // 已对该周发起过自动抓取（避免重渲染重复触发）
+  var _lastRenderedWeek = null;   // 上次渲染的周（区分「切周」与「切筛选」）
+
   // ---------- 工具 ----------
   // 学科组归一（与 teachers.js canonSubject 保持一致：数学/英语/文综/理综）
   // 统一委托 kpi-engine，确保与数据中心归档口径一致（零回归）
@@ -85,6 +91,55 @@
   }
 
   // 选择状态（以教师姓名为键；null = 全部选中）
+  // 是否可自动抓取：已登录（sync 状态 ok）且已配置抓取服务
+  function canAutoFetch() {
+    if (!(App.sync && App.sync.getStatus && App.sync.getStatus() === 'ok')) return false;
+    if (!(typeof window !== 'undefined' && window.APP_CONFIG && window.APP_CONFIG.COURSE_FETCH_WORKER_URL)) return false;
+    return true;
+  }
+
+  // 自动抓取指定周并写入 schedules[W] 缓存；完成后重渲染 KPI（仅当仍在该周）
+  async function autoFetchWeek(weekStart) {
+    _loadingWeek = weekStart;
+    renderLoading(weekStart);
+    try {
+      await App.views.schedule.fetchWeek(weekStart);
+      _loadingWeek = null;
+      if (_curWeekStart === weekStart) render();
+    } catch (e) {
+      _loadingWeek = null;
+      _fetchFailedWeeks[weekStart] = true;
+      App.util.toast('自动抓取失败：' + ((e && e.message) || e), 'bad');
+      if (_curWeekStart === weekStart) render(); // 重渲染为失败态（带重试按钮）
+    }
+  }
+  function retryFetch(weekStart) {
+    delete _fetchFailedWeeks[weekStart];
+    autoFetchWeek(weekStart);
+  }
+
+  // 加载态：提示正在自动抓取
+  function renderLoading(weekStart) {
+    var container = document.getElementById('view-container');
+    if (!container) return;
+    container.innerHTML = '<div class="page-head"><h1 class="page-title">教师周度 KPI</h1></div>'
+      + '<div class="card" style="padding:28px;color:var(--text-muted)">正在自动从课程表抓取 <b>' + App.util.escapeHtml(weekStart)
+      + '</b> 周数据并实时计算 KPI…（首次抓取需数秒）</div>';
+  }
+  // 无数据态：根据是否可重试给出不同提示
+  function renderNoData(weekStart, canRetry) {
+    var container = document.getElementById('view-container');
+    if (!container) return;
+    var hint = canRetry
+      ? '该周暂无课程表数据，自动抓取失败。'
+      : '该周暂无课程表数据。登录后在本视图选择该周将自动从课程表抓取；也可先到「课程表」手动设置并保存该周。';
+    var btn = canRetry
+      ? ' <button class="btn btn-secondary btn-sm" onclick="App.views.weeklyKpi.retryFetch(\'' + weekStart + '\')">重试抓取</button>'
+      : '';
+    container.innerHTML = '<div class="page-head"><h1 class="page-title">教师周度 KPI</h1></div>'
+      + '<div class="card" style="padding:24px;color:var(--text-muted)">' + App.util.escapeHtml(hint) + btn + '</div>';
+  }
+
   function syncSel(teachers) {
     var cur = {};
     (teachers || []).forEach(function (t) {
@@ -193,6 +248,11 @@
     _curWeekStart = weekStart;
 
     var sch = scheduleForWeek(weekStart);
+    // 仅「正在加载」或「上次抓取失败」直接展示对应状态；其余情况走原快照/归档/空态路径（零回归）
+    if (_loadingWeek === weekStart) { renderLoading(weekStart); _lastRenderedWeek = weekStart; return; }
+    if (_fetchFailedWeeks[weekStart]) { renderNoData(weekStart, true); _lastRenderedWeek = weekStart; return; }
+    _lastRenderedWeek = weekStart;
+
     var isLive = !!sch;     // 该周有课程表存档（活动周或历史周）即可实时重算
     var activeWeekStart = (App.store.get('schedule') || {}).weekStartDate;
     var isActiveWeek = !!(sch && sch.weekStartDate === activeWeekStart);
@@ -228,6 +288,12 @@
         sourceText = '数据来源：周度数据中心归档（' + (dc.weekLabel || (weekStart + ' ~ ' + weekEnd)) +
           '，来源：' + (dc.dataSource || '未知') + (dc.locked ? '，已锁定' : '') + '，更新于 ' + dcWhenText + '）';
       } else {
+        // 无快照、无归档：若为「首次选中该周」且已登录/已配置，则自动从课程表抓取该周数据；否则保持零回归空态
+        if (canAutoFetch() && !_fetchAttempted[weekStart]) {
+          _fetchAttempted[weekStart] = true;
+          autoFetchWeek(weekStart); // 异步：抓回后写 schedules[W] 缓存并重渲染
+          return;
+        }
         rows = []; groups = [];
         summary = computeCampusSummary(groups);
         sourceText = '当前所选周次（' + weekStart + ' ~ ' + weekEnd + '）暂无数据：请先在「课程表」设置该周并保存，或保存该周 KPI 快照';
@@ -586,7 +652,8 @@
     deleteSnapshot: deleteSnapshot,
     archiveToDataCenter: archiveToDataCenter,
     exportImage: exportImage,
-    exportXLSX: exportXLSX
+    exportXLSX: exportXLSX,
+    retryFetch: retryFetch
   };
 
 })();
