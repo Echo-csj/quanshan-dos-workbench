@@ -193,9 +193,24 @@
       var when = snap.createdAt ? new Date(snap.createdAt).toLocaleString('zh-CN') : '未知';
       sourceText = '数据来源：KPI 快照（保存于 ' + when + '）';
     } else {
-      rows = []; groups = [];
-      summary = computeCampusSummary(groups);
-      sourceText = '当前所选周次（' + weekStart + ' ~ ' + weekEnd + '）暂无数据：请先在「课程表」设置该周并保存，或保存该周 KPI 快照';
+      // 尝试从周度数据中心反查该周归档（只读，不依赖手动快照；数据随整档同步）
+      var dc = (App.weeklyData && App.weeklyData.get) ? App.weeklyData.get(weekStart) : null;
+      if (dc && dc.kpiByTeacher && dc.kpiByTeacher.length) {
+        rows = (dc.kpiByTeacher || []).filter(function (r) {
+          return (_filterGroup === 'all') || (r.group === _filterGroup);
+        });
+        groups = (_filterGroup === 'all') ? (dc.kpiByGroup || [])
+          : (dc.kpiByGroup || []).filter(function (g) { return g.group === _filterGroup; });
+        summary = dc.campusSummary || computeCampusSummary(groups);
+        var dcWhen = dc.updatedAt || dc.createdAt;
+        var dcWhenText = dcWhen ? new Date(dcWhen).toLocaleString('zh-CN') : '未知';
+        sourceText = '数据来源：周度数据中心归档（' + (dc.weekLabel || (weekStart + ' ~ ' + weekEnd)) +
+          '，来源：' + (dc.dataSource || '未知') + (dc.locked ? '，已锁定' : '') + '，更新于 ' + dcWhenText + '）';
+      } else {
+        rows = []; groups = [];
+        summary = computeCampusSummary(groups);
+        sourceText = '当前所选周次（' + weekStart + ' ~ ' + weekEnd + '）暂无数据：请先在「课程表」设置该周并保存，或保存该周 KPI 快照';
+      }
     }
 
     _displayedRows = rows;
