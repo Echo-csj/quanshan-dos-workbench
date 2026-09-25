@@ -365,7 +365,8 @@
   }
 
   // 合并视图数据：全量模块用总台数据，任务用合并视图，settings/meta 用本地
-  var MIRROR_KEYS = ['timeline', 'reports', 'projects', 'teachers', 'hr', 'teacherMilestones'];
+  // （2026-09-25 Option B：新增 weeklyData，使子工作台也能看到总台维护的周度数据中心）
+  var MIRROR_KEYS = ['timeline', 'reports', 'projects', 'teachers', 'hr', 'teacherMilestones', 'weeklyData'];
   function viewData() {
     if (!isSub()) return App.store.getData();
     var local = App.store.getData() || {};

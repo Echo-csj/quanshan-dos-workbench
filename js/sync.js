@@ -296,6 +296,20 @@
   }
   function escapeHtml(s) { return s.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
 
+  // 立即同步：把本机最新整档推送到云端，再拉取云端覆盖本地（整档 last-write-wins）。
+  // 用于「立即同步」按钮：用户在多设备间手动触发一次对齐。
+  async function syncNow() {
+    if (disabled || !session) { if (App.util && App.util.toast) App.util.toast('未登录或同步未启用', 'warn'); return; }
+    try {
+      await push(App.store.getData());
+      await applyRemote();
+      if (App.util && App.util.toast) App.util.toast('已同步至云端', 'ok');
+    } catch (e) {
+      console.error('[sync] syncNow 失败', e);
+      if (App.util && App.util.toast) App.util.toast('同步失败：' + ((e && e.message) ? e.message : '网络异常'), 'bad');
+    }
+  }
+
   // ---- 启动 ----
   async function start() {
     if (disabled) { setStatus('disabled'); renderWidget(); return; }
@@ -370,6 +384,7 @@
     onStatus: function (f) { statusListeners.push(f); },
     getStatus: function () { return status; },
     applyRemote: applyRemote,
+    syncNow: syncNow,
     // 供 task-share.js 复用同一 Supabase 客户端与会话
     getClient: function () { return ensureClient(); },
     getSession: function () { return session; },

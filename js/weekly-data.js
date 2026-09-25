@@ -9,7 +9,23 @@
 
   var KEY = 'weeklyData'; // store 键
 
-  function _all() { return (App.store.get(KEY)) || {}; }
+  function _readOnlyGuard() {
+    // 子工作台视角：周度数据由总台维护，子台只读（数据经 sub-context 镜像）。
+    if (App.isSub && App.isSub()) {
+      if (App.util && App.util.toast) App.util.toast('子工作台只读，周度数据由总台维护', 'warn');
+      return true;
+    }
+    return false;
+  }
+
+  function _all() {
+    // 子工作台：读取总台镜像（weeklyData 已加入 sub-context MIRROR_KEYS，由 loadMaster 拉取）
+    if (App.isSub && App.isSub()) {
+      var md = (App.subContext && App.subContext.getMasterData) ? App.subContext.getMasterData() : {};
+      return (md && md[KEY]) || {};
+    }
+    return (App.store.get(KEY)) || {};
+  }
 
   // 全部记录（按 weekStart 升序）
   function all() {
@@ -21,6 +37,7 @@
   function get(weekStart) { return _all()[weekStart] || null; }
 
   function upsert(rec) {
+    if (_readOnlyGuard()) return null;
     if (!rec || !rec.weekStart) return null;
     var m = _all();
     m[rec.weekStart] = rec;
@@ -29,12 +46,14 @@
   }
 
   function remove(weekStart) {
+    if (_readOnlyGuard()) return;
     var m = _all();
     if (m[weekStart]) { delete m[weekStart]; App.store.set(KEY, m); }
   }
 
   // 归档锁定 / 解锁（锁定后不被 compute / 回灌覆盖）
   function lock(weekStart, locked) {
+    if (_readOnlyGuard()) return null;
     var r = get(weekStart);
     if (!r) return null;
     r.locked = !!locked;
@@ -81,6 +100,7 @@
 
   // 手动补录 / 修正：覆盖 KPI 三件套 + 可选花名册，标记 manual + 锁定
   function saveManual(weekStart, patch) {
+    if (_readOnlyGuard()) return null;
     var r = get(weekStart);
     if (!r) return null;
     if (patch && patch.kpiByGroup) r.kpiByGroup = patch.kpiByGroup;
@@ -152,6 +172,7 @@
   // 已存在的周不覆盖（幂等、避免冲掉手动计算/补录数据）；新记录标记 snapshot + 锁定。
   // 返回 { added, skipped, total }。
   function backfillFromSnapshots() {
+    if (_readOnlyGuard()) return { added: 0, skipped: 0, total: 0 };
     var snaps = App.store.get('kpiSnapshots') || {};
     var keys = Object.keys(snaps);
     var added = 0, skipped = 0;

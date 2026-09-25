@@ -21,9 +21,19 @@
     var c = document.getElementById('view-container');
     if (!c) return;
     var U = App.util;
+    var isSub = !!(App.isSub && App.isSub());
     var html = '';
     html += '<div class="page-head"><h1 class="page-title">周度数据中心</h1>';
     html += '<p class="page-sub">按「周」归档 KPI 并锁定，支持历史回灌与跨周月度汇总重算 · 基准：每周 ' + BASE + ' 次课 = 100% 满负荷</p></div>';
+
+    // 同步状态条（Option B：总台=云端同步；子台=总台镜像只读）
+    var si = syncInfo();
+    html += '<div class="wd-syncbar">';
+    html += '<span class="sw-dot ' + si[0] + '"></span>';
+    html += '<span class="wd-sync-text">' + si[1] + '</span>';
+    if (isSub) html += '<span class="wd-readonly-tip">总台数据镜像 · 只读</span>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyData.syncNow()">' + U.svgIcon('refresh-cw', 14) + ' 立即同步</button>';
+    html += '</div>';
 
     html += '<div class="tabs">';
     html += '<button class="tab' + (_tab === 'weeks' ? ' active' : '') + '" onclick="App.views.weeklyData.onTab(\'weeks\')">周度数据</button>';
@@ -32,10 +42,14 @@
 
     if (_tab === 'weeks') {
       html += '<div class="teacher-toolbar"><div class="teacher-filters"></div><div class="teacher-actions">';
-      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyData.archiveCurrent()">' + U.svgIcon('save', 14) + ' 归档当前周</button>';
-      html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyData.backfill()">' + U.svgIcon('download', 14) + ' 一键历史回灌</button>';
+      if (isSub) {
+        html += '<span class="wd-readonly-tip">子工作台只读，归档与回灌请由总台操作</span>';
+      } else {
+        html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyData.archiveCurrent()">' + U.svgIcon('save', 14) + ' 归档当前周</button>';
+        html += '<button class="btn btn-secondary btn-sm" onclick="App.views.weeklyData.backfill()">' + U.svgIcon('download', 14) + ' 一键历史回灌</button>';
+      }
       html += '</div></div>';
-      html += renderWeeks();
+      html += renderWeeks(isSub);
     } else {
       html += renderMonth();
     }
@@ -43,13 +57,43 @@
     c.innerHTML = html;
   }
 
-  function renderWeeks() {
+  // 同步状态条文案/色点：跟随 App.sync.getStatus()
+  function syncInfo() {
+    var st = (App.sync && App.sync.getStatus) ? App.sync.getStatus() : 'disabled';
+    var map = {
+      disabled: ['grey', '云端同步未启用（仅本地）'],
+      signedout: ['grey', '未登录，仅本地数据'],
+      signingin: ['blue', '登录中…'],
+      error: ['red', '同步异常，请重试'],
+      ok: ['green', '已同步至云端'],
+      syncing: ['blue', '同步中…']
+    };
+    return map[st] || ['grey', '状态未知'];
+  }
+
+  // 立即同步：总台→推送+拉取云端并刷新；子台→重新拉取总台镜像并刷新
+  function syncNow() {
+    if (App.isSub && App.isSub()) {
+      if (App.subContext && App.subContext.loadMaster) {
+        App.subContext.loadMaster().then(function () {
+          App.util.toast('已刷新总台数据', 'ok');
+          render();
+        }).catch(function () {
+          App.util.toast('刷新总台数据失败', 'bad');
+        });
+      }
+      return;
+    }
+    if (App.sync && App.sync.syncNow) App.sync.syncNow();
+  }
+
+  function renderWeeks(isSub) {
     var recs = App.weeklyData.all();
     var html = '';
     html += '<div class="card"><div class="card-header"><h3 class="card-title">周度数据记录</h3>';
     html += '<span style="font-size:12px;color:var(--text-muted)">PK = 周一开始日(weekStart) · 来源：实时 / 快照 / 手动 · 锁定后不被覆盖</span></div>';
     if (!recs.length) {
-      html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无周度数据。点击上方「归档当前周」归档实时课程表，或「一键历史回灌」从旧 KPI 快照导入。</div>';
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无周度数据。' + (isSub ? '总台尚未归档或回灌任何周次。' : '点击上方「归档当前周」归档实时课程表，或「一键历史回灌」从旧 KPI 快照导入。') + '</div>';
     } else {
       html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:820px"><thead><tr>';
       ['人工月', '周次', '周范围', '来源', '锁定', '教师数', '预排合计', '实际合计', '操作'].forEach(function (h) { html += '<th>' + h + '</th>'; });
@@ -70,10 +114,14 @@
         html += '<td class="mono">' + (cs.pre || 0) + '</td>';
         html += '<td class="mono">' + (cs.actual || 0) + '</td>';
         html += '<td class="wd-actions">';
-        html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.toggleLock(\'' + r.weekStart + '\')">' + (r.locked ? '解锁' : '锁定') + '</button> ';
-        html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.openManual(\'' + r.weekStart + '\')">修正</button> ';
-        html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.exportWeekXLSX(\'' + r.weekStart + '\')">导出</button> ';
-        html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.deleteRecord(\'' + r.weekStart + '\')">删除</button>';
+        if (isSub) {
+          html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.exportWeekXLSX(\'' + r.weekStart + '\')">导出</button>';
+        } else {
+          html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.toggleLock(\'' + r.weekStart + '\')">' + (r.locked ? '解锁' : '锁定') + '</button> ';
+          html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.openManual(\'' + r.weekStart + '\')">修正</button> ';
+          html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.exportWeekXLSX(\'' + r.weekStart + '\')">导出</button> ';
+          html += '<button class="btn btn-ghost btn-xs" onclick="App.views.weeklyData.deleteRecord(\'' + r.weekStart + '\')">删除</button>';
+        }
         html += '</td></tr>';
       });
       html += '</tbody></table></div>';
@@ -297,7 +345,8 @@
     openManual: openManual,
     onManualInput: onManualInput,
     exportWeekXLSX: exportWeekXLSX,
-    exportMonthXLSX: exportMonthXLSX
+    exportMonthXLSX: exportMonthXLSX,
+    syncNow: syncNow
   };
 
 })();
