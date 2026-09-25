@@ -15,6 +15,7 @@
   var lastFetched = null;     // 最近一次从 shared_link(kind='schedule_fetch') 读到的抓取结果
   var _dismissedKey = null;   // 已忽略的抓取时间戳，避免重复弹横幅
   var _fetchChannel = null;   // 抓取结果共享行的实时订阅
+  var _pickerMonth = null;    // 课程表月份选择器的当前人工月（未选则从活动周推导）
 
 
   // 把常见星期写法归一到 周一..周日
@@ -108,29 +109,106 @@
     });
   }
 
-  // 切换周次：选中已存周 → 载入编辑器；"新建周" → 清空为本周一开始的空周
-  function switchWeek(val) {
+  // 为月份+周次选择器构造可用人工月列表：近 12 个月 + 所有存档周所在月 + 当前活动周所在月
+  function pickerMonths(data) {
+    var set = {};
+    (App.weeklyCycle.recentMonths(12) || []).forEach(function (m) { set[m] = true; });
+    var map = App.store.get('schedules') || {};
+    Object.keys(map).forEach(function (k) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(k)) return;
+      var info = App.weeklyCycle.artMonthOfDate(k);
+      if (info) set[info.artMonthId] = true;
+    });
+    if (data && data.weekStartDate) {
+      var curInfo = App.weeklyCycle.artMonthOfDate(data.weekStartDate);
+      if (curInfo) set[curInfo.artMonthId] = true;
+    }
+    var months = Object.keys(set).sort().reverse();
+    if (!months.length) months = App.weeklyCycle.recentMonths(12);
+    return months;
+  }
+
+  // 当前选择器应显示的 (month, week, months)
+  function currentPickerInfo(data) {
+    var months = pickerMonths(data);
+    var month = _pickerMonth;
+    var week = 1;
+    if (data && data.weekStartDate) {
+      var curInfo = App.weeklyCycle.artMonthOfDate(data.weekStartDate);
+      if (curInfo) {
+        if (!month || months.indexOf(month) < 0) month = curInfo.artMonthId;
+        if (curInfo.artMonthId === month) week = curInfo.weekNo;
+      }
+    }
+    if (!month || months.indexOf(month) < 0) month = months[0] || App.weeklyCycle.recentMonths(12)[0];
+    return { months: months, month: month, week: week };
+  }
+
+  // 切换到指定日期范围的周：有存档则载入，无存档则新建空白周（不写入 schedules，保存时才写）
+  function switchToWeek(weekStart, weekEnd) {
     var container = document.getElementById('view-container');
-    if (val === '__new__') {
-      var cur = getSchedule();
-      var nd = {
-        updatedAt: null, source: '', sourceUrl: '', fetchedAt: null, screenshotsCount: 0,
-        weekStartDate: thisMonday(), weekEndDate: thisSunday(),
-        scheduleMode: 'weekly', selMonth: null,
-        periods: (cur.periods && cur.periods.length) ? cur.periods.slice() : DEFAULT_PERIODS.slice(),
-        teachers: []
-      };
-      App.store.set('schedule', nd);
-      renderShell(container, nd);
-      App.util.toast('已新建一周（本周一 ~ 本周日），填写后保存', 'ok');
+    var map = App.store.get('schedules') || {};
+    var wd = map[weekStart];
+    if (wd) {
+      var data = JSON.parse(JSON.stringify(wd));
+      App.store.set('schedule', data);
+      renderShell(container, data);
+      App.util.toast('已切换到 ' + weekStart + ' ~ ' + weekEnd + ' 周课程表', 'ok');
       return;
     }
+    var cur = getSchedule();
+    var data = {
+      updatedAt: null, source: '', sourceUrl: '', fetchedAt: null, screenshotsCount: 0,
+      weekStartDate: weekStart, weekEndDate: weekEnd,
+      scheduleMode: 'weekly', selMonth: null,
+      periods: (cur.periods && cur.periods.length) ? cur.periods.slice() : DEFAULT_PERIODS.slice(),
+      teachers: []
+    };
+    App.store.set('schedule', data);
+    renderShell(container, data);
+    App.util.toast('该周暂无存档，已新建空白周 ' + weekStart + ' ~ ' + weekEnd + '，填写后保存', 'ok');
+  }
+
+  // 新建一个空白周（默认本周一 ~ 本周日）
+  function newThisWeek() {
+    var container = document.getElementById('view-container');
+    var cur = getSchedule();
+    var data = {
+      updatedAt: null, source: '', sourceUrl: '', fetchedAt: null, screenshotsCount: 0,
+      weekStartDate: thisMonday(), weekEndDate: thisSunday(),
+      scheduleMode: 'weekly', selMonth: null,
+      periods: (cur.periods && cur.periods.length) ? cur.periods.slice() : DEFAULT_PERIODS.slice(),
+      teachers: []
+    };
+    App.store.set('schedule', data);
+    renderShell(container, data);
+    App.util.toast('已新建一周（本周一 ~ 本周日），填写后保存', 'ok');
+  }
+
+  // 切换周次：选中已存周 → 载入编辑器；"新建周" → 新建本周空白周
+  function switchWeek(val) {
+    if (val === '__new__') { newThisWeek(); return; }
     var map = App.store.get('schedules') || {};
     var wd = map[val];
     if (!wd) return;
-    var data = JSON.parse(JSON.stringify(wd)); // 克隆，避免直接引用存档对象
-    App.store.set('schedule', data);
-    renderShell(container, data);
+    switchToWeek(wd.weekStartDate, wd.weekEndDate || '');
+  }
+
+  // 月份+周次选择器回调：切换月份只刷新周次下拉（不改活动周）
+  function onPickerMonthChange(v) {
+    _pickerMonth = v;
+    var container = document.getElementById('view-container');
+    renderShell(container, getSchedule());
+  }
+
+  // 月份+周次选择器回调：切换周次后解析为真实日期并切换到该周
+  function onPickerWeekChange(v) {
+    var weekNo = parseInt(v, 10) || 1;
+    var info = currentPickerInfo(getSchedule());
+    var wk = App.weeklyCycle.resolveWeek(info.month, weekNo);
+    if (!wk) { App.util.toast('所选周次无效', 'warn'); return; }
+    _pickerMonth = null; // 切换后让选择器跟随活动周自动推导
+    switchToWeek(wk.start, wk.end);
   }
 
   // 删除当前周存档（带确认）
@@ -195,23 +273,20 @@
       html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.syncNow()">' + U.svgIcon('refresh-cw', 14) + '同步抓取</button>';
     }
     html += '</div></div>';
-    // 周次切换（多周并存）：列出所有存档周 + 新建周
-    var weeks = getScheduleWeeks();
-    var activeWs = data.weekStartDate || '';
+    // 月份+周次选择器（多周并存）：与 KPI 视图同口径，选择某周后载入或新建空白周
+    var pickerInfo = currentPickerInfo(data);
     html += '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">';
-    html += '<label style="font-size:12px;color:var(--text-muted)">周次<select class="form-input" id="schedule-week-select" onchange="App.views.schedule.switchWeek(this.value)" style="width:auto;display:inline-block;margin-left:6px">';
-    if (!weeks.length) {
-      html += '<option value="">（暂无存档周）</option>';
-    } else {
-      weeks.forEach(function (w) {
-        var sel = (w.weekStart === activeWs) ? ' selected' : '';
-        html += '<option value="' + w.weekStart + '"' + sel + '>' + U.escapeHtml(w.label) + '</option>';
-      });
-    }
-    html += '<option value="__new__">＋ 新建周</option>';
-    html += '</select></label>';
+    html += '<label style="font-size:12px;color:var(--text-muted)">月份/周次' +
+      App.components.monthWeekPicker.html({
+        month: pickerInfo.month,
+        week: pickerInfo.week,
+        months: pickerInfo.months,
+        monthCb: 'App.views.schedule.onPickerMonthChange(this.value)',
+        weekCb: 'App.views.schedule.onPickerWeekChange(this.value)'
+      }) + '</label>';
+    html += '<button class="btn btn-secondary btn-sm" onclick="App.views.schedule.newThisWeek()">' + U.svgIcon('plus', 14) + '新建周</button>';
     html += '<button class="btn btn-danger btn-ghost btn-sm" onclick="App.views.schedule.deleteWeek()">' + U.svgIcon('trash-2', 14) + '删除当前周</button>';
-    html += '<span style="font-size:12px;color:var(--text-muted)">（切换/新建/删除周次，历史周可在 KPI 视图实时重算）</span>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">（切换月份/周次编辑历史周，新建周默认本周一~本周日，历史周可在 KPI 视图实时重算）</span>';
     html += '</div>';
     html += '<div id="schedule-fetch-banner"></div>';
     html += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:6px">上次更新：' + U.escapeHtml(updatedAt) + U.escapeHtml(srcInfo) + '</p>';
@@ -760,11 +835,15 @@
     // 日期选择模式（周度 / 月度）
     setScheduleMode: setScheduleMode,
     onMonthChange: onMonthChange,
-    // 多周并存：周次切换 / 删除
+    // 多周并存：周次切换 / 删除 / 新建
     switchWeek: switchWeek,
     deleteWeek: deleteWeek,
+    newThisWeek: newThisWeek,
     getScheduleWeeks: getScheduleWeeks,
     ensureSchedules: ensureSchedules,
+    // 月份+周次选择器回调
+    onPickerMonthChange: onPickerMonthChange,
+    onPickerWeekChange: onPickerWeekChange,
   };
 
   // 首次加载即确保 schedules 映射存在（懒迁移活动周）
