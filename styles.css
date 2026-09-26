@@ -1200,17 +1200,6 @@ a:hover { color: var(--accent-hover); }
 .teacher-stats .stat-pill b { color:var(--text); }
 .teacher-stats .dot, .teacher-table .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
 
-/* 周度教师（#232）：三块名单网格 + 摘要条 + 人数徽章 */
-.roster-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
-@media (max-width:768px) { .roster-grid { grid-template-columns:1fr; } }
-.roster-stat { display:flex; align-items:baseline; gap:10px; padding:14px 16px; background:#EEF2FF; border:1px solid #E0E7FF; border-radius:10px; margin-bottom:16px; }
-.roster-stat .n { font-size:26px; font-weight:700; color:#4F46E5; font-family:var(--mono, monospace); line-height:1; }
-.roster-stat .l { font-size:13px; color:#475569; }
-.roster-panel .pill { display:inline-block; font-size:11px; padding:1px 8px; border-radius:999px; background:#F3F4F6; color:#6B7280; margin-left:8px; vertical-align:middle; }
-.roster-panel .pill.active { background:#EEF2FF; color:#4F46E5; }
-.roster-panel .pill.joined { background:#ECFDF5; color:#059669; }
-.roster-panel .pill.left { background:#FEF2F2; color:#DC2626; }
-
 .table-card { overflow-x:auto; -webkit-overflow-scrolling:touch; padding:0; }
 .teacher-table { width:100%; min-width:1020px; border-collapse:collapse; font-size:13px; table-layout:fixed; }
 .teacher-table th, .teacher-table td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
