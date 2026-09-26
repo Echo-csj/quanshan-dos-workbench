@@ -54,6 +54,25 @@
     };
   }
   var resilientFetch = makeResilientFetch(10000, 3);
+  // 信号无关的硬超时：即便底层 fetch 的 AbortController 被 Supabase 自建网关覆盖而失效，
+  // 也保证 Promise 在 ms 后 reject，彻底杜绝“登录点击后永久无响应 / 卡在登录中”。
+  function withTimeout(promise, ms, label) {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        reject(new Error((label || '请求') + '超时（' + Math.round(ms / 1000) + 's），请检查网络或稍后重试'));
+      }, ms);
+      Promise.resolve(promise).then(function (v) {
+        if (done) return;
+        done = true; clearTimeout(timer); resolve(v);
+      }, function (err) {
+        if (done) return;
+        done = true; clearTimeout(timer); reject(err);
+      });
+    });
+  }
   function ensureClient() {
     if (disabled || client) return client;
     if (global.supabase && global.supabase.createClient) {
@@ -173,12 +192,19 @@
     }
     if (!c) { setStatus('error', '同步服务加载失败：无法连接云端。请检查网络 / 代理后刷新重试。'); return; }
     try {
-      var r = await c.auth.signInWithPassword({ email: email, password: password });
+      // 关键修复：登录网络请求套「信号无关的硬超时」。
+      // 自建 supabase.dosworkbench.top 在慢/不可达时，底层 fetch 的 AbortController 可能被网关覆盖而失效，
+      // resilientFetch 的 10s abort 不兜底 → signInWithPassword 挂起数分钟 → 用户看到「点击后卡在登录中」。
+      // withTimeout 独立于信号，保证 12s 后必 reject，给出明确报错而非永久无响应。
+      var r = await withTimeout(c.auth.signInWithPassword({ email: email, password: password }), 12000, '登录');
       if (r.error) { setStatus('error', r.error.message || '登录失败'); return; }
       session = r.data.session;
       setStatus('ok');
       subscribeStore();
-      await applyRemote();
+      // 远端数据拉取同样可能挂起；套 15s 硬超时但**不**因此失败整个登录——
+      // 即便云端拉取超时，用户已处于登录态，稍后可用「立即同步」重试。
+      try { await withTimeout(applyRemote(), 15000, '数据同步'); }
+      catch (e) { console.warn('[sync] 远端数据拉取超时（已登录，稍后可在「立即同步」重试）:', e && e.message ? e.message : e); }
       try { if (App.router && App.router.resolve) App.router.resolve(); } catch (e) {}
       subscribeRealtime();
       upsertProfile();
