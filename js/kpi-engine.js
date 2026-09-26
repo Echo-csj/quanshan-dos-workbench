@@ -9,6 +9,7 @@
 
   var BASE = 16; // 16 次课 = 100% 满负荷
   var SUBJECT_GROUPS = ['数学', '英语', '文综', '理综'];
+  var DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
   // 学科组归一（数学/英语/文综/理综）
   function canonSubject(s) {
@@ -32,10 +33,34 @@
   function isRest(v) { return v == null || String(v).trim().length === 0 || String(v).trim() === '休息'; }
   function isLeave(v) { return String(v).indexOf('[请假]') >= 0; }
 
+  // 课程类型判断（与课程表模块约定一致）：
+  //   - 单元格值含「泉山+年级/班级」→ 1V6 班课
+  //   - 其余非空、非休息、非请假 → 1V1 个课（学生姓名+年级）
+  //   - 返回 null 表示不计课次（休息/空）
+  function classTypeOf(v) {
+    var base = String(v || '').replace(/\[请假\]/g, '').trim();
+    if (!base || base === '休息') return null;
+    if (base.indexOf('泉山') >= 0) return '1v6';
+    return '1v1';
+  }
+
+  // 从 classes 键（如「周一-08:00-10:00」）提取星期
+  function classDayOf(key) {
+    var idx = String(key || '').indexOf('-');
+    return idx >= 0 ? key.slice(0, idx) : key;
+  }
+
+  function emptyByDay() {
+    var o = {};
+    DAYS.forEach(function (d) { o[d] = { pre: 0, pre1v1: 0, pre1v6: 0 }; });
+    return o;
+  }
+
   // schedule: { weekStartDate, weekEndDate, teachers:[{name, subject, classes}] }
   // teachers: 教师管理板块教师名册（权威来源，决定科组归属与科组教师数）
   // opts: { filterGroup:'all'|组名, selNames:{name->bool}|null（null=全选） }
   // 规则：科组教师数以教师管理板块为准；课程表缺失该老师数据时，该老师当周课次计为 0（仍计入科组教师数）。
+  // 新增：按课程类型拆分 1V1/1V6，并按星期聚合（用于 KPI 视图展示）。
   function computeRows(schedule, teachers, opts) {
     opts = opts || {};
     var filterGroup = opts.filterGroup || 'all';
@@ -53,37 +78,88 @@
       if (filterGroup && filterGroup !== 'all' && subj !== filterGroup) return;
       var st = schedByName[name];                 // 该周课程表数据（可能缺失）
       var classes = (st && st.classes) || {};
-      var pre = 0, leave = 0;
+      var pre = 0, pre1v1 = 0, pre1v6 = 0;
+      var leave = 0, leave1v1 = 0, leave1v6 = 0;
+      var byDay = emptyByDay();
       Object.keys(classes).forEach(function (k) {
         var v = String(classes[k] || '').trim();
         if (isRest(v)) return;             // 空 / 休息 不计入预排
+        var typ = classTypeOf(v);          // '1v1' | '1v6' | null
+        var d = classDayOf(k);
         pre++;
-        if (isLeave(v)) leave++;           // 请假课次
+        if (typ === '1v1') { pre1v1++; }
+        else if (typ === '1v6') { pre1v6++; }
+        if (byDay[d]) {
+          byDay[d].pre++;
+          if (typ === '1v1') byDay[d].pre1v1++;
+          else if (typ === '1v6') byDay[d].pre1v6++;
+        }
+        if (isLeave(v)) {                  // 请假课次（仍先计入预排，再计请假）
+          leave++;
+          if (typ === '1v1') leave1v1++;
+          else if (typ === '1v6') leave1v6++;
+        }
       });
       var actual = pre - leave;
+      var actual1v1 = pre1v1 - leave1v1;
+      var actual1v6 = pre1v6 - leave1v6;
       var selected = selNames ? (selNames[name] !== false) : true;
       rows.push({
-        name: name, group: subj, pre: pre, leave: leave, actual: actual,
-        preSat: pre / BASE, actualSat: actual / BASE, selected: selected
+        name: name, group: subj, selected: selected,
+        pre: pre, pre1v1: pre1v1, pre1v6: pre1v6,
+        leave: leave, leave1v1: leave1v1, leave1v6: leave1v6,
+        actual: actual, actual1v1: actual1v1, actual1v6: actual1v6,
+        byDay: byDay,
+        preSat: pre / BASE, actualSat: actual / BASE
       });
     });
     return rows;
   }
 
-  // 按科组聚合（仅统计 selected 教师）
+  // 按科组聚合（仅统计 selected 教师）：同步拆分 1V1/1V6 与按天聚合。
   function computeGroups(rows) {
     var groups = {};
     (rows || []).forEach(function (r) {
       if (!r.selected) return;
-      if (!groups[r.group]) groups[r.group] = { group: r.group, teachers: 0, pre: 0, actual: 0 };
-      groups[r.group].teachers++;
-      groups[r.group].pre += r.pre;
-      groups[r.group].actual += r.actual;
+      if (!groups[r.group]) {
+        groups[r.group] = {
+          group: r.group, teachers: 0,
+          pre: 0, pre1v1: 0, pre1v6: 0,
+          leave: 0, leave1v1: 0, leave1v6: 0,
+          actual: 0, actual1v1: 0, actual1v6: 0,
+          byDay: emptyByDay()
+        };
+      }
+      var g = groups[r.group];
+      g.teachers++;
+      g.pre += r.pre;
+      g.pre1v1 += (r.pre1v1 || 0);
+      g.pre1v6 += (r.pre1v6 || 0);
+      g.leave += r.leave;
+      g.leave1v1 += (r.leave1v1 || 0);
+      g.leave1v6 += (r.leave1v6 || 0);
+      g.actual += r.actual;
+      g.actual1v1 += (r.actual1v1 || 0);
+      g.actual1v6 += (r.actual1v6 || 0);
+      if (r.byDay) {
+        DAYS.forEach(function (d) {
+          var rd = r.byDay[d], gd = g.byDay[d];
+          if (rd) {
+            gd.pre += (rd.pre || 0);
+            gd.pre1v1 += (rd.pre1v1 || 0);
+            gd.pre1v6 += (rd.pre1v6 || 0);
+          }
+        });
+      }
     });
     return Object.keys(groups).map(function (k) {
       var g = groups[k];
       return {
-        group: g.group, teachers: g.teachers, pre: g.pre, actual: g.actual,
+        group: g.group, teachers: g.teachers,
+        pre: g.pre, pre1v1: g.pre1v1, pre1v6: g.pre1v6,
+        leave: g.leave, leave1v1: g.leave1v1, leave1v6: g.leave1v6,
+        actual: g.actual, actual1v1: g.actual1v1, actual1v6: g.actual1v6,
+        byDay: g.byDay,
         preSat: g.teachers ? g.pre / BASE / g.teachers : 0,
         actualSat: g.teachers ? g.actual / BASE / g.teachers : 0
       };
@@ -92,10 +168,11 @@
 
   // 校区汇总（基于已勾选教师的所有科组聚合）
   function computeCampusSummary(groups) {
-    var summary = { label: '校区汇总', teachers: 0, pre: 0, actual: 0, preSat: 0, actualSat: 0 };
+    var summary = { label: '校区汇总', teachers: 0, pre: 0, leave: 0, actual: 0, preSat: 0, actualSat: 0 };
     (groups || []).forEach(function (g) {
       summary.teachers += g.teachers;
       summary.pre += g.pre;
+      summary.leave += (g.leave || 0);
       summary.actual += g.actual;
     });
     if (summary.teachers) {
@@ -149,8 +226,11 @@
   var api = {
     BASE: BASE,
     SUBJECT_GROUPS: SUBJECT_GROUPS,
+    DAYS: DAYS,
     canonSubject: canonSubject,
     buildGroupMap: buildGroupMap,
+    classTypeOf: classTypeOf,
+    classDayOf: classDayOf,
     computeRows: computeRows,
     computeGroups: computeGroups,
     computeCampusSummary: computeCampusSummary,

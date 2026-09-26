@@ -48,6 +48,18 @@
   }
   function pct(v) { if (v == null || isNaN(v)) return '-'; return (v * 100).toFixed(0) + '%'; }
 
+  // 安全读取按天聚合（旧快照/归档可能无 byDay）
+  function safeByDay(row, day) {
+    return (row && row.byDay && row.byDay[day]) || { pre: 0, pre1v1: 0, pre1v6: 0 };
+  }
+
+  // 展示「total (a+b)」；total 或拆分字段缺失（旧数据）时降级展示，零回归。
+  function fmtBreakdown(total, a, b) {
+    if (total == null) return '—';
+    if (a == null || b == null) return String(total);
+    return total + ' (' + a + '+' + b + ')';
+  }
+
   // HTML/屏幕用饱和度配色（CSS 变量）
   function satColor(v) {
     if (v == null || isNaN(v)) return 'var(--text-muted)';
@@ -355,26 +367,33 @@
 
   function renderTeacherTable(rows, isLive) {
     var U = App.util;
+    function fmtMaybe(v) { return v == null ? '—' : v; }
     var html = '';
     html += '<div class="card" style="margin-bottom:18px"><div class="card-header"><h3 class="card-title">' + U.svgIcon('users', 18) + '按教师</h3>';
-    html += '<span style="font-size:12px;color:var(--text-muted)">勾选「选」决定该教师是否纳入科组汇总</span></div>';
+    html += '<span style="font-size:12px;color:var(--text-muted)">勾选「选」决定该教师是否纳入科组汇总 · 课次展示为「合计（1V1+1V6）」</span></div>';
     if (!rows.length) {
       html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无教师课次数据' + (isLive ? '（请先在「课程表」导入 / 填写并保存）' : '') + '</div>';
     } else {
-      html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:680px"><thead><tr>';
+      html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:920px"><thead><tr>';
       if (isLive) html += '<th style="width:44px">选</th>';
-      ['教师', '科组', '预排周课次', '请假课次', '实际周课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
+      ['教师', '科组', '预排周课次(1V1+1V6)', '请假课次(1V1+1V6)', '实际周课次(1V1+1V6)', '周六课次', '周日课次', '1V1课次', '1V6课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
       html += '</tr></thead><tbody>';
       rows.forEach(function (r, idx) {
+        var sat = safeByDay(r, '周六'), sun = safeByDay(r, '周日');
+        var hasByDay = !!(r.byDay);
         html += '<tr>';
         if (isLive) {
           html += '<td><input type="checkbox" ' + (r.selected ? 'checked' : '') + ' onchange="App.views.weeklyKpi.toggleTeacher(' + idx + ', this.checked)"></td>';
         }
         html += '<td>' + U.escapeHtml(r.name) + '</td>';
         html += '<td>' + U.escapeHtml(r.group) + '</td>';
-        html += '<td class="mono">' + r.pre + '</td>';
-        html += '<td class="mono">' + r.leave + '</td>';
-        html += '<td class="mono">' + r.actual + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(r.pre, r.pre1v1, r.pre1v6) + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(r.leave, r.leave1v1, r.leave1v6) + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(r.actual, r.actual1v1, r.actual1v6) + '</td>';
+        html += '<td class="mono">' + (hasByDay ? sat.pre : '—') + '</td>';
+        html += '<td class="mono">' + (hasByDay ? sun.pre : '—') + '</td>';
+        html += '<td class="mono">' + fmtMaybe(r.pre1v1) + '</td>';
+        html += '<td class="mono">' + fmtMaybe(r.pre1v6) + '</td>';
         html += '<td class="mono" style="color:' + satColor(r.preSat) + ';font-weight:600">' + pct(r.preSat) + '</td>';
         html += '<td class="mono" style="color:' + satColor(r.actualSat) + ';font-weight:600">' + pct(r.actualSat) + '</td>';
         html += '</tr>';
@@ -387,21 +406,42 @@
 
   function renderGroupTable(groups, summary) {
     var U = App.util;
+    function fmtMaybe(v) { return v == null ? '—' : v; }
+    // 从 groups 聚合出校区维度的类型/日期合计（供汇总行展示）
+    var campusHasByDay = groups.length && groups[0].byDay;
+    var campusSat = 0, campusSun = 0, campus1v1 = 0, campus1v6 = 0;
+    if (campusHasByDay) {
+      groups.forEach(function (g) {
+        if (g.byDay) {
+          campusSat += (g.byDay['周六'] && g.byDay['周六'].pre) || 0;
+          campusSun += (g.byDay['周日'] && g.byDay['周日'].pre) || 0;
+        }
+        campus1v1 += (g.pre1v1 || 0);
+        campus1v6 += (g.pre1v6 || 0);
+      });
+    }
     var html = '';
     html += '<div class="card"><div class="card-header"><h3 class="card-title">' + U.svgIcon('bar-chart-2', 18) + '按科组</h3>';
     html += '<span style="font-size:12px;color:var(--text-muted)">科组饱和度 = 科组周课次 / ' + BASE + ' / 科组教师数（仅统计已勾选教师）</span></div>';
     if (!groups.length) {
       html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无科组数据</div>';
     } else {
-      html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:680px"><thead><tr>';
-      ['科组', '教师数', '预排周课次', '实际周课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
+      html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:920px"><thead><tr>';
+      ['科组', '教师数', '预排周课次(1V1+1V6)', '请假课次(1V1+1V6)', '实际周课次(1V1+1V6)', '周六课次', '周日课次', '1V1课次', '1V6课次', '预排饱和度', '实际饱和度'].forEach(function (h) { html += '<th>' + h + '</th>'; });
       html += '</tr></thead><tbody>';
       groups.forEach(function (g) {
+        var sat = safeByDay(g, '周六'), sun = safeByDay(g, '周日');
+        var hasByDay = !!(g.byDay);
         html += '<tr>';
         html += '<td>' + U.escapeHtml(g.group) + '</td>';
         html += '<td class="mono">' + g.teachers + '</td>';
-        html += '<td class="mono">' + g.pre + '</td>';
-        html += '<td class="mono">' + g.actual + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(g.pre, g.pre1v1, g.pre1v6) + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(g.leave, g.leave1v1, g.leave1v6) + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(g.actual, g.actual1v1, g.actual1v6) + '</td>';
+        html += '<td class="mono">' + (hasByDay ? sat.pre : '—') + '</td>';
+        html += '<td class="mono">' + (hasByDay ? sun.pre : '—') + '</td>';
+        html += '<td class="mono">' + fmtMaybe(g.pre1v1) + '</td>';
+        html += '<td class="mono">' + fmtMaybe(g.pre1v6) + '</td>';
         html += '<td class="mono" style="color:' + satColor(g.preSat) + ';font-weight:600">' + pct(g.preSat) + '</td>';
         html += '<td class="mono" style="color:' + satColor(g.actualSat) + ';font-weight:600">' + pct(g.actualSat) + '</td>';
         html += '</tr>';
@@ -410,8 +450,13 @@
         html += '<tr style="font-weight:600;background:#EEF2FF;border-top:2px solid #4F46E5">';
         html += '<td>' + U.escapeHtml(summary.label) + '</td>';
         html += '<td class="mono">' + summary.teachers + '</td>';
-        html += '<td class="mono">' + summary.pre + '</td>';
-        html += '<td class="mono">' + summary.actual + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(summary.pre, summary.pre1v1, summary.pre1v6) + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(summary.leave, summary.leave1v1, summary.leave1v6) + '</td>';
+        html += '<td class="mono">' + fmtBreakdown(summary.actual, summary.actual1v1, summary.actual1v6) + '</td>';
+        html += '<td class="mono">' + (campusHasByDay ? campusSat : '—') + '</td>';
+        html += '<td class="mono">' + (campusHasByDay ? campusSun : '—') + '</td>';
+        html += '<td class="mono">' + (campusHasByDay ? campus1v1 : '—') + '</td>';
+        html += '<td class="mono">' + (campusHasByDay ? campus1v6 : '—') + '</td>';
         html += '<td class="mono" style="color:' + satColor(summary.preSat) + '">' + pct(summary.preSat) + '</td>';
         html += '<td class="mono" style="color:' + satColor(summary.actualSat) + '">' + pct(summary.actualSat) + '</td>';
         html += '</tr>';
@@ -459,14 +504,63 @@
     if (typeof XLSX === 'undefined') { App.util.toast('表格组件未加载，无法导出', 'bad'); return; }
     var rows = _lastRows || [], groups = _lastGroups || [], summary = _lastSummary;
     if (!rows.length) { App.util.toast('暂无可导出的数据', 'warn'); return; }
+    function fmtMaybe(v) { return v == null ? '—' : v; }
     var wb = XLSX.utils.book_new();
-    var aoa1 = [['教师', '科组', '预排周课次', '请假课次', '实际周课次', '预排饱和度', '实际饱和度']];
-    rows.forEach(function (r) { aoa1.push([r.name, r.group, r.pre, r.leave, r.actual, pct(r.preSat), pct(r.actualSat)]); });
+    var aoa1 = [['教师', '科组', '预排周课次（1V1+1V6）', '请假课次（1V1+1V6）', '实际周课次（1V1+1V6）', '周六课次', '周日课次', '1V1课次', '1V6课次', '预排饱和度', '实际饱和度']];
+    rows.forEach(function (r) {
+      var sat = safeByDay(r, '周六'), sun = safeByDay(r, '周日');
+      var hasByDay = !!(r.byDay);
+      aoa1.push([
+        r.name, r.group,
+        fmtBreakdown(r.pre, r.pre1v1, r.pre1v6),
+        fmtBreakdown(r.leave, r.leave1v1, r.leave1v6),
+        fmtBreakdown(r.actual, r.actual1v1, r.actual1v6),
+        hasByDay ? sat.pre : '—',
+        hasByDay ? sun.pre : '—',
+        fmtMaybe(r.pre1v1), fmtMaybe(r.pre1v6),
+        pct(r.preSat), pct(r.actualSat)
+      ]);
+    });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa1), '按教师');
-    var aoa2 = [['科组', '教师数', '预排周课次', '实际周课次', '预排饱和度', '实际饱和度']];
-    groups.forEach(function (g) { aoa2.push([g.group, g.teachers, g.pre, g.actual, pct(g.preSat), pct(g.actualSat)]); });
+    var aoa2 = [['科组', '教师数', '预排周课次（1V1+1V6）', '请假课次（1V1+1V6）', '实际周课次（1V1+1V6）', '周六课次', '周日课次', '1V1课次', '1V6课次', '预排饱和度', '实际饱和度']];
+    groups.forEach(function (g) {
+      var sat = safeByDay(g, '周六'), sun = safeByDay(g, '周日');
+      var hasByDay = !!(g.byDay);
+      aoa2.push([
+        g.group, g.teachers,
+        fmtBreakdown(g.pre, g.pre1v1, g.pre1v6),
+        fmtBreakdown(g.leave, g.leave1v1, g.leave1v6),
+        fmtBreakdown(g.actual, g.actual1v1, g.actual1v6),
+        hasByDay ? sat.pre : '—',
+        hasByDay ? sun.pre : '—',
+        fmtMaybe(g.pre1v1), fmtMaybe(g.pre1v6),
+        pct(g.preSat), pct(g.actualSat)
+      ]);
+    });
     if (summary && summary.teachers) {
-      aoa2.push([summary.label, summary.teachers, summary.pre, summary.actual, pct(summary.preSat), pct(summary.actualSat)]);
+      var campusHasByDay = groups.length && groups[0].byDay;
+      var campusSat = 0, campusSun = 0, campus1v1 = 0, campus1v6 = 0;
+      if (campusHasByDay) {
+        groups.forEach(function (g) {
+          if (g.byDay) {
+            campusSat += (g.byDay['周六'] && g.byDay['周六'].pre) || 0;
+            campusSun += (g.byDay['周日'] && g.byDay['周日'].pre) || 0;
+          }
+          campus1v1 += (g.pre1v1 || 0);
+          campus1v6 += (g.pre1v6 || 0);
+        });
+      }
+      aoa2.push([
+        summary.label, summary.teachers,
+        fmtBreakdown(summary.pre, summary.pre1v1, summary.pre1v6),
+        fmtBreakdown(summary.leave, summary.leave1v1, summary.leave1v6),
+        fmtBreakdown(summary.actual, summary.actual1v1, summary.actual1v6),
+        campusHasByDay ? campusSat : '—',
+        campusHasByDay ? campusSun : '—',
+        campusHasByDay ? campus1v1 : '—',
+        campusHasByDay ? campus1v6 : '—',
+        pct(summary.preSat), pct(summary.actualSat)
+      ]);
     }
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa2), '按科组');
     XLSX.writeFile(wb, '教师周度KPI_' + (_lastWeek || 'export') + '.xlsx');
@@ -479,19 +573,81 @@
     if (!rows.length) { App.util.toast('暂无可导出的数据', 'warn'); return; }
 
     var scale = 2;
-    var W = 980, pad = 30;
+    var W = 1200, pad = 30;
     var fontStack = '-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif';
 
+    function fmtMaybe(v) { return v == null ? '—' : v; }
+    var teacherRows = rows.map(function (r) {
+      var sat = safeByDay(r, '周六'), sun = safeByDay(r, '周日');
+      var hasByDay = !!(r.byDay);
+      return {
+        name: r.name, group: r.group,
+        pre: fmtBreakdown(r.pre, r.pre1v1, r.pre1v6),
+        leave: fmtBreakdown(r.leave, r.leave1v1, r.leave1v6),
+        actual: fmtBreakdown(r.actual, r.actual1v1, r.actual1v6),
+        sat: hasByDay ? sat.pre : '—',
+        sun: hasByDay ? sun.pre : '—',
+        v1v1: fmtMaybe(r.pre1v1), v1v6: fmtMaybe(r.pre1v6),
+        preSat: r.preSat, actualSat: r.actualSat
+      };
+    });
     var teacherCols = [
       { label: '教师', w: 140, key: 'name' }, { label: '科组', w: 80, key: 'group' },
-      { label: '预排周课次', w: 104, num: true, key: 'pre' }, { label: '请假课次', w: 104, num: true, key: 'leave' }, { label: '实际周课次', w: 104, num: true, key: 'actual' },
-      { label: '预排饱和度', w: 130, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 130, pct: true, key: 'actualSat' }
+      { label: '预排周课次', w: 130, key: 'pre' }, { label: '请假课次', w: 130, key: 'leave' }, { label: '实际周课次', w: 130, key: 'actual' },
+      { label: '周六课次', w: 90, key: 'sat' }, { label: '周日课次', w: 90, key: 'sun' },
+      { label: '1V1课次', w: 90, key: 'v1v1' }, { label: '1V6课次', w: 90, key: 'v1v6' },
+      { label: '预排饱和度', w: 120, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 120, pct: true, key: 'actualSat' }
     ];
+
+    var groupRows = groups.map(function (g) {
+      var sat = safeByDay(g, '周六'), sun = safeByDay(g, '周日');
+      var hasByDay = !!(g.byDay);
+      return {
+        group: g.group, teachers: g.teachers,
+        pre: fmtBreakdown(g.pre, g.pre1v1, g.pre1v6),
+        leave: fmtBreakdown(g.leave, g.leave1v1, g.leave1v6),
+        actual: fmtBreakdown(g.actual, g.actual1v1, g.actual1v6),
+        sat: hasByDay ? sat.pre : '—',
+        sun: hasByDay ? sun.pre : '—',
+        v1v1: fmtMaybe(g.pre1v1), v1v6: fmtMaybe(g.pre1v6),
+        preSat: g.preSat, actualSat: g.actualSat
+      };
+    });
     var groupCols = [
       { label: '科组', w: 150, key: 'group' }, { label: '教师数', w: 96, num: true, key: 'teachers' },
-      { label: '预排周课次', w: 130, num: true, key: 'pre' }, { label: '实际周课次', w: 130, num: true, key: 'actual' },
-      { label: '预排饱和度', w: 150, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 150, pct: true, key: 'actualSat' }
+      { label: '预排周课次', w: 130, key: 'pre' }, { label: '请假课次', w: 130, key: 'leave' }, { label: '实际周课次', w: 130, key: 'actual' },
+      { label: '周六课次', w: 90, key: 'sat' }, { label: '周日课次', w: 90, key: 'sun' },
+      { label: '1V1课次', w: 90, key: 'v1v1' }, { label: '1V6课次', w: 90, key: 'v1v6' },
+      { label: '预排饱和度', w: 120, pct: true, key: 'preSat' }, { label: '实际饱和度', w: 120, pct: true, key: 'actualSat' }
     ];
+
+    // 汇总行：字段名与 groupCols 一致
+    var summaryRow = null;
+    if (summary && summary.teachers) {
+      var campusHasByDay = groups.length && groups[0].byDay;
+      var campusSat = 0, campusSun = 0, campus1v1 = 0, campus1v6 = 0;
+      if (campusHasByDay) {
+        groups.forEach(function (g) {
+          if (g.byDay) {
+            campusSat += (g.byDay['周六'] && g.byDay['周六'].pre) || 0;
+            campusSun += (g.byDay['周日'] && g.byDay['周日'].pre) || 0;
+          }
+          campus1v1 += (g.pre1v1 || 0);
+          campus1v6 += (g.pre1v6 || 0);
+        });
+      }
+      summaryRow = {
+        group: summary.label, teachers: summary.teachers,
+        pre: fmtBreakdown(summary.pre, summary.pre1v1, summary.pre1v6),
+        leave: fmtBreakdown(summary.leave, summary.leave1v1, summary.leave1v6),
+        actual: fmtBreakdown(summary.actual, summary.actual1v1, summary.actual1v6),
+        sat: campusHasByDay ? campusSat : '—',
+        sun: campusHasByDay ? campusSun : '—',
+        v1v1: campusHasByDay ? campus1v1 : '—',
+        v1v6: campusHasByDay ? campus1v6 : '—',
+        preSat: summary.preSat, actualSat: summary.actualSat
+      };
+    }
     function tableH(count, hasSummary) { return 22 + 44 + Math.max(count, 1) * 34 + (hasSummary ? 34 : 0) + 10; }
     var t1h = tableH(rows.length, false), t2h = tableH(groups.length, true);
     var H = pad + 58 + 28 + 16 + t1h + 20 + t2h + pad;
@@ -516,9 +672,9 @@
     ctx.fillText('周度范围：' + (_lastWeek || '') + '　·　基准：每周 ' + BASE + ' 次课 = 100%　·　生成于 ' + new Date().toLocaleString('zh-CN'), pad, pad + 50);
 
     var y = pad + 58 + 28 + 16;
-    y = drawTable(ctx, pad, y, '按教师', teacherCols, rows, false, null);
+    y = drawTable(ctx, pad, y, '按教师', teacherCols, teacherRows, false, null);
     y += 20;
-    drawTable(ctx, pad, y, '按科组', groupCols, groups, true, summary);
+    drawTable(ctx, pad, y, '按科组', groupCols, groupRows, true, summaryRow);
 
     canvas.toBlob(function (blob) {
       if (!blob) { App.util.toast('图片生成失败', 'bad'); return; }
