@@ -102,12 +102,20 @@
     return null;
   }
 
-  // 最近若干个人工月（含当前月，[新…旧]），用于筛选器下拉
-  function recentMonths(count) {
-    var cur = artMonthOfDate(new Date()).artMonthId;
+  // 最近若干个人工月（含当前月，[当前, 过去…, 未来…]），用于筛选器下拉。
+  // 过去月数 = count；未来月数 = futureCount（默认 6，便于提前规划 / 查看下一月，如 10 月）。
+  // 当前月始终为数组首位，保证各调用方「默认选中当前月」的语义不变。
+  function recentMonths(count, futureCount) {
+    count = count || 12;
+    futureCount = (typeof futureCount === 'number') ? futureCount : 6;
+    var nowInfo = artMonthOfDate(new Date());
+    var cur = nowInfo ? nowInfo.artMonthId
+      : (new Date().getFullYear() + '-' + pad(new Date().getMonth() + 1));
     var arr = [cur];
     var m = cur;
-    for (var i = 1; i < (count || 12); i++) { m = prevMonthId(m); arr.push(m); }
+    for (var i = 1; i < count; i++) { m = prevMonthId(m); arr.push(m); }
+    m = cur;
+    for (var j = 0; j < futureCount; j++) { m = nextMonthId(m); arr.push(m); }
     return arr;
   }
 
