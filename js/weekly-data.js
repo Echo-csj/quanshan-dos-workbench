@@ -113,34 +113,70 @@
     return upsert(r);
   }
 
-  // 月度汇总重算：跨周去重教师，Σ 预排/实际，饱和度 = Σ / 16 / 去重教师数
-  // 返回 { artMonthId, weeks, teachers, pre, actual, leave, preSat, actualSat, groups:[...], byTeacher:[...] }
+  // 月度汇总重算：跨周去重教师，Σ 预排/实际/请假 及 1V1/1V6、周六周日拆分，饱和度 = Σ / 16 / 去重教师数
+  // 返回 { artMonthId, weeks, teachers, pre, actual, leave, preSat, actualSat,
+  //        pre1v1, pre1v6, actual1v1, actual1v6, byDay,
+  //        groups:[...], byTeacher:[...] }
+  // 注意：preSat/actualSat 口径保持不变（校区 = Σ/16/去重教师数；科组 = 科组Σ/16/去重教师数），仅新增拆分字段。
   function monthlySummary(artMonthId) {
     var BASE = (App.kpiEngine && App.kpiEngine.BASE) || 16;
     var recs = all().filter(function (r) { return r.artMonthId === artMonthId; });
-    var teacherMap = {};   // name -> 累计
-    var groupMap = {};     // group -> 累计
+    var teacherMap = {};   // name -> 累计（含拆分）
+    var groupsMap = {};    // group -> 累计（含拆分）
     var weeks = recs.length;
+    var BD_KEYS = ['pre', 'pre1v1', 'pre1v6', 'actual', 'actual1v1', 'actual1v6'];
+    function emptyByDay() { return { 周六: { pre: 0, pre1v1: 0, pre1v6: 0, actual: 0, actual1v1: 0, actual1v6: 0 }, 周日: { pre: 0, pre1v1: 0, pre1v6: 0, actual: 0, actual1v1: 0, actual1v6: 0 } }; }
     recs.forEach(function (r) {
       (r.kpiByTeacher || []).forEach(function (t) {
-        if (!teacherMap[t.name]) teacherMap[t.name] = { name: t.name, group: t.group || '', pre: 0, actual: 0, leave: 0 };
+        if (!teacherMap[t.name]) teacherMap[t.name] = {
+          name: t.name, group: t.group || '', pre: 0, leave: 0, actual: 0,
+          pre1v1: 0, pre1v6: 0, actual1v1: 0, actual1v6: 0, byDay: {}
+        };
         var tm = teacherMap[t.name];
-        tm.pre += (t.pre || 0); tm.actual += (t.actual || 0); tm.leave += (t.leave || 0);
+        tm.pre += (t.pre || 0); tm.leave += (t.leave || 0); tm.actual += (t.actual || 0);
+        tm.pre1v1 += (t.pre1v1 || 0); tm.pre1v6 += (t.pre1v6 || 0);
+        tm.actual1v1 += (t.actual1v1 || 0); tm.actual1v6 += (t.actual1v6 || 0);
         if (t.group) tm.group = t.group;
+        ['周六', '周日'].forEach(function (d) {
+          var bd = (t.byDay && t.byDay[d]) || {};
+          if (!tm.byDay[d]) tm.byDay[d] = { pre: 0, pre1v1: 0, pre1v6: 0, actual: 0, actual1v1: 0, actual1v6: 0, leave: 0 };
+          var m = tm.byDay[d];
+          BD_KEYS.forEach(function (f) { m[f] += (bd[f] || 0); });
+          m.leave += (bd.leave || 0);
+        });
       });
     });
     var teachersArr = Object.keys(teacherMap).map(function (k) { return teacherMap[k]; });
     var deduped = teachersArr.length;
     var totalPre = 0, totalActual = 0, totalLeave = 0;
-    teachersArr.forEach(function (t) { totalPre += t.pre; totalActual += t.actual; totalLeave += t.leave; });
+    var totalPre1v1 = 0, totalPre1v6 = 0, totalAct1v1 = 0, totalAct1v6 = 0;
+    var totalByDay = emptyByDay();
     teachersArr.forEach(function (t) {
-      if (!groupMap[t.group]) groupMap[t.group] = { group: t.group, teachers: 0, pre: 0, actual: 0, leave: 0 };
-      var g = groupMap[t.group]; g.teachers++; g.pre += t.pre; g.actual += t.actual; g.leave += t.leave;
+      totalPre += t.pre; totalActual += t.actual; totalLeave += t.leave;
+      totalPre1v1 += t.pre1v1; totalPre1v6 += t.pre1v6; totalAct1v1 += t.actual1v1; totalAct1v6 += t.actual1v6;
+      ['周六', '周日'].forEach(function (d) {
+        var bd = t.byDay[d] || {}; BD_KEYS.forEach(function (f) { totalByDay[d][f] += (bd[f] || 0); });
+      });
+      t.preSat = deduped ? t.pre / BASE : 0;
+      t.actualSat = deduped ? t.actual / BASE : 0;
     });
-    var groupsArr = Object.keys(groupMap).map(function (k) {
-      var g = groupMap[k];
+    teachersArr.forEach(function (t) {
+      if (!groupsMap[t.group]) groupsMap[t.group] = {
+        group: t.group, teachers: 0, pre: 0, leave: 0, actual: 0,
+        pre1v1: 0, pre1v6: 0, actual1v1: 0, actual1v6: 0, byDay: emptyByDay()
+      };
+      var g = groupsMap[t.group];
+      g.teachers++; g.pre += t.pre; g.leave += t.leave; g.actual += t.actual;
+      g.pre1v1 += t.pre1v1; g.pre1v6 += t.pre1v6; g.actual1v1 += t.actual1v1; g.actual1v6 += t.actual1v6;
+      ['周六', '周日'].forEach(function (d) {
+        var bd = t.byDay[d] || {}; BD_KEYS.forEach(function (f) { g.byDay[d][f] += (bd[f] || 0); });
+      });
+    });
+    var groupsArr = Object.keys(groupsMap).map(function (k) {
+      var g = groupsMap[k];
       return {
-        group: g.group, teachers: g.teachers, pre: g.pre, actual: g.actual, leave: g.leave,
+        group: g.group, teachers: g.teachers, pre: g.pre, leave: g.leave, actual: g.actual,
+        pre1v1: g.pre1v1, pre1v6: g.pre1v6, actual1v1: g.actual1v1, actual1v6: g.actual1v6, byDay: g.byDay,
         preSat: deduped ? g.pre / BASE / deduped : 0,
         actualSat: deduped ? g.actual / BASE / deduped : 0
       };
@@ -149,9 +185,9 @@
       artMonthId: artMonthId,
       weeks: weeks,
       teachers: deduped,
-      pre: totalPre,
-      actual: totalActual,
-      leave: totalLeave,
+      pre: totalPre, actual: totalActual, leave: totalLeave,
+      pre1v1: totalPre1v1, pre1v6: totalPre1v6, actual1v1: totalAct1v1, actual1v6: totalAct1v6,
+      byDay: totalByDay,
       preSat: deduped ? totalPre / BASE / deduped : 0,
       actualSat: deduped ? totalActual / BASE / deduped : 0,
       groups: groupsArr,

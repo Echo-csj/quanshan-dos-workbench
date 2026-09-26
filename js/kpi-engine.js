@@ -178,13 +178,32 @@
   }
 
   // 校区汇总（基于已勾选教师的所有科组聚合）
+  // 注：在原有字段基础上新增 1V1/1V6 与按天(byDay) 拆分累计，使「周度明细/月度汇总」弹窗的
+  // 校区汇总行与按教师/按科组同源展示（预排/实际/周六/周日拆分）。preSat/actualSat 口径不变（零回归）。
   function computeCampusSummary(groups) {
-    var summary = { label: '校区汇总', teachers: 0, pre: 0, leave: 0, actual: 0, preSat: 0, actualSat: 0 };
+    var summary = {
+      label: '校区汇总', teachers: 0, pre: 0, leave: 0, actual: 0, preSat: 0, actualSat: 0,
+      pre1v1: 0, pre1v6: 0, actual1v1: 0, actual1v6: 0, byDay: emptyByDay()
+    };
     (groups || []).forEach(function (g) {
       summary.teachers += g.teachers;
       summary.pre += g.pre;
       summary.leave += (g.leave || 0);
       summary.actual += g.actual;
+      summary.pre1v1 += (g.pre1v1 || 0);
+      summary.pre1v6 += (g.pre1v6 || 0);
+      summary.actual1v1 += (g.actual1v1 || 0);
+      summary.actual1v6 += (g.actual1v6 || 0);
+      if (g.byDay) {
+        DAYS.forEach(function (d) {
+          var gd = g.byDay[d], sd = summary.byDay[d];
+          if (gd) {
+            sd.pre += (gd.pre || 0);
+            sd.pre1v1 += (gd.pre1v1 || 0);
+            sd.pre1v6 += (gd.pre1v6 || 0);
+          }
+        });
+      }
     });
     if (summary.teachers) {
       summary.preSat = summary.pre / BASE / summary.teachers;
