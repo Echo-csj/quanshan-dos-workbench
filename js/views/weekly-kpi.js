@@ -25,12 +25,6 @@
   var _lastWeek = 'export';    // 导出用文件名片段
   var _lastSummary = null;     // 导出用：最近一次校区汇总
 
-  // 教师表筛选状态（仅作用于「按教师」明细表，不影响科组聚合/校区汇总）
-  // name：教师姓名模糊匹配；satMin/sunMin/v1v1Min/v1v6Min：对应课次下限（≥）；'' = 不限
-  var _filters = { name: '', satMin: '', sunMin: '', v1v1Min: '', v1v6Min: '' };
-  var _teacherBaseRows = [];   // 筛选前的「按教师」基础行（受科组筛选/数据源影响，作为筛选输入）
-  var _lastIsLive = false;     // 最近一次渲染是否活动周（供局部刷新复渲染教师表）
-
   // 自动抓取（KPI 选周联动课程表）状态
   var _loadingWeek = null;        // 正在自动抓取的周（防止重复触发）
   var _fetchFailedWeeks = {};     // 抓取失败的周（防无限重试，提供重试按钮）
@@ -168,48 +162,6 @@
   }
   function isSel(name) { return _selNames ? (_selNames[name] !== false) : true; }
   function setSel(name, val) { if (!_selNames) _selNames = {}; _selNames[name] = val; }
-
-  // ---------- 教师表筛选 ----------
-  // 可筛选字段：
-  //   教师姓名（name）：对 r.name 做不区分大小写的子串模糊匹配
-  //   周六课次 / 周日课次（satMin / sunMin）：对预排按天课次 r.byDay['周六'|'周日'].pre 取下限 ≥
-  //   1V1课次 / 1V6课次（v1v1Min / v1v6Min）：对预排分类课次 r.pre1v1 / r.pre1v6 取下限 ≥
-  // 任一条件为空（''）即视为「不限」。所有条件以 AND 组合。
-  function applyFilters(rows) {
-    var f = _filters || {};
-    var name = (f.name || '').trim().toLowerCase();
-    function num(v) { return (v === '' || v == null) ? null : Number(v); }
-    var satMin = num(f.satMin), sunMin = num(f.sunMin), v1v1Min = num(f.v1v1Min), v1v6Min = num(f.v1v6Min);
-    return (rows || []).filter(function (r) {
-      if (name && (r.name || '').toLowerCase().indexOf(name) < 0) return false;
-      var byDay = r.byDay || {};
-      var sat = (byDay['周六'] && byDay['周六'].pre) || 0;
-      var sun = (byDay['周日'] && byDay['周日'].pre) || 0;
-      if (satMin != null && !(sat >= satMin)) return false;
-      if (sunMin != null && !(sun >= sunMin)) return false;
-      if (v1v1Min != null && !((r.pre1v1 || 0) >= v1v1Min)) return false;
-      if (v1v6Min != null && !((r.pre1v6 || 0) >= v1v6Min)) return false;
-      return true;
-    });
-  }
-
-  // 筛选输入实时刷新：仅重渲染「按教师」表卡片（保持输入框焦点），并同步导出源与计数
-  function onFilterInput() {
-    function v(id) { var el = document.getElementById(id); return el ? el.value : ''; }
-    _filters = { name: v('kpi-filter-name'), satMin: v('kpi-filter-sat'), sunMin: v('kpi-filter-sun'), v1v1Min: v('kpi-filter-v1v1'), v1v6Min: v('kpi-filter-v1v6') };
-    var filtered = applyFilters(_teacherBaseRows);
-    _displayedRows = filtered;        // 勾选 idx 映射以筛选后展示行
-    _lastRows = filtered;             // 导出以当前展示（筛选后）为准
-    var wrap = document.getElementById('kpi-teacher-table-wrap');
-    if (wrap) wrap.innerHTML = renderTeacherTable(filtered, _lastIsLive, _teacherBaseRows.length > 0 && filtered.length === 0);
-    var cnt = document.getElementById('kpi-filter-count');
-    if (cnt) cnt.textContent = '匹配 ' + filtered.length + ' / ' + _teacherBaseRows.length + ' 位教师';
-  }
-
-  function resetFilters() {
-    _filters = { name: '', satMin: '', sunMin: '', v1v1Min: '', v1v6Min: '' };
-    render();
-  }
 
   // 计算每位教师 KPI（受科组筛选；selected 由 _selNames 决定）
   // 委托 kpi-engine，确保与数据中心归档口径一致（零回归）
@@ -360,11 +312,8 @@
       }
     }
 
-    _teacherBaseRows = rows;          // 筛选前基础行（科组筛选/数据源已生效）
-    _lastIsLive = isLive;
-    var filtered = applyFilters(rows); // 教师表筛选（仅作用明细表）
-    _displayedRows = filtered;        // 勾选 idx 映射以筛选后展示行为准
-    _lastRows = filtered;             // 导出以当前展示（筛选后）为准
+    _displayedRows = rows;
+    _lastRows = rows;
     _lastGroups = groups;
     _lastSummary = summary;
     _lastWeek = weekStart + '_' + weekEnd;
@@ -410,44 +359,20 @@
       + ' · 当前周度范围：' + U.escapeHtml(weekStart) + ' ~ ' + U.escapeHtml(weekEnd)
       + (isLive ? (isActiveWeek ? '（调整课表请点上方「编辑此周课程表」）' : '（历史周·课程表存档，点上方「编辑此周课程表」可直接改并存）') : '') + '</p>';
 
-    // 教师表筛选条（仅作用于「按教师」明细表；科组聚合/校区汇总不受影响）
-    var hasBase = rows.length > 0;
-    html += '<div class="kpi-filter-bar">';
-    html += '<div class="kpi-filter-row">';
-    html += '<div class="kpi-filter-item"><label class="kpi-filter-label">教师姓名</label>'
-      + '<input type="text" id="kpi-filter-name" class="form-input form-input-sm" placeholder="模糊匹配姓名" value="' + U.escapeHtml(_filters.name) + '" oninput="App.views.weeklyKpi.onFilterInput()"></div>';
-    html += '<div class="kpi-filter-item"><label class="kpi-filter-label">周六课次 ≥</label>'
-      + '<input type="number" id="kpi-filter-sat" class="form-input form-input-sm kpi-filter-num" min="0" step="1" placeholder="不限" value="' + U.escapeHtml(_filters.satMin) + '" oninput="App.views.weeklyKpi.onFilterInput()"></div>';
-    html += '<div class="kpi-filter-item"><label class="kpi-filter-label">周日课次 ≥</label>'
-      + '<input type="number" id="kpi-filter-sun" class="form-input form-input-sm kpi-filter-num" min="0" step="1" placeholder="不限" value="' + U.escapeHtml(_filters.sunMin) + '" oninput="App.views.weeklyKpi.onFilterInput()"></div>';
-    html += '<div class="kpi-filter-item"><label class="kpi-filter-label">1V1课次 ≥</label>'
-      + '<input type="number" id="kpi-filter-v1v1" class="form-input form-input-sm kpi-filter-num" min="0" step="1" placeholder="不限" value="' + U.escapeHtml(_filters.v1v1Min) + '" oninput="App.views.weeklyKpi.onFilterInput()"></div>';
-    html += '<div class="kpi-filter-item"><label class="kpi-filter-label">1V6课次 ≥</label>'
-      + '<input type="number" id="kpi-filter-v1v6" class="form-input form-input-sm kpi-filter-num" min="0" step="1" placeholder="不限" value="' + U.escapeHtml(_filters.v1v6Min) + '" oninput="App.views.weeklyKpi.onFilterInput()"></div>';
-    html += '<button class="btn btn-ghost btn-sm" onclick="App.views.weeklyKpi.resetFilters()"' + (hasBase ? '' : ' disabled') + '>清除筛选</button>';
-    html += '</div>';
-    html += '<div class="kpi-filter-meta"><span id="kpi-filter-count">匹配 ' + filtered.length + ' / ' + rows.length + ' 位教师</span>'
-      + '<span class="kpi-filter-tip">姓名模糊匹配；课次为「预排」口径下限（≥）。输入即时刷新「按教师」表，不影响科组聚合与导出之外的汇总。</span></div>';
-    html += '</div>';
-
-    html += '<div id="kpi-teacher-table-wrap">' + renderTeacherTable(filtered, isLive, hasBase && filtered.length === 0) + '</div>';
+    html += renderTeacherTable(rows, isLive);
     html += renderGroupTable(groups, summary);
 
     container.innerHTML = html;
   }
 
-  function renderTeacherTable(rows, isLive, noMatch) {
+  function renderTeacherTable(rows, isLive) {
     var U = App.util;
     function fmtMaybe(v) { return v == null ? '—' : v; }
     var html = '';
     html += '<div class="card" style="margin-bottom:18px"><div class="card-header"><h3 class="card-title">' + U.svgIcon('users', 18) + '按教师</h3>';
     html += '<span style="font-size:12px;color:var(--text-muted)">勾选「选」决定该教师是否纳入科组汇总 · 课次展示为「合计（1V1+1V6）」</span></div>';
     if (!rows.length) {
-      if (noMatch) {
-        html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">无匹配结果：当前筛选条件下没有符合的教师。请调整上方筛选条件，或点「清除筛选」恢复全部。</div>';
-      } else {
-        html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无教师课次数据' + (isLive ? '（请先在「课程表」导入 / 填写并保存）' : '') + '</div>';
-      }
+      html += '<div style="padding:16px;color:var(--text-muted);font-size:13px">暂无教师课次数据' + (isLive ? '（请先在「课程表」导入 / 填写并保存）' : '') + '</div>';
     } else {
       html += '<div style="overflow-x:auto"><table class="data-table" style="min-width:920px"><thead><tr>';
       if (isLive) html += '<th style="width:44px">选</th>';
@@ -876,8 +801,6 @@
     onMonthChange: onMonthChange,
     onWeekChange: onWeekChange,
     onFilterChange: onFilterChange,
-    onFilterInput: onFilterInput,
-    resetFilters: resetFilters,
     toggleTeacher: toggleTeacher,
     selectAll: selectAll,
     editSchedule: editSchedule,

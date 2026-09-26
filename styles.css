@@ -1193,18 +1193,6 @@ a:hover { color: var(--accent-hover); }
 .teacher-stats .stat-pill b { color:var(--text); }
 .teacher-stats .dot, .teacher-table .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
 
-/* ================ 教师周度 KPI · 筛选条 ================ */
-.kpi-filter-bar { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:14px; }
-.kpi-filter-row { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
-.kpi-filter-item { display:flex; flex-direction:column; gap:4px; }
-.kpi-filter-label { font-size:12px; color:var(--text-muted); font-weight:500; }
-.kpi-filter-item .form-input-sm { width:130px; }
-.kpi-filter-num { width:84px; }
-.kpi-filter-item .btn { height:32px; }
-.kpi-filter-meta { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:10px; font-size:12px; }
-#kpi-filter-count { color:var(--indigo); font-weight:600; }
-.kpi-filter-tip { color:var(--text-muted); }
-
 .table-card { overflow-x:auto; -webkit-overflow-scrolling:touch; padding:0; }
 .teacher-table { width:100%; min-width:1020px; border-collapse:collapse; font-size:13px; table-layout:fixed; }
 .teacher-table th, .teacher-table td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); white-space:nowrap; }
