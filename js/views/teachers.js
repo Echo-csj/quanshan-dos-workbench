@@ -189,13 +189,18 @@
     // 权限规则：所有子工作台均可查看全部教师（不再按本科组过滤），
     // 仅隐藏「毕业院校 / 学历 / 专业」三字段（见下方表头与行渲染的 isSub 分支）。
 
-    // 统计
-    var stats = { total: teachers.length, bySubject: {}, byPos: {} };
+    // 统计：教师总数与学科组/岗位分布均【不含离职教师】。
+    // 离职教师单独以「离职 X」呈现（见下方 stat-left），并在「离职教师」档位查看完整留存信息与历史待办；
+    // 这样“共 N 人”与各学科组/岗位分布自洽（学科组人数之和 = 总数），且反映当前在岗名册。
     var statusCount = { active: 0, pending: 0, left: 0 };
+    var stats = { total: 0, bySubject: {}, byPos: {} };
     teachers.forEach(function(t) {
+      var st = statusOf(t);
+      statusCount[st]++;
+      if (st === 'left') return; // 离职不计入名册统计（总数 / 学科组 / 岗位）
       stats.bySubject[canonSubject(t.subjectGroup)] = (stats.bySubject[canonSubject(t.subjectGroup)] || 0) + 1;
       stats.byPos[t.positionCode] = (stats.byPos[t.positionCode] || 0) + 1;
-      statusCount[statusOf(t)]++;
+      stats.total++;
     });
 
     var html = '';
