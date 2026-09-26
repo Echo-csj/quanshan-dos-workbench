@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" data-page-node-id="P7zXt1k10AzhK0l70na2YZ">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin data-page-node-id="nW8tWW5H914F5ADBKCmF9I">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" data-page-node-id="67L5n8GQgruAsj3CiVSr5t">
-  <link rel="stylesheet" href="styles.css?v=20260926c" data-page-node-id="rA2ApdyNE8gR1MuO1NSdIg">
+  <link rel="stylesheet" href="styles.css?v=20260926e" data-page-node-id="rA2ApdyNE8gR1MuO1NSdIg">
   <link rel="manifest" href="manifest.webmanifest" data-page-node-id="GgYQXDBOFLsW06TdoSRTJB">
   <meta name="theme-color" content="#4F46E5" data-page-node-id="AhAchsSeuF2WnYyuoeacFZ">
   <link rel="apple-touch-icon" href="icons/icon-192.png" data-page-node-id="l0pv1UzxE0zLxKMoaPUK8K">
@@ -93,6 +93,11 @@
         <span data-page-node-id="wbKpiNav03">教师周度 KPI</span>
       </a>
 
+      <a class="nav-item" data-route="/teacher-weekly" onclick="App.router.navigate('/teacher-weekly')" data-page-node-id="wbTwNav01">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="wbTwNav02"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        <span data-page-node-id="wbTwNav03">周度教师</span>
+      </a>
+
       <a class="nav-item" data-route="/weekly-data" onclick="App.router.navigate('/weekly-data')" data-page-node-id="wbWdNav01">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="wbWdNav02"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
         <span data-page-node-id="wbWdNav03">周度数据中心</span>
@@ -173,15 +178,16 @@
 <script src="js/views/data.js?v=20260829q"></script>
 <script src="js/views/linked-data.js?v=20260829v"></script>
 <script src="js/views/linked-kezu.js?v=20260909a"></script>
-<script src="js/teacher-status.js?v=20260925a"></script>
+<script src="js/teacher-status.js?v=20260926e"></script>
 <script src="js/views/teachers.js?v=20260925a"></script>
 <script src="js/views/schedule.js?v=20260925g"></script>
 <!-- 周度数据管理：人工月/周次引擎 + 月份周次筛选器 -->
 <script src="js/weekly-cycle.js?v=20260926d"></script>
 <script src="js/month-week-picker.js?v=20260924a"></script>
-<script src="js/kpi-engine.js?v=20260926a"></script>
+<script src="js/kpi-engine.js?v=20260926e"></script>
 <script src="js/weekly-data.js?v=20260925b"></script>
-<script src="js/views/weekly-kpi.js?v=20260926c"></script>
+<script src="js/views/weekly-kpi.js?v=20260926e"></script>
+<script src="js/views/teacher-weekly.js?v=20260926e"></script>
 <script src="js/views/weekly-data.js?v=20260925b"></script>
 <!-- Supabase JS 由 js/sync.js 动态加载（先 jsdelivr 失败则回退 unpkg），避免同步 <script> 在 CDN 卡顿时阻塞整页 -->
   <script src="js/config.js?v=20260914b"></script>

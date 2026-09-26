@@ -165,10 +165,11 @@
 
   // 计算每位教师 KPI（受科组筛选；selected 由 _selNames 决定）
   // 委托 kpi-engine，确保与数据中心归档口径一致（零回归）
-  function computeRows(filterGroup, schOverride) {
+  // weekEnd 给定时按周过滤名册（仅计入截至该周时点在职教师），修复饱和度分母
+  function computeRows(filterGroup, schOverride, weekEnd) {
     var sch = schOverride || readSchedule();
     var tchAll = (App.viewData && App.viewData().teachers) || [];
-    return App.kpiEngine.computeRows(sch, tchAll, { filterGroup: filterGroup, selNames: _selNames });
+    return App.kpiEngine.computeRows(sch, tchAll, { filterGroup: filterGroup, selNames: _selNames, weekEnd: weekEnd || null });
   }
 
   // 按科组聚合（仅统计已勾选教师）：科组周课次 / 16 / 科组教师数
@@ -183,14 +184,16 @@
   function saveSnapshot() {
     var sch = scheduleForWeek(_curWeekStart);   // 用当前所选周的课程表（活动周或历史存档周）
     if (!sch || !sch.weekStartDate) { App.util.toast('请先在「课程表」设置并保存该周', 'warn'); return; }
-    var rows = computeRows('all', sch);     // 存全量（含 selected 标记），查看时再按筛选显示
+    var wkRes = App.weeklyCycle.resolveWeek(_artMonth, _weekNo);
+    var weekEnd = (wkRes && wkRes.end) || sch.weekEndDate || thisSunday();
+    var rows = computeRows('all', sch, weekEnd);   // 存全量（含 selected 标记），按周过滤名册；查看时再按筛选显示
     var groups = computeGroups(rows);
     var summary = computeCampusSummary(groups);
     var wk = sch.weekStartDate;
     var snaps = getSnapshots();
     snaps[wk] = {
       weekStart: wk,
-      weekEnd: sch.weekEndDate || thisSunday(),
+      weekEnd: weekEnd,
       rows: rows,
       groups: groups,
       summary: summary,
@@ -273,9 +276,9 @@
     var rows, groups, summary, sourceText;
     if (isLive) {
       syncSel(App.viewData().teachers); // 选框以教师管理板块名册为准（与 computeRows 名册一致）
-      rows = computeRows(_filterGroup, sch);
+      rows = computeRows(_filterGroup, sch, weekEnd);
       groups = computeGroups(rows);
-      summary = computeCampusSummary(computeGroups(computeRows('all', sch)));
+      summary = computeCampusSummary(computeGroups(computeRows('all', sch, weekEnd)));
       sourceText = '数据来源：课程表（' + weekStart + ' ~ ' + weekEnd + '）' + (isActiveWeek ? '' : '（历史周·课程表存档）');
     } else if (snap) {
       rows = (snap.rows || []).filter(function (r) {
@@ -471,6 +474,8 @@
   function onMonthChange(v) { _artMonth = v; _weekNo = 1; render(); }
   function onWeekChange(v) { _weekNo = parseInt(v, 10) || 1; render(); }
   function onFilterChange(v) { _filterGroup = v; render(); }
+  // 供「周度教师」等其它视图跳转到本视图并定位到指定人工月+周次（零耦合）
+  function setWeek(artMonth, weekNo) { if (artMonth) _artMonth = artMonth; if (weekNo) _weekNo = weekNo; render(); }
   function toggleTeacher(idx, val) {
     var r = _displayedRows[idx];
     if (!r) return;
@@ -801,6 +806,7 @@
     onMonthChange: onMonthChange,
     onWeekChange: onWeekChange,
     onFilterChange: onFilterChange,
+    setWeek: setWeek,
     toggleTeacher: toggleTeacher,
     selectAll: selectAll,
     editSchedule: editSchedule,

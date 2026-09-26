@@ -27,6 +27,19 @@
     return 'active';
   }
 
+  // 学科组归一（数学/英语/文综/理综）——与 kpi-engine.canonSubject 保持一致，
+  // 供 weekRoster 仅纳入「科组教师」，确保与 KPI 饱和度分母口径一致。
+  function canonSubject(s) {
+    s = String(s || '').trim();
+    if (!s) return '';
+    s = s.replace(/科组$|教研组$|备课组$|学科组$|组$|学科$/, '');
+    if (s.indexOf('数学') >= 0) return '数学';
+    if (s.indexOf('英语') >= 0) return '英语';
+    if (s.indexOf('文综') >= 0) return '文综';
+    if (s.indexOf('理综') >= 0) return '理综';
+    return s;
+  }
+
   // 按 week_end 时点判定在职；weekEndIso 形如 'YYYY-MM-DD'
   function isActiveAt(teacher, weekEndIso) {
     if (!teacher) return false;
@@ -61,13 +74,48 @@
     return entryDate;
   }
 
+  // 周度教师名册推导（与 KPI 饱和度分母口径一致：仅含 SUBJECT_GROUPS 科组教师）。
+  // 入参：teachers 全量名册；weekStart/weekEnd 形如 'YYYY-MM-DD'（周一 / 周日）。
+  // 返回：
+  //   active : 截至 weekEnd 时点在职的科组教师（KPI 分母 = 此人数）
+  //   joined : 入职/状态生效日落在 [weekStart, weekEnd] 区间内的教师（⊂ active，亦可独立列出）
+  //   left   : 离职日落在 [weekStart, weekEnd] 区间内的教师（该周已离职，⊄ active）
+  //   counts : { active, joined, left }
+  // 说明：口径与 kpi-engine.computeRows(weekEnd) 过滤完全一致（同一 isActiveAt + 同一 SUBJECT_GROUPS 过滤），
+  //       保证「周度教师人数」=「周度 KPI 饱和度分母」，两者永不脱节。
+  function weekRoster(teachers, weekStart, weekEnd) {
+    var SUBJ = ['数学', '英语', '文综', '理综'];
+    var active = [], joined = [], left = [];
+    (teachers || []).forEach(function (t) {
+      if (!t || !t.name) return;
+      var subj = canonSubject(t.subjectGroup);
+      if (SUBJ.indexOf(subj) < 0) return; // 仅科组教师（与 KPI 分母一致）
+      var effFrom = t.statusFrom || t.entryDate || '';
+      var status = t.status || statusOf(t);
+      var leftAt = (status === 'left') ? (t.leftAt || '') : '';
+      var rec = {
+        name: t.name, group: subj, status: status,
+        statusFrom: effFrom, leftAt: leftAt
+      };
+      if (isActiveAt(t, weekEnd)) active.push(rec);
+      if (effFrom && weekStart && effFrom >= weekStart && effFrom <= weekEnd) joined.push(rec);
+      if (leftAt && weekStart && leftAt >= weekStart && leftAt <= weekEnd) left.push(rec);
+    });
+    return {
+      active: active, joined: joined, left: left,
+      counts: { active: active.length, joined: joined.length, left: left.length }
+    };
+  }
+
   var api = {
     STATUS_LABEL: STATUS_LABEL,
     statusLabel: statusLabel,
     statusOf: statusOf,
     isActiveAt: isActiveAt,
     employedNames: employedNames,
-    deriveStatusFrom: deriveStatusFrom
+    deriveStatusFrom: deriveStatusFrom,
+    canonSubject: canonSubject,
+    weekRoster: weekRoster
   };
 
   if (root && (root.App = root.App || {})) { root.App.teachersUtil = api; }
