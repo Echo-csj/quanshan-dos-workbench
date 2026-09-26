@@ -398,6 +398,7 @@ a:hover { color: var(--accent-hover); }
   margin-bottom: 8px; cursor: pointer;
   position: relative;
   transition: all var(--fast);
+  touch-action: none; /* 关键：允许在触屏上拖拽卡片，而非被浏览器当作滚动 */
 }
 .kanban-card:hover { border-color: var(--accent); box-shadow: var(--shadow-2); }
 .kanban-card-title { font-size: 13px; font-weight: 500; margin-bottom: 4px; }
@@ -459,7 +460,13 @@ a:hover { color: var(--accent-hover); }
 
 /* 拖拽状态 */
 .kanban-card.dragging { opacity: 0.4; transform: scale(0.98); box-shadow: var(--shadow-3); }
-.kanban-card[draggable] { position: relative; }
+/* 拖拽时跟随指针的卡片幽灵 */
+.drag-ghost {
+  opacity: 0.92;
+  transform: rotate(2deg) scale(1.02);
+  box-shadow: var(--shadow-3);
+  cursor: grabbing;
+}
 
 /* 优先级标签配色 */
 .tag.priority-urgent { background: #FEE2E2; color: #991B1B; font-weight: 600; }

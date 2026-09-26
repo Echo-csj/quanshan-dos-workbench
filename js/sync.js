@@ -63,7 +63,36 @@
   }
   // 确保 Supabase 客户端库已加载：先试 jsdelivr，被网络/代理拦截则回退 unpkg。
   // 自行动态加载（非阻塞），避免 index.html 里同步 <script> 在 CDN 卡顿时阻塞整页、导致“登录无反应”。
+  // 关键修复：每个 CDN 尝试都带超时（LIB_TIMEOUT），杜绝“CDN 连接挂起 → loadSupabaseLib 永不 resolve →
+  // 登录点击后永久静默、连错误提示都没有”的故障。超时/失败即回退下一个，全部失败则返回 false 让 signIn 显式报错。
   var libLoadPromise = null;
+  var LIB_TIMEOUT = 7000; // 单个 CDN 尝试超时（ms）
+  function loadScript(src, ms) {
+    return new Promise(function (resolve) {
+      var done = false;
+      var s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      var timer = setTimeout(function () {
+        if (done) return;
+        done = true;
+        s.onload = s.onerror = null;
+        try { if (s.parentNode) s.parentNode.removeChild(s); } catch (e) {}
+        resolve(false); // 超时：当作加载失败，绝不挂起
+      }, ms);
+      s.onload = function () {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        resolve(!!(global.supabase && global.supabase.createClient));
+      };
+      s.onerror = function () {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        resolve(false);
+      };
+      document.head.appendChild(s);
+    });
+  }
   function loadSupabaseLib() {
     if (global.supabase && global.supabase.createClient) return Promise.resolve(true);
     if (libLoadPromise) return libLoadPromise;
@@ -73,14 +102,10 @@
     ];
     function tryLoad(i) {
       if (i >= CDNS.length) return Promise.resolve(false);
-      return new Promise(function (resolve) {
-        var s = document.createElement('script');
-        s.src = CDNS[i];
-        s.async = true;
-        s.onload = function () { resolve(!!(global.supabase && global.supabase.createClient)); };
-        s.onerror = function () { resolve(false); };
-        document.head.appendChild(s);
-      }).then(function (ok) { return ok ? true : tryLoad(i + 1); });
+      return loadScript(CDNS[i], LIB_TIMEOUT).then(function (ok) {
+        if (ok && global.supabase && global.supabase.createClient) return true;
+        return tryLoad(i + 1);
+      });
     }
     libLoadPromise = tryLoad(0);
     return libLoadPromise;
@@ -137,14 +162,16 @@
     return false;
   }
   async function signIn(email, password) {
+    // 关键修复：点击登录即刻进入“登录中”态（即使客户端库尚未就绪），
+    // 避免「多数情况静默、偶尔才显示」——任何入口（全屏门禁 / 侧栏小组件）点击都会立刻有反馈。
+    setStatus('signingin');
     var c = ensureClient();
     if (!c) {
-      // 首选 CDN 未生效，尝试兜底加载一次，避免“点击登录毫无反应”
+      // 首选 CDN 未生效，尝试兜底加载一次（带超时，不会永久挂起）
       var loaded = await loadSupabaseLib();
       c = loaded ? ensureClient() : null;
     }
     if (!c) { setStatus('error', '同步服务加载失败：无法连接云端。请检查网络 / 代理后刷新重试。'); return; }
-    setStatus('signingin');
     try {
       var r = await c.auth.signInWithPassword({ email: email, password: password });
       if (r.error) { setStatus('error', r.error.message || '登录失败'); return; }

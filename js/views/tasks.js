@@ -21,8 +21,7 @@
     { v: 'low',    label: '低' }
   ];
 
-  var dragId = null;
-    var _pasteItems = [];              // 粘贴解析预览暂存
+  var _pasteItems = [];              // 粘贴解析预览暂存
   var _pasteSkipped = [];            // 被识别为说明/邮件/否定句而跳过的行
   var _pasteResult = null;           // 整次解析结果（含 errors）
 
@@ -443,11 +442,7 @@
     html += '<span class="kanban-col-title">' + col.label + '</span>';
     html += '<span class="kanban-col-count" style="color:' + col.accent + '">' + sorted.length + '</span>';
     html += '</div>';
-    html += '<div class="kanban-cards" data-status="' + col.status + '" ' +
-      'ondragover="App.views.tasks.onDragOver(event)" ' +
-      'ondragenter="App.views.tasks.onDragEnter(event)" ' +
-      'ondragleave="App.views.tasks.onDragLeave(event)" ' +
-      'ondrop="App.views.tasks.onDrop(event, \'' + col.status + '\')">';
+    html += '<div class="kanban-cards" data-status="' + col.status + '">';
     if (sorted.length === 0) html += '<div class="kanban-empty">拖动任务到此</div>';
     else {
       visible.forEach(function(t) { html += renderCard(t); });
@@ -463,11 +458,7 @@
     html += '<span class="kanban-col-title">已完成</span>';
     html += '<span class="kanban-col-count" style="color:var(--ok)">' + sorted.length + '</span>';
     html += '</div>';
-    html += '<div class="kanban-cards" data-status="done" ' +
-      'ondragover="App.views.tasks.onDragOver(event)" ' +
-      'ondragenter="App.views.tasks.onDragEnter(event)" ' +
-      'ondragleave="App.views.tasks.onDragLeave(event)" ' +
-      'ondrop="App.views.tasks.onDrop(event, \'done\')">';
+    html += '<div class="kanban-cards" data-status="done">';
     if (getHideDone()) {
       html += '<div class="kanban-empty">已完成已隐藏<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="App.views.tasks.toggleHideDone()">显示已完成</button></div></div></div>';
       return html;
@@ -636,9 +627,8 @@
     var tags = '';
 
     var _selCls = (_selectMode && _selected[t.id] && isEditable(t)) ? ' selected' : '';
-    var html = '<div class="kanban-card' + _selCls + '" draggable="true" data-id="' + t.id + '" ' +
-      'ondragstart="App.views.tasks.onDragStart(event, \'' + t.id + '\')" ' +
-      'ondragend="App.views.tasks.onDragEnd(event)">';
+    var html = '<div class="kanban-card' + _selCls + '" data-id="' + t.id + '" ' +
+      'onpointerdown="App.views.tasks.onPointerDown(event, \'' + t.id + '\')">';
     if (_selectMode && isEditable(t)) {
       html += '<label class="task-select" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()"><input type="checkbox" ' + (_selected[t.id] ? 'checked' : '') + ' onchange="App.views.tasks.toggleSelect(\'' + t.id + '\', this.checked)"></label>';
     }
@@ -679,29 +669,107 @@
     return html;
   }
 
-  /* ---------------- 拖拽 ---------------- */
-  function onDragStart(e, id) {
-    dragId = id;
-    try { e.dataTransfer.setData('text/plain', id); e.dataTransfer.effectAllowed = 'move'; } catch (err) {}
-    if (e.currentTarget) e.currentTarget.classList.add('dragging');
+  /* ---------------- 拖拽（Pointer Events：鼠标 + 触屏通用，替代原生 HTML5 DnD） ----------------
+   * 原生 DnD 缺陷：① 触屏设备完全不可用；② dragenter/dragleave 因子元素冒泡频繁抖动导致高亮闪烁、
+   *    落点不稳定；③ 依赖浏览器拖拽会话，偶发失败。改为自管理的指针拖拽后，鼠标与触摸一致、无抖动、
+   *    落点用 elementFromPoint 精确判定，彻底解决「拖拽失败、不流畅」。
+   * 交互要点：pointerdown 记录起点；移动超过阈值(6px)才真正进入拖拽（避免误触点击编辑）；
+   *    拖拽中用克隆幽灵跟随指针，并高亮指针下方的列；pointerup 落在某列则 moveTask。
+   */
+  var _pd = null;            // 当前指针拖拽状态
+  var _pdBound = false;      // 是否已经绑定 document 级监听
+  var _pdSuppressClick = false; // 拖拽后抑制误触发的 click（防止落点弹出编辑）
+  var PD_THRESHOLD = 6;      // 像素：超过此位移才判定为拖拽
+
+  function isInteractiveTarget(t) {
+    return !!(t && t.closest && (t.closest('button') || t.closest('input') || t.closest('label') ||
+      t.closest('a') || t.closest('.kanban-card-actions') || t.closest('.task-select') || t.closest('.kanban-expand-btn')));
   }
-  function onDragEnd(e) {
-    dragId = null;
-    if (e.currentTarget) e.currentTarget.classList.remove('dragging');
-    document.querySelectorAll('.kanban-cards.drop-over').forEach(function(el) { el.classList.remove('drop-over'); });
+  function pdColumnUnderPoint(x, y) {
+    var el = document.elementFromPoint(x, y);
+    return (el && el.closest) ? el.closest('.kanban-cards') : null;
   }
-  function onDragOver(e) { e.preventDefault(); try { e.dataTransfer.dropEffect = 'move'; } catch (err) {} }
-  function onDragEnter(e) { e.preventDefault(); if (e.currentTarget) e.currentTarget.classList.add('drop-over'); }
-  function onDragLeave(e) {
-    if (e.currentTarget && !e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('drop-over');
+  function pdClearHighlights() {
+    document.querySelectorAll('.kanban-cards.drop-over').forEach(function (el) { el.classList.remove('drop-over'); });
   }
-  function onDrop(e, status) {
-    e.preventDefault();
-    var id = dragId;
-    try { id = e.dataTransfer.getData('text/plain') || dragId; } catch (err) {}
-    if (e.currentTarget) e.currentTarget.classList.remove('drop-over');
-    if (!id) return;
-    moveTask(id, status);
+  function onPointerDown(e, id) {
+    // 仅响应主键 / 触摸 / 笔；忽略交互元素（按钮、勾选框等），让其正常点击
+    if (e.button !== undefined && e.button !== 0 && e.pointerType === 'mouse') return;
+    if (isInteractiveTarget(e.target)) return;
+    var task = getTasks().filter(function (x) { return x.id === id; })[0];
+    if (task && !isEditable(task)) return; // 不可编辑（子台只读）任务不发起拖拽
+    var card = e.currentTarget;
+    _pd = {
+      id: id, pointerId: e.pointerId,
+      startX: e.clientX, startY: e.clientY,
+      card: card, ghost: null, dragging: false,
+      grabDX: 0, grabDY: 0
+    };
+    try { card.setPointerCapture(e.pointerId); } catch (err) {}
+    if (!_pdBound) pdBindDoc();
+  }
+  function pdBindDoc() {
+    _pdBound = true;
+    document.addEventListener('pointermove', onPointerMove, { passive: false });
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
+    // 捕获阶段拦截「拖拽后误触发的 click」，阻止落点处卡片的 onclick（编辑）被触发
+    document.addEventListener('click', function (e) {
+      if (_pdSuppressClick) { e.stopPropagation(); e.preventDefault(); _pdSuppressClick = false; }
+    }, true);
+  }
+  function pdBeginDrag(e) {
+    var card = _pd.card;
+    var rect = card.getBoundingClientRect();
+    _pd.grabDX = e.clientX - rect.left;
+    _pd.grabDY = e.clientY - rect.top;
+    var ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.removeAttribute('onpointerdown');
+    ghost.style.position = 'fixed';
+    ghost.style.width = rect.width + 'px';
+    ghost.style.left = (e.clientX - _pd.grabDX) + 'px';
+    ghost.style.top = (e.clientY - _pd.grabDY) + 'px';
+    ghost.style.pointerEvents = 'none'; // 关键：让 elementFromPoint 穿透幽灵，命中真实列
+    ghost.style.zIndex = '9999';
+    ghost.style.margin = '0';
+    document.body.appendChild(ghost);
+    _pd.ghost = ghost;
+    _pd.dragging = true;
+    card.classList.add('dragging');
+    _pdSuppressClick = true; // 本次拖拽结束后抑制一次 click
+  }
+  function onPointerMove(e) {
+    if (!_pd) return;
+    if (!_pd.dragging) {
+      var dx = e.clientX - _pd.startX, dy = e.clientY - _pd.startY;
+      if (Math.abs(dx) < PD_THRESHOLD && Math.abs(dy) < PD_THRESHOLD) return;
+      pdBeginDrag(e);
+    }
+    e.preventDefault(); // 阻止触摸滚动 / 文本选区，保证拖拽连贯
+    if (_pd.ghost) {
+      _pd.ghost.style.left = (e.clientX - _pd.grabDX) + 'px';
+      _pd.ghost.style.top = (e.clientY - _pd.grabDY) + 'px';
+    }
+    var col = pdColumnUnderPoint(e.clientX, e.clientY);
+    pdClearHighlights();
+    if (col) col.classList.add('drop-over');
+  }
+  function onPointerUp(e) {
+    if (!_pd) return;
+    var pd = _pd;
+    _pd = null;
+    try { pd.card.releasePointerCapture(pd.pointerId); } catch (err) {}
+    pd.card.classList.remove('dragging');
+    if (pd.ghost) pd.ghost.remove();
+    pdClearHighlights();
+    if (pd.dragging) {
+      var col = pdColumnUnderPoint(e.clientX, e.clientY);
+      if (col) {
+        var status = col.getAttribute('data-status');
+        if (status) moveTask(pd.id, status);
+      }
+    }
   }
 
   function moveTask(id, status) {
@@ -2699,12 +2767,7 @@
   /* ---------------- 对外 ---------------- */
   App.views = App.views || {};
   App.views.tasks = {
-    onDragStart: onDragStart,
-    onDragEnd: onDragEnd,
-    onDragOver: onDragOver,
-    onDragEnter: onDragEnter,
-    onDragLeave: onDragLeave,
-    onDrop: onDrop,
+    onPointerDown: onPointerDown,
     openTaskModal: openTaskModal,
     editTask: openTaskModal,
     deleteTask: deleteTask,
