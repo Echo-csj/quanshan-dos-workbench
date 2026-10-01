@@ -454,8 +454,11 @@ a:hover { color: var(--accent-hover); }
 .batch-actions { display: flex; gap: 8px; }
 
 /* 看板列：拖放区域 */
-.kanban-cards { min-height: 40px; transition: background 0.15s; border-radius: var(--radius-sm); }
+.kanban-cards { min-height: 40px; max-height: calc(100vh - 300px); overflow-y: auto; transition: background 0.15s; border-radius: var(--radius-sm); }
 .kanban-cards.drop-over { background: var(--accent-soft); outline: 2px dashed var(--accent); outline-offset: -3px; }
+/* 拖拽进行中：弱化非目标列，凸显落点，提升长列表下的定位精度 */
+body.kanban-dragging .kanban-column { opacity: 0.55; transition: opacity 0.12s; }
+body.kanban-dragging .kanban-column.drop-active { opacity: 1; }
 .kanban-empty { text-align: center; padding: 20px; color: var(--text-faint); font-size: 12px; }
 
 /* 拖拽状态 */

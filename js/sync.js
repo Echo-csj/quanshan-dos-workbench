@@ -248,10 +248,15 @@
     if (r.error) { console.warn('[sync] pull', r.error); return null; }
     return r.data;
   }
+  // 本机最近一次推送时刻（ms）：用于过滤「自己刚写出的回声 / 陈旧远端快照」，
+  // 避免 applyRemote 用旧数据覆盖本地尚未/刚完成的改动（看板拖拽改状态后卡片回弹的根因）。
+  var lastPushAt = 0;
   async function push(obj) {
     if (!session) return;
     var c = ensureClient(); if (!c) return;
-    var r = await c.from(TABLE).upsert({ user_id: uid(), data: obj, updated_at: new Date().toISOString() });
+    var ts = new Date();
+    lastPushAt = ts.getTime(); // 与下方 updated_at 同一时刻，保证回声可精确识别
+    var r = await c.from(TABLE).upsert({ user_id: uid(), data: obj, updated_at: ts.toISOString() });
     if (r.error) { console.warn('[sync] push', r.error); setStatus('error', r.error.message); return; }
     setStatus('ok');
   }
@@ -260,7 +265,7 @@
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(function () { push(obj); }, 800);
   }
-  async function applyRemote() {
+  async function applyRemote(force) {
     if (applyingRemote) return;
     var local = App.store.getData();
     var remote = await pull();
@@ -268,6 +273,15 @@
       // 云端为空：把本机已有数据上传（首次登录即完成迁移）
       if (local && Object.keys(local).length) { await push(local); }
       setStatus('ok'); return;
+    }
+    // 修复：过滤「本机刚推送的回声 / 远端不比本机新的回写」。
+    // 实时订阅会回放用户自己刚 upsert 的行；若远端 updated_at 不晚于本机最近一次推送时刻，
+    // 说明这是本机自己写出的数据回声（或尚未包含本地最新改动的陈旧快照），直接跳过，
+    // 避免用旧快照覆盖本地改动（看板拖拽改状态后卡片「回弹」的根因）。
+    // force=true（如用户点「立即同步」）时跳过此保护，强制对齐远端。
+    if (!force && lastPushAt && remote.updated_at && Date.parse(remote.updated_at) <= lastPushAt) {
+      setStatus('ok');
+      return;
     }
     applyingRemote = true;
     try {
@@ -285,7 +299,13 @@
       schedulePush(App.store.getData());
     });
   }
-  function onVisibility() { if (!document.hidden && session) applyRemote(); }
+  function onVisibility() {
+    if (!document.hidden && session) {
+      // 刚推送过则跳过自己的回声，避免覆盖本地尚未完成/刚完成的改动
+      if (lastPushAt && Date.now() - lastPushAt < 4000) return;
+      applyRemote();
+    }
+  }
   function subscribeRealtime() {
     if (!session || !client) return;
     try {
@@ -355,7 +375,7 @@
     if (disabled || !session) { if (App.util && App.util.toast) App.util.toast('未登录或同步未启用', 'warn'); return; }
     try {
       await push(App.store.getData());
-      await applyRemote();
+      await applyRemote(true);
       if (App.util && App.util.toast) App.util.toast('已同步至云端', 'ok');
     } catch (e) {
       console.error('[sync] syncNow 失败', e);

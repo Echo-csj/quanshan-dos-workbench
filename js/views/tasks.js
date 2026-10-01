@@ -432,11 +432,7 @@
   }
 
   function renderKanbanColumn(col, sorted, view) {
-    var key = 'col:' + col.status;
-    var expanded = !!view.expanded[key];
-    var limit = view.columnLimit;
-    var visible = expanded ? sorted : sorted.slice(0, limit);
-    var hidden = sorted.length - visible.length;
+    // 看板模式不折叠：所有卡片均渲染，长列表由「列内滚动」承载，保证每张卡都可拖拽
     var html = '<div class="kanban-column">';
     html += '<div class="kanban-col-header" style="border-bottom-color:' + col.accent + '">';
     html += '<span class="kanban-col-title">' + col.label + '</span>';
@@ -444,10 +440,7 @@
     html += '</div>';
     html += '<div class="kanban-cards" data-status="' + col.status + '">';
     if (sorted.length === 0) html += '<div class="kanban-empty">拖动任务到此</div>';
-    else {
-      visible.forEach(function(t) { html += renderCard(t); });
-      html += expandFooter(key, hidden, expanded, limit, sorted.length);
-    }
+    else sorted.forEach(function(t) { html += renderCard(t); });
     html += '</div></div>';
     return html;
   }
@@ -463,16 +456,9 @@
       html += '<div class="kanban-empty">已完成已隐藏<br><button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="App.views.tasks.toggleHideDone()">显示已完成</button></div></div></div>';
       return html;
     }
-    var key = 'col:done';
-    var expanded = !!view.expanded[key];
-    var limit = view.columnLimit;
-    var visible = expanded ? sorted : sorted.slice(0, limit);
-    var hidden = sorted.length - visible.length;
+    // 看板模式不折叠：所有已完成卡片均渲染（长列表由列内滚动承载）
     if (sorted.length === 0) html += '<div class="kanban-empty">拖动任务到此</div>';
-    else {
-      visible.forEach(function(t) { html += renderCard(t); });
-      html += expandFooter(key, hidden, expanded, limit, sorted.length);
-    }
+    else sorted.forEach(function(t) { html += renderCard(t); });
     html += '</div></div>';
     return html;
   }
@@ -680,6 +666,10 @@
   var _pdBound = false;      // 是否已经绑定 document 级监听
   var _pdSuppressClick = false; // 拖拽后抑制误触发的 click（防止落点弹出编辑）
   var PD_THRESHOLD = 6;      // 像素：超过此位移才判定为拖拽
+  var _pdAutoScroll = null;  // 边缘自动滚动定时器
+  var _pdLastX = 0, _pdLastY = 0; // 最近指针位置（供自动滚动判定）
+  var PD_EDGE = 72;          // 距视口/列边缘多少 px 触发自动滚动
+  var PD_SCROLL_STEP = 16;   // 每 tick 滚动像素
 
   function isInteractiveTarget(t) {
     return !!(t && t.closest && (t.closest('button') || t.closest('input') || t.closest('label') ||
@@ -691,6 +681,7 @@
   }
   function pdClearHighlights() {
     document.querySelectorAll('.kanban-cards.drop-over').forEach(function (el) { el.classList.remove('drop-over'); });
+    document.querySelectorAll('.kanban-column.drop-active').forEach(function (el) { el.classList.remove('drop-active'); });
   }
   function onPointerDown(e, id) {
     // 仅响应主键 / 触摸 / 笔；忽略交互元素（按钮、勾选框等），让其正常点击
@@ -738,6 +729,11 @@
     _pd.dragging = true;
     card.classList.add('dragging');
     _pdSuppressClick = true; // 本次拖拽结束后抑制一次 click
+    // 启动边缘自动滚动，便于在长列表中将卡片拖到屏幕外/滚动后的落点
+    _pdLastX = e.clientX; _pdLastY = e.clientY;
+    document.body.classList.add('kanban-dragging');
+    if (_pdAutoScroll) clearInterval(_pdAutoScroll);
+    _pdAutoScroll = setInterval(_pdAutoScrollTick, 30);
   }
   function onPointerMove(e) {
     if (!_pd) return;
@@ -747,18 +743,47 @@
       pdBeginDrag(e);
     }
     e.preventDefault(); // 阻止触摸滚动 / 文本选区，保证拖拽连贯
+    _pdLastX = e.clientX; _pdLastY = e.clientY;
     if (_pd.ghost) {
       _pd.ghost.style.left = (e.clientX - _pd.grabDX) + 'px';
       _pd.ghost.style.top = (e.clientY - _pd.grabDY) + 'px';
     }
     var col = pdColumnUnderPoint(e.clientX, e.clientY);
     pdClearHighlights();
-    if (col) col.classList.add('drop-over');
+    if (col) {
+      col.classList.add('drop-over');
+      var colBox = col.closest('.kanban-column');
+      if (colBox) colBox.classList.add('drop-active');
+    }
+  }
+  // 边缘自动滚动：指针靠近视口/列/看板边缘时持续滚动，解决长列表拖拽「够不到落点」问题
+  function _pdAutoScrollTick() {
+    if (!_pd || !_pd.dragging) return;
+    var M = PD_EDGE, S = PD_SCROLL_STEP;
+    // 视口纵向
+    if (_pdLastY > 0 && _pdLastY < M) window.scrollBy(0, -S);
+    else if (_pdLastY > window.innerHeight - M) window.scrollBy(0, S);
+    // 看板列内纵向
+    var colEl = pdColumnUnderPoint(_pdLastX, _pdLastY);
+    if (colEl && colEl.scrollHeight > colEl.clientHeight + 4) {
+      var r = colEl.getBoundingClientRect();
+      var yIn = _pdLastY - r.top;
+      if (yIn < M) colEl.scrollTop -= S;
+      else if (yIn > r.height - M) colEl.scrollTop += S;
+    }
+    // 移动端：看板横向滚动以抵达「已完成」列
+    var board = document.querySelector('.kanban-board');
+    if (board && board.scrollWidth > board.clientWidth + 4) {
+      if (_pdLastX < M) board.scrollLeft -= S;
+      else if (_pdLastX > window.innerWidth - M) board.scrollLeft += S;
+    }
   }
   function onPointerUp(e) {
     if (!_pd) return;
     var pd = _pd;
     _pd = null;
+    if (_pdAutoScroll) { clearInterval(_pdAutoScroll); _pdAutoScroll = null; }
+    document.body.classList.remove('kanban-dragging');
     try { pd.card.releasePointerCapture(pd.pointerId); } catch (err) {}
     pd.card.classList.remove('dragging');
     if (pd.ghost) pd.ghost.remove();
